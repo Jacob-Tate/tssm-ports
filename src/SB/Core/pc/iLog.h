@@ -48,4 +48,11 @@ const char* iLogCrashPath();
 // The log file this run writes, or an empty string.
 const char* iLogPath();
 
+// A host whose log is the platform's own: Android, where stdout and stderr go
+// to logcat and to tssm-log.txt in the app's external files folder
+// (android/iAndroid.cpp), and iLogBegin starts no tee. Names that file for
+// iLogPath and puts crash.log beside it. Until this is called Android has no
+// crash.log: the app's folders are not known before SDL's JNI is up.
+void iLogUsePlatformLog(const char* path);
+
 #endif

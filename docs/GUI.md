@@ -118,8 +118,10 @@ These settings take effect at the next start, and are tagged **restart**:
     button (its tooltip says which).
   - The settings are the input layer's own: controller type, move layout (Karate Spin on X or B),
     button pictures, keyboard alongside a controller, stick response, deadzone, trigger press point,
-    camera and mouse speed and inversion, rumble, touch controls and the input test. Each applies at
-    once except touch controls (restart).
+    camera and mouse speed and inversion, rumble and the input test. Each applies at once.
+  - **Touch controls** has the on-screen controls' settings: on or off (applies at the next start),
+    drag-to-look on the right half beside the right stick, size and opacity. With the touch controls
+    on, this section comes right after Controllers; otherwise it is last.
   - While the overlay is open the mouse is the overlay's: the mouse camera lets go of it, and takes
     it back when the overlay closes.
 - **Saves:** the save folder, and every slot of folders A and B (or of A to J) with its level,
@@ -420,17 +422,21 @@ tssm.exe          (with [video] backend = gl3, width = 640, height = 480, mode =
 
 - **Vulkan has no overlay yet.** It needs ImGui's Vulkan renderer recording into the render pass that
   librw's `drawPresentOverlay` uses.
-- **Android has not been built or tested yet.** The CMake arm (GLES 3) is written. These still need a
-  device:
-  - the launcher (Android has one window, and the launcher closes it before the game opens its own)
-  - the folder picker
-  - the three-finger tap
+- **Android is built (GLES 3) but not yet run on a device.** These still need one:
+  - the launcher (Android has one window, and the launcher closes it before the game opens its own;
+    it opens there only with `gui.launcher = always`)
+  - the three-finger tap. SDL's Java half sends touch, key and mouse events from Android's UI
+    thread; the event watch copies an event that arrives on another thread into a small locked
+    queue, and `Frame` handles the queue on the main thread before anything else. The three-finger
+    window uses the events' own timestamps.
+  - SDL has no folder picker on Android (it answers "unsupported"), so the folder choosers do
+    nothing there and the Saves tab leaves out the GCI-folder export.
 - **Only the game's input is paused, not the game.** Opening the overlay mid-level leaves the level
   running, with SpongeBob standing still. Pausing the game itself would need a call into the game's
   pause path.
-- **The file dialogs** are SDL's. On Android the folder export (GCI folder) needs a folder path the
-  system's picker may not give; the zip and `.gci` exports and every import go through SDL's
-  streams and do not.
+- **The file dialogs** are SDL's. The zip and `.gci` exports and every import go through SDL's
+  streams; on Android the save dialog and the `content://` documents it and the open dialog answer
+  with go through the app's own Java instead (docs/ANDROID.md, "Saves and the file picker").
 - A debug build's Direct3D 11 device asks for the D3D11 debug layer (`D3D11_CREATE_DEVICE_DEBUG` in
   librw), which fails on a machine without the Windows "Graphics Tools" feature. A release build is not
   affected. This is librw's behaviour, not the GUI's.

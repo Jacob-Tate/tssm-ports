@@ -232,7 +232,9 @@ namespace
             F32 cell = half / 7.0f;
             F32 left = s.x - cell * 2.5f;
             F32 top = s.y - cell * 3.5f;
-            F32 alpha = s.a < 128 ? 0.6f : 0.95f;
+            // Fainter with a faint shape (input.touch_opacity), so a label
+            // never floats over a button that is hardly there.
+            F32 alpha = (s.a < 128 ? 0.6f : 0.95f) * (s.a < 60 ? s.a / 60.0f : 1.0f);
 
             for (S32 row = 0; row < 7; row++)
             {

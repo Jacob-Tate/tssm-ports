@@ -1170,6 +1170,15 @@ void iGui::DrawSaves()
     {
         PickSaveFile("save-export-zip", "SpongeBobMovie-saves.zip", kZipFilter, 1);
     }
+#ifdef __ANDROID__
+    // SDL has no folder picker on Android (SDL_androiddialog.c answers
+    // "unsupported"), so the GCI-folder export is left out there; each save's
+    // own .gci export, above, is a file picker and works.
+    ImGui::EndDisabled();
+    Note("A .zip carries every save to another install of the port; Import takes it back slot "
+         "for slot. For Dolphin or a console, export one save at a time as a .gci (its "
+         "Export... button in the list).");
+#else
     ImGui::SameLine();
     if (ImGui::Button("Every save into a GCI folder..."))
     {
@@ -1180,6 +1189,7 @@ void iGui::DrawSaves()
          "for slot. A GCI folder is the folder Dolphin keeps a memory card in when it uses GCI "
          "folders (Card A): folder A's saves go in the folder chosen, folder B's in B/ inside "
          "it.");
+#endif
 
     if (sOpenImport)
     {

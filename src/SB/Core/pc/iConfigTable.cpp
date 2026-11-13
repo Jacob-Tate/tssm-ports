@@ -36,6 +36,19 @@ namespace
     const F32 kNone = 0.0f;
 }
 
+// The default render size. 480 lines is the original's. A phone's panel is two to
+// three times as tall as that, and 480 lines scaled up to it look soft; 720 is
+// sharper. With the default aspect (wide) the width follows from the screen's
+// shape -- 1600x720 on a 20:9 phone -- and the width here is used only by
+// aspect = custom, where 960 keeps it 4:3.
+#ifdef __ANDROID__
+#define ICONFIG_DEFAULT_WIDTH "960"
+#define ICONFIG_DEFAULT_HEIGHT "720"
+#else
+#define ICONFIG_DEFAULT_WIDTH "640"
+#define ICONFIG_DEFAULT_HEIGHT "480"
+#endif
+
 const iConfigSetting kConfigSettings[] = {
     // TSSM-ADAPTED: treedome's table less the settings of BfBB features this
     // port did not import (toon, hipoly, world lighting, day/night, fonts,
@@ -80,11 +93,11 @@ const iConfigSetting kConfigSettings[] = {
       "; menus and HUD in a centered 4:3 area), 4:3 (the original picture) or custom\n"
       "; (exactly width x height).",
       ICONFIG_ENUM, "wide|4:3|custom", kNone, kNone },
-    { "video", "width", "640",
+    { "video", "width", ICONFIG_DEFAULT_WIDTH,
       "Render width in pixels. Used only with aspect = custom; otherwise it follows\n"
       "; from the height and the aspect.",
       ICONFIG_INT, NULL, 320.0f, 15360.0f },
-    { "video", "height", "480",
+    { "video", "height", ICONFIG_DEFAULT_HEIGHT,
       "Render height in pixels (lines). The picture is scaled to the window keeping\n"
       "; its shape.",
       ICONFIG_INT, NULL, 240.0f, 8640.0f },
@@ -140,9 +153,9 @@ const iConfigSetting kConfigSettings[] = {
       ICONFIG_ENUM, "auto|xbox|gamecube", kNone, kNone },
     { "input", "button_icons", "auto",
       "Button pictures in the game's prompts: auto (the device you last used),\n"
-      "; xbox, playstation, switch, gamecube, keyboard, or off (the disc's own).\n"
-      "; They show what each button is bound to.",
-      ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube|keyboard|off", kNone, kNone },
+      "; xbox, playstation, switch, gamecube, keyboard, touch (the on-screen\n"
+      "; buttons), or off (the disc's own). They show what each button is bound to.",
+      ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube|keyboard|touch|off", kNone, kNone },
     { "input", "keyboard", "always",
       "Keyboard and mouse: always (play alongside a controller), fallback (only\n"
       "; with no controller) or off.",
@@ -182,6 +195,16 @@ const iConfigSetting kConfigSettings[] = {
     { "input", "touch_controls", "auto",
       "On-screen touch controls: auto (on for Android), on or off.",
       ICONFIG_ENUM, "auto|on|off", kNone, kNone },
+    { "input", "touch_drag_look", "off",
+      "Touch controls: a finger dragged on the empty right half of the screen also\n"
+      "; turns the camera, as the mouse does (the right stick is there either way).",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "touch_scale", "1.0",
+      "Size of the touch controls, 0.5 to 1.2. 1.0 is the default.",
+      ICONFIG_FLOAT, NULL, 0.5f, 1.2f },
+    { "input", "touch_opacity", "100",
+      "How solid the touch controls are drawn, in percent: 10 to 100.",
+      ICONFIG_INT, NULL, 10.0f, 100.0f },
     { "input", "test", "off",
       "Input test: log prints what the game reads from the controller every time\n"
       "; it changes; overlay also draws it on screen (OpenGL and Vulkan).\n"

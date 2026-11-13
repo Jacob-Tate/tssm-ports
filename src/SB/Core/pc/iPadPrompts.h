@@ -30,12 +30,15 @@ struct iPadHostState;
 //      The pad_button textures' rasters are swapped for ones this file draws:
 //      the key's name on a keycap, the PlayStation's shapes, the Switch's and
 //      GameCube's letters -- chosen through the BINDING, so a rebound button
-//      draws what now presses it. input.button_icons picks the set; auto
-//      follows the device last used. The Xbox set on an Xbox pad with the
+//      draws what now presses it. The touch set draws the on-screen buttons
+//      (iPadTouch.h): the disc's own Xbox A B X Y, and the letter on each
+//      other button. input.button_icons picks the set; auto follows the device
+//      last used, and is the touch set while the touch controls are on screen
+//      and nothing else has been used. The Xbox set on an Xbox pad with the
 //      default rows changes nothing.
 //
-//   3. The verb. The Xbox disc says "Pull RT to talk"; with a key, or a
-//      GameCube pad's R, it says "Press". push_trigger_text is rewritten in
+//   3. The verb. The Xbox disc says "Pull RT to talk"; with a key, a touch
+//      button or a GameCube pad's R, it says "Press". push_trigger_text is rewritten in
 //      place when the longer word fits the asset.
 //
 // All are re-applied every half second and whenever the layout, the bindings
@@ -48,7 +51,7 @@ void iPadPromptsUpdate(const iPadHostState* host);
 void iPadPromptsShutdown();
 
 // input.button_icons: "auto", "xbox", "playstation", "switch", "gamecube",
-// "keyboard" or "off".
+// "keyboard", "touch" or "off".
 void iPadPromptsSetIcons(const char* choice);
 const char* iPadPromptsIconsChoice();
 

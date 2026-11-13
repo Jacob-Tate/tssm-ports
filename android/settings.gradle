@@ -1,0 +1,8 @@
+// The Android app for the PC port. See docs/ANDROID.md.
+//
+// Its own Gradle build: CMakeLists.txt at the repository root is invoked BY
+// Gradle (externalNativeBuild in app/build.gradle), the same way a desktop
+// build invokes it directly. Based on treedome's android/ (CC0).
+rootProject.name = 'tssm-android'
+
+include ':app'

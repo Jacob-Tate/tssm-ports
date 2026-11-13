@@ -20,6 +20,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __ANDROID__
+#include "android/iAndroid.h"
+#endif
+
 namespace
 {
     // Set by iLogBegin, before anything else runs: plain arrays, so nothing
@@ -527,7 +531,10 @@ void iLogBegin()
     ResolvePaths();
 #ifdef __ANDROID__
     // Android's log is the platform's (android/iAndroid.cpp); no tee here.
+    // No crash.log yet either: the folders above are not known this early (the
+    // working directory is "/"), and iLogUsePlatformLog sets it.
     sOff = true;
+    sCrashPath[0] = '\0';
 #endif
     if (sOff)
     {
@@ -599,6 +606,10 @@ void iLogDrain(U32 ms)
 {
     fflush(stdout);
     fflush(stderr);
+#ifdef __ANDROID__
+    // The platform's log pump (android/iAndroid.cpp) has the lines.
+    iAndroidLogDrain(ms);
+#endif
     if (!sTeeOn)
     {
         return;
@@ -637,4 +648,16 @@ const char* iLogCrashPath()
 const char* iLogPath()
 {
     return sOpened;
+}
+
+void iLogUsePlatformLog(const char* path)
+{
+    if (path == NULL || path[0] == '\0')
+    {
+        return;
+    }
+    snprintf(sOpened, sizeof(sOpened), "%s", path);
+    SlashesForward(sOpened);
+    ParentOf(sOpened, sDir, sizeof(sDir));
+    Join(sCrashPath, sizeof(sCrashPath), sDir, "crash.log");
 }

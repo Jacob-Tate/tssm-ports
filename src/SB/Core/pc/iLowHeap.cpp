@@ -12,6 +12,7 @@
 #include "iLowHeap.h"
 
 #include "iHost.h"
+#include "iMemMgr.h"
 
 #include <mutex>
 #include <stdio.h>
@@ -414,8 +415,13 @@ S32 iLowHeapInit()
 
 void* iLowHeapMalloc(size_t size)
 {
-    std::lock_guard<std::mutex> hold(sLock);
-    return MallocLocked(size);
+    void* mem;
+    {
+        std::lock_guard<std::mutex> hold(sLock);
+        mem = MallocLocked(size);
+    }
+    iMemCheckLow(mem, size, "iLowHeapMalloc");
+    return mem;
 }
 
 void* iLowHeapCalloc(size_t count, size_t size)
@@ -463,7 +469,9 @@ void* iLowHeapRealloc(void* mem, size_t size)
     if (!InHeap(mem))
     {
         ReportForeign("realloc", mem);
-        return realloc(mem, size);
+        void* grown = realloc(mem, size);
+        iMemCheckLow(grown, size, "iLowHeapRealloc (the C library's realloc)");
+        return grown;
     }
 
     size_t keep;

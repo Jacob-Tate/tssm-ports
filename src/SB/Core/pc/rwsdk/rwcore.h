@@ -82,6 +82,25 @@ typedef RxObjSpace3DLitVertex RwIm3DVertex;
     }                                                                                              \
     MACRO_STOP
 
+// TSSM-ADAPTED (Android): on PC the colour goes in as one 32-bit word, in
+// the BGRA byte order above. Four byte stores in the reverse of the order the
+// bytes arrive in crash NDK r28c's clang 19 for AArch64 ("Cannot select: store
+// (s16) ... bswap"; zEntCruiseBubble.cpp). Same bytes on every little-endian host.
+#ifdef PLATFORM_PC
+#define RwIm3DVertexSetRGBA(vert, imr, img, imb, ima)                                              \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwRGBA col;                                                                                \
+        col.red = (imr);                                                                           \
+        col.green = (img);                                                                         \
+        col.blue = (imb);                                                                          \
+        col.alpha = (ima);                                                                         \
+        RwUInt32 word = (RwUInt32)col.blue | ((RwUInt32)col.green << 8) |                          \
+                        ((RwUInt32)col.red << 16) | ((RwUInt32)col.alpha << 24);                   \
+        __builtin_memcpy(&(vert)->b, &word, sizeof(word));                                         \
+    }                                                                                              \
+    MACRO_STOP
+#else
 #define RwIm3DVertexSetRGBA(vert, imr, img, imb, ima)                                              \
     MACRO_START                                                                                    \
     {                                                                                              \
@@ -96,6 +115,7 @@ typedef RxObjSpace3DLitVertex RwIm3DVertex;
         (vert)->a = col.alpha;                                                                     \
     }                                                                                              \
     MACRO_STOP
+#endif
 
 #define RwIm3DVertexSetUV(vert, imu, imv)                                                          \
     MACRO_START                                                                                    \

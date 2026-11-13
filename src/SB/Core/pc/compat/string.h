@@ -48,6 +48,23 @@ static inline int strcmpi(const char* a, const char* b)
     return TSSM_STRCASECMP(a, b);
 }
 
+// TSSM-ADAPTED: MSL's in-place uppercase, which zMain.cpp calls with only
+// <string.h> included. The Microsoft CRT declares it in <string.h>; POSIX has
+// none (compat/extras.h covers MinGW, whose callers include <extras.h>).
+#if !defined(_WIN32)
+static inline char* strupr(char* str)
+{
+    for (char* p = str; *p != '\0'; p++)
+    {
+        if (*p >= 'a' && *p <= 'z')
+        {
+            *p = (char)(*p - 'a' + 'A');
+        }
+    }
+    return str;
+}
+#endif
+
 #ifdef __cplusplus
 }
 #endif

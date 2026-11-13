@@ -43,8 +43,21 @@ By hand:
 | `TSSM_AUDIO_BACKEND` | `sdl` | or `null` |
 | `TSSM_SDL` | `auto` | `system` / `vendored` (`third_party/SDL`) |
 | `TSSM_GUI` | ON | the Dear ImGui launcher and in-game overlay (`third_party/imgui`, `docs/GUI.md`) |
+| `TSSM_FFMPEG_ROOT` | none | an FFmpeg install to link instead of searching; on Android a folder of `<abi>/` installs |
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
+
+## Building for Android
+
+`android/` is a Gradle project that builds the same CMakeLists.txt into
+`libmain.so` and packages one APK per ABI (armeabi-v7a, arm64-v8a), with a
+folder-import screen for the game's files and touch controls. FFmpeg for the
+movies is built from source by `tools/android/build_ffmpeg.sh`.
+
+    cd android
+    gradle assembleDebug -Ptssm.ffmpeg=<folder of FFmpeg builds>
+
+`docs/ANDROID.md` has the details, the first-launch flow and the known issues.
 
 ## The game's files
 
@@ -79,7 +92,8 @@ intro_movies, save_folder`, `[video] mode, width, height, ui, framerate,
 vsync, msaa, fov, backend, pipeline, hdr_glow, screen_warp`, `[input] controller, preset, layout,
 button_icons, keyboard, stick_curve, deadzone, trigger_threshold,
 camera_sensitivity, camera_invert_x, camera_invert_y, mouse_camera,
-mouse_sensitivity, rumble, touch_controls, test`, `[audio] master_volume,
+mouse_sensitivity, rumble, touch_controls, touch_drag_look, touch_scale,
+touch_opacity, test`, `[audio] master_volume,
 music_volume, sfx_volume, movie_volume`, `[gui] launcher, key, pad_combo,
 scale`, and the `[pad]`/`[keyboard]` bindings). The controls, and how each
 button was established, are in `docs/CONTROLS.md`. In the game, F1 (or

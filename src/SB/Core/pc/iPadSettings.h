@@ -64,6 +64,13 @@ struct iPadSettings
     F32 rumble;
 
     iPadTestMode test;
+
+    // The on-screen controls (iPadTouch.h): a drag on the empty right half
+    // turns the camera, the size of the layout, and how solid it is drawn
+    // (0..1).
+    S32 touch_drag_look;
+    F32 touch_scale;
+    F32 touch_opacity;
 };
 
 const iPadSettings& iPadSettingsGet();

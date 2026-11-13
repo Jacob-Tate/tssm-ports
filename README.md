@@ -1,17 +1,16 @@
-# The SpongeBob SquarePants Movie: PC port
+# The SpongeBob SquarePants Movie: Android port
 
-A native Windows version of *The SpongeBob SquarePants Movie* game, built from the
-matching decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
-this repository starts from). The
-game's own decompiled code runs unchanged in behaviour; a new platform layer
-(`src/SB/Core/pc`) replaces the GameCube one, draws through librw (Direct3D 9, Direct3D
-11 or OpenGL 3), and uses SDL 3 for the window, controllers and sound.
+*The SpongeBob SquarePants Movie* game as an Android app, built from the matching
+decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
+this repository starts from) and the PC port
+(the `pc` branch). The app is the PC port's code built for Android: the same game code
+and platform layer, with touch controls, controller support and an import screen for the
+game files.
 
-- Windows, 64-bit (x64) and 32-bit (x86). The code also has Linux and macOS paths, but
-  they are not tested.
-- Widescreen, any resolution, high frame rates, MSAA, a settings window (F1, or Back +
-  Start on a controller), controller and keyboard bindings, mods, and save import and
-  export with Dolphin and the GameCube.
+- Android 7.0 or newer, OpenGL ES 3. Two APKs: `arm64-v8a` (64-bit phones, which is most
+  phones today) and `armeabi-v7a` (older 32-bit phones). The 64-bit app has been played
+  on one phone so far; the 32-bit one is build-checked only.
+- This branch still builds the Windows version too, exactly as on the `pc` branch.
 
 This repository and its branches
 --------------------------------
@@ -23,8 +22,8 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 
 | Branch | What it is for |
 |---|---|
-| `pc` (this one) | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
-| `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
+| `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
+| `android` (this one) | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
 | `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
 | `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
 | `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
@@ -36,58 +35,54 @@ Every branch builds from source; you bring your own game files.
 You need your own copy of the game
 ----------------------------------
 
-This repository contains **no game data**. The port reads the files of the **Xbox**
-release of *The SpongeBob SquarePants Movie*, so you need your own copy of that disc and
-its files copied off it (about 1 GB): the folder that directly holds `boot.HIP`,
-`font.HIP` and `FMV\`. Never put those files in the repository.
+This repository contains **no game data**, and neither does the app. It reads the files of
+the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own copy of
+that disc and its files copied off it (about 1 GB): the folder that holds `boot.HIP`,
+`font.HIP` and `FMV`. Never put those files in the repository.
 
-Building on Windows
--------------------
+Building the APKs
+-----------------
 
-You need:
+You need the Android SDK (platform 35, build-tools 35, the SDK's CMake 3.22.1), NDK r28c
+(28.2.13676358), Gradle 8.9 or newer (8.14.3 tested), JDK 17 or 21, and git. No Gradle
+wrapper is included.
 
-- Visual Studio 2022 or its Build Tools, with the "Desktop development with C++" workload
-  and a Windows SDK
-- LLVM (`clang++`), CMake 3.16 or newer, Ninja, Python 3 and git
-- optional, for the game's movies: FFmpeg from vcpkg,
-  `vcpkg install ffmpeg[core,avcodec,avformat,swresample,swscale]:x64-windows`
-  (and `:x86-windows` for a 32-bit build). Without it the movies are skipped.
-
-Then, in a normal command prompt:
-
-    git clone --branch pc <this repository's address> tssm
+    git clone --branch android <this repository's address> tssm
     cd tssm
     git submodule update --init --depth 1
-    build-release.bat
+    cd android
+    gradle assembleDebug
 
-`build-release.bat` finds Visual Studio by itself, and LLVM and CMake in their default
-install folders. It puts `tssm.exe` and the DLLs it needs in `bin\`.
-`build-release.bat GL3 x86` builds one renderer, 32-bit; `build-debug.bat` makes a debug
-build. `src/SB/Core/pc/README.md` lists the CMake options and the rest.
+On Windows, set `JAVA_HOME` to the JDK and `ANDROID_HOME` to the SDK first. The APKs are
+written to `android/app/build/outputs/apk/debug/`.
+
+For the game's movies, build FFmpeg for Android first with
+`tools/android/build_ffmpeg.sh` (from FFmpeg's own source; LGPL-only settings) and add
+`-Ptssm.ffmpeg=<the folder it made>` to the `gradle` command. Without it the movies are
+skipped. `docs/ANDROID.md` has every option and the details.
 
 Playing
 -------
 
-1. Start `bin\tssm.exe`. On the first run it writes `config.ini` beside itself.
-2. Point the game at your Xbox files: set `path` under `[assets]` in `config.ini` (or the
-   `TSSM_ASSETS` environment variable) to the folder that holds `boot.HIP`.
-3. F1, or Back + Start on a controller, opens the settings window.
-
-Saves go to `%APPDATA%\tssm\saves`, and the log of the last run to
-`%APPDATA%\tssm\last_run.log`.
+1. Install the APK for your phone (`app-arm64-v8a-debug.apk` on almost every phone made in
+   the last years).
+2. On the first start the app asks for the game files: pick the folder that holds
+   `boot.HIP` (copied onto the phone or an SD card). It can copy them into the app, or
+   read them where they are.
+3. On-screen touch controls are on by default; a Bluetooth or USB controller works too.
+   `docs/ANDROID.md` ("Playing") shows the touch layout and how to open the settings
+   window.
 
 More documentation:
 
 | File | What |
 |---|---|
-| `docs/CONTROLS.md` | the controls, and how each was worked out |
-| `docs/GUI.md` | the settings window and the launcher |
-| `docs/SAVES.md` | save files, and moving them to and from Dolphin or a GameCube |
-| `docs/MODDING.md` | mods: replacing textures, sounds, text and whole assets |
-| `docs/RENDERING.md`, `docs/WIDESCREEN.md` | how the console's screen effects and widescreen are done |
-| `docs/ICON.md` | using your own picture as the program's icon |
-| `src/SB/Core/pc/README.md` | building in detail, settings, switches and test runs |
-| `src/SB/Core/pc/PORTING.md` | where every file of the platform layer came from, and what is still stubbed |
+| `docs/ANDROID.md` | building, importing the game files, playing, files on the device, known issues |
+| `docs/CONTROLS.md` | the controls |
+| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube |
+| `docs/MODDING.md` | mods |
+| `docs/ICON.md` | using your own picture as the app's icon |
+| `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |
 
 The GameCube build still works here
 -----------------------------------
@@ -154,3 +149,4 @@ needed to relink it with another FFmpeg).
 | Vulkan-Headers (Vulkan renderer only) | git submodule | Apache 2.0 / MIT |
 | FFmpeg (optional, for the movies) | not in the repository: you install or build it | LGPL 2.1 or later |
 | treedome (code adapted into `src/SB/Core/pc`) | copied, see `src/SB/Core/pc/PORTING.md` | CC0 1.0 |
+| FFmpeg on Android (optional) | built by `tools/android/build_ffmpeg.sh` from FFmpeg's source and linked statically into the app | LGPL 2.1 or later |

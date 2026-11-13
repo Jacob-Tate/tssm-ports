@@ -2,6 +2,7 @@
 
 #include "iHangDump.h"
 #include "iScreen.h"
+#include "iGpuOpt.h"
 #include "rw/backend.h"
 
 // The window, on SDL, for both render backends.
@@ -30,10 +31,17 @@
 // awareness, the screensaver suppression and the display enumeration that the
 // Win32 window backend had to write by hand.
 
+#include "iHost.h"
+
 #include <SDL3/SDL.h>
 
 #ifdef _WIN32
 #include <windows.h>
+#endif
+
+#ifdef __ANDROID__
+#include <android/native_window.h>
+#include <dlfcn.h>
 #endif
 
 #include <stdio.h>
@@ -399,13 +407,53 @@ void iWindowClose()
 //
 // SDL_PumpEvents is also what refreshes the keyboard state iPadKeyboardSDL.cpp
 // reads, so this runs before input is polled rather than after.
+#ifdef __ANDROID__
+static void RequestSurfaceFrameRate();
+// The surface RequestSurfaceFrameRate last asked about (see there).
+static void* sRateSurface;
+static void ApplySurfaceBufferSize();
+// The surface ApplySurfaceBufferSize last sized (see there).
+static void* sSizedSurface;
+
+// A new surface, which may sit at the old one's address (it did in about half
+// of the returns from Home on a Galaxy S25 Ultra), so it is asked about again.
+// A watch and not a case in iWindowPump's loop: SDL never queues the foreground
+// events, it only shows them to watches, here on the game thread inside
+// SDL_PumpEvents.
+static bool SDLCALL WatchForeground(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+    {
+        sRateSurface = NULL;
+        sSizedSurface = NULL;
+    }
+    return true;
+}
+#endif
+
 void iWindowPump()
 {
     // TSSM_TEST_HANG_DUMP: every present and every pass of a movie comes
     // through here, so this is the game thread's heartbeat (iHangDump.h).
     iHangDumpBeat();
 
+#ifdef __ANDROID__
+    static bool sWatchingForeground;
+    if (!sWatchingForeground)
+    {
+        sWatchingForeground = SDL_AddEventWatch(WatchForeground, NULL);
+    }
+#endif
+
     SDL_PumpEvents();
+
+#ifdef __ANDROID__
+    // After the pump, which is where SDL gives the window a new surface when
+    // the game comes back to the foreground. The request belongs to the
+    // surface and goes with it.
+    RequestSurfaceFrameRate();
+    ApplySurfaceBufferSize();
+#endif
 
     SDL_Event event;
 
@@ -474,10 +522,35 @@ void iWindowPump()
         }
     }
 
-    // Touch, pen, drop, audio device, sensor, camera and render events, none of
-    // which anything here reads. Dropped rather than left to pile up.
+    // Touch, pen, drop, audio device, sensor, camera and render events, of
+    // which only the one below is read here. The rest are dropped rather than
+    // left to pile up.
     while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FINGER_DOWN, SDL_EVENT_LAST) > 0)
     {
+        // **The GL context was lost and SDL made a new, empty one.** Android
+        // can take the EGL context from a backgrounded app; SDL's resume then
+        // finds it gone, creates another and says so with this event. Every
+        // texture, buffer and shader librw made went with the old context, and
+        // librw cannot make them again, so from here the game draws black or
+        // garbage. The honest thing is to say so and close through the game's
+        // own exit path rather than leave the player looking at it.
+        //
+        // Matched to the game's window: an SDL renderer (the launcher's) can
+        // post this too, for a window of its own.
+        if (event.type == SDL_EVENT_RENDER_DEVICE_RESET && sWindow != NULL &&
+            event.render.windowID == SDL_GetWindowID(sWindow) && !sShouldClose)
+        {
+            printf("tssm: the graphics context was lost and recreated (%s); the game cannot "
+                   "restore its textures and will close\n",
+                   SDL_GetCurrentVideoDriver() != NULL ? SDL_GetCurrentVideoDriver() : "?");
+            fflush(stdout);
+            iHostErrorBox(TSSM_GAME_TITLE,
+                          "The system took the game's graphics away while it was in the "
+                          "background, and they cannot be restored.\n\n"
+                          "The game will close now. Start it again to keep playing; progress "
+                          "since your last save is lost.");
+            sShouldClose = 1;
+        }
     }
 }
 
@@ -505,6 +578,178 @@ static S32 PacedRate()
 // can invalidate the deadline. See iWindowSetFrameRate.
 static bool sPacerStarted = false;
 static Uint64 sNextFrame = 0;
+
+#ifdef __ANDROID__
+// **Asking Android for the cap as the display's rate.** Phones with 90 and
+// 120 Hz panels present at the panel's rate, and the pacer's 60 fps is then a
+// sleep on top of a vsync that does not divide it: at 90 Hz frames alternate
+// between one and two refreshes (11 and 22 ms), which judders and hands the
+// game an uneven dt. ANativeWindow_setFrameRate tells the compositor the
+// surface produces frames at a fixed rate, and it switches the panel to a rate
+// that is a multiple of it where it can do so without a visible mode change.
+// Where it cannot, or before Android 11, nothing changes and the pacer works
+// as it did.
+//
+// Looked up at run time because it is API 30 and the app installs from 24.
+// Called from iWindowPump every frame and acting only on a change: the surface
+// is replaced each time the game comes back to the foreground (forgotten then
+// by WatchForeground, and noticed by its address), and the cap and vsync can change from the
+// overlay. The rate asked for is the one the pacer holds (PacedRate), so a
+// movie's ceiling of 60 lets a 120 Hz panel drop to 60 while it plays.
+static S32 sRateApplied = -1;
+
+// **The window's surface at the render size, scaled by the display.**
+//
+// The picture is drawn at the render size ([video] height) and librw scales
+// it into the window. On a phone the window is the panel, 3120x1440 on the
+// S25 Ultra, and a 2340x1080 picture scaled up into it is a whole pass of the
+// GPU over 4.5 million pixels every frame. Android can give a window's surface
+// buffers of another size and have the display hardware scale them to the
+// window as it composes the screen, at no cost to the GPU. So the surface gets
+// the window's shape at the scale the blit would have used, and the blit
+// becomes a copy (rw::gl3::getWindowDrawableSize says how big the buffer is).
+// Only when the picture is smaller than the window; at or above its size the
+// surface keeps the window's own. SDL still reports the window's size, so the
+// touches, the touch controls' layout and the settings overlay are as before;
+// the overlays draw into the smaller buffer (rw/touch_overlay.cpp,
+// gui/iGuiRender.cpp). Off unless TSSM_GPU_FIXEDSIZE=1 until it has been
+// measured and checked on a phone (iGpuOpt.h), and off means the surface is not
+// touched at all.
+static void ApplySurfaceBufferSize()
+{
+    static S32 sBufWidth = -1;
+    static S32 sBufHeight = -1;
+
+    if (!iGpuOptOn(IGPUOPT_FIXEDSIZE) || sWindow == NULL || !iBackendIsGL3())
+    {
+        return;
+    }
+
+    ANativeWindow* surface = (ANativeWindow*)SDL_GetPointerProperty(
+        SDL_GetWindowProperties(sWindow), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
+    if (surface == NULL)
+    {
+        return;
+    }
+
+    int ww = 0;
+    int wh = 0;
+    SDL_GetWindowSizeInPixels(sWindow, &ww, &wh);
+    const S32 rw = iScreenWidth();
+    const S32 rh = iScreenHeight();
+
+    // 0 x 0 is the window's own size.
+    S32 bw = 0;
+    S32 bh = 0;
+    if (ww > 0 && wh > 0 && rw > 0 && rh > 0)
+    {
+        // The scale the blit would use: the picture as large as fits.
+        const double sx = (double)ww / rw;
+        const double sy = (double)wh / rh;
+        const double scale = sx < sy ? sx : sy;
+        if (scale > 1.0)
+        {
+            bw = (S32)(ww / scale + 0.5);
+            bh = (S32)(wh / scale + 0.5);
+        }
+    }
+
+    // Every frame, as SDL may set the surface's geometry itself when it
+    // changes; with the size it already has this is a no-op. The format is the
+    // one the surface has: 0 would not keep it but put back the window's base
+    // format, which for SDL's SurfaceView is RGB_565 (the log's "format= 4"),
+    // and the game would draw into 16-bit buffers instead of EGL's RGBA ones.
+    const int32_t format = ANativeWindow_getFormat(surface);
+    const int32_t result =
+        format > 0 ? ANativeWindow_setBuffersGeometry(surface, bw, bh, format) : -1;
+    if (surface == sSizedSurface && bw == sBufWidth && bh == sBufHeight)
+    {
+        return;
+    }
+    sSizedSurface = surface;
+    sBufWidth = bw;
+    sBufHeight = bh;
+
+    if (bw > 0)
+    {
+        printf("tssm: the window's surface is %dx%d for a %dx%d window; the display scales "
+               "it (%s)\n",
+               (int)bw, (int)bh, ww, wh, result == 0 ? "ok" : "refused");
+    }
+    else
+    {
+        printf("tssm: the window's surface is the window's size, %dx%d (%s)\n", ww, wh,
+               result == 0 ? "ok" : "refused");
+    }
+}
+
+static void RequestSurfaceFrameRate()
+{
+    if (sWindow == NULL)
+    {
+        return;
+    }
+
+    ANativeWindow* surface = (ANativeWindow*)SDL_GetPointerProperty(
+        SDL_GetWindowProperties(sWindow), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
+    const S32 paced = PacedRate();
+    const S32 rate = (paced > 0 && sVSync) ? paced : 0;
+    if (surface == NULL || (surface == sRateSurface && rate == sRateApplied))
+    {
+        return;
+    }
+    sRateSurface = surface;
+    sRateApplied = rate;
+
+    typedef int32_t (*SetFrameRateFn)(ANativeWindow*, float, int8_t);
+    static bool sLooked;
+    static SetFrameRateFn sSetFrameRate;
+    if (!sLooked)
+    {
+        sLooked = true;
+        sSetFrameRate = (SetFrameRateFn)dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate");
+        if (sSetFrameRate == NULL)
+        {
+            void* android = dlopen("libandroid.so", RTLD_NOW);
+            if (android != NULL)
+            {
+                sSetFrameRate = (SetFrameRateFn)dlsym(android, "ANativeWindow_setFrameRate");
+            }
+        }
+        if (sSetFrameRate == NULL)
+        {
+            printf("tssm: this Android has no ANativeWindow_setFrameRate (before Android 11); "
+                   "the frame rate is paced by sleeping alone\n");
+        }
+    }
+    if (sSetFrameRate == NULL)
+    {
+        return;
+    }
+
+    // 1 is ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, spelled out
+    // because the NDK's headers hide the enum below API 30. 0 Hz is "no
+    // preference", for no cap or vsync off.
+    const int32_t result = sSetFrameRate(surface, (float)rate, 1);
+    if (result == 0)
+    {
+        if (rate > 0)
+        {
+            printf("tssm: asked Android to show the game at %d Hz\n", (int)rate);
+        }
+        else
+        {
+            printf("tssm: asked Android for no particular refresh rate\n");
+        }
+    }
+    else
+    {
+        printf("tssm: Android refused a %d Hz frame rate for the game's surface (error %d)\n",
+               (int)rate, (int)result);
+    }
+    fflush(stdout);
+}
+#endif
 
 void iWindowSetFrameRate(S32 fps)
 {

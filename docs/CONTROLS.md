@@ -284,13 +284,25 @@ executable.
 
 **Touch.** `input.touch_controls` (on by default on Android) adds on-screen controls:
 
-- a stick;
+- a left stick, anywhere on the left half (it centres where the thumb lands);
+- a right stick, the camera, at the bottom right, left of the face buttons;
 - A, B, X and Y;
 - LT and RT;
 - Back and black;
 - Start.
 
-A drag on the right half of the screen turns the camera.
+Each button presses the game button of the same name (its row in `iPadBindTable.cpp`), so it sets
+what a controller's button of that name does. The right stick is a controller's right stick, so the
+camera speed and inversion settings apply to it.
+
+Each finger belongs to the control it landed on until it lifts: a thumb on the left stick never turns
+the camera, a finger slid off a button lets go of it without pressing another, and a finger on empty
+screen does nothing. `input.touch_drag_look = on` brings back the drag of earlier builds: a finger
+dragged on the empty right half also turns the camera. `input.touch_scale` (0.5 to 1.2) and
+`input.touch_opacity` (10 to 100 percent) size and fade the controls. docs/ANDROID.md has the layout.
+
+The mouse that SDL makes of a touch screen's first finger is not read as a mouse (it would turn the
+mouse camera and hold the left button).
 
 ## Keyboard and mouse
 
@@ -329,7 +341,7 @@ screen writes the same lines.
 [input]
 preset = auto            ; xbox, playstation, switch, gamecube
 layout = auto            ; xbox: Karate Spin on X; gamecube: on B
-button_icons = auto      ; prompt pictures: auto, xbox, playstation, switch, gamecube, keyboard, off
+button_icons = auto      ; prompt pictures: auto, xbox, playstation, switch, gamecube, keyboard, touch, off
 keyboard = always        ; always, fallback, off
 stick_curve = xbox       ; xbox, gamecube, linear
 deadzone = auto          ; or a percentage
@@ -340,6 +352,10 @@ camera_invert_y = off
 mouse_camera = on
 mouse_sensitivity = 1.0
 rumble = 100
+touch_controls = auto    ; on, off (auto: on for Android)
+touch_drag_look = off    ; a drag on the empty right half also turns the camera
+touch_scale = 1.0        ; 0.5 to 1.2
+touch_opacity = 100      ; 10 to 100
 test = off               ; log, overlay
 ```
 
@@ -425,12 +441,15 @@ The prompts show what to press on the device in hand (`src/SB/Core/pc/iPadPrompt
   - PlayStation: cross, circle, square and triangle;
   - Switch: the Switch's letters;
   - GameCube: the GameCube's buttons, with chords drawn as "Z+L";
-  - Xbox pad: the disc's own pictures, rearranged if a face button was rebound.
+  - Xbox pad: the disc's own pictures, rearranged if a face button was rebound;
+  - touch controls: the on-screen buttons, which are the disc's Xbox A, B, X and Y and the letter on
+    each other button (L, R, =, Z, >). Before anything has been used, a screen with the touch
+    controls on it shows these rather than keycaps.
 
   The glyphs are drawn by the port and swapped into the `pad_button*` textures; the disc's files are
   never touched.
 - **The six move prompts follow the layout.** Their TEXT assets are rewritten in place in memory.
-- **"Pull" becomes "Press"** for a key or a GameCube R.
+- **"Pull" becomes "Press"** for a key, a touch button or a GameCube R.
 
 Checked in the game: the main menu's "Choose" prompt draws "SPC" with the keyboard and a cross with
 `button_icons = playstation`. The dialog's "Return" draws "RMB".

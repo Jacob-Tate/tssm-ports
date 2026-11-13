@@ -175,6 +175,27 @@ list(APPEND AUDIO_SOURCES ${PC_DIR}/iSndReverb.cpp)
 # TSSM's Xbox movies are Bink 1 (FMV/*.bik), which FFmpeg decodes. Point
 # CMAKE_PREFIX_PATH at vcpkg's installed/<arch>-windows (the build scripts do).
 # Without FFmpeg the null decoder is built and movies report "ran to the end".
+#
+# TSSM_FFMPEG_ROOT names an FFmpeg install (include/, lib/) to use instead of
+# searching. On Android it is the folder holding one install per ABI
+# (<root>/arm64-v8a, <root>/armeabi-v7a), as tools/android/build_ffmpeg.sh
+# writes them and gradle -Ptssm.ffmpeg=<root> passes it; the NDK toolchain
+# otherwise searches only its own sysroot, so without it Android builds the
+# null decoder.
+set(TSSM_FFMPEG_ROOT "" CACHE PATH "An FFmpeg install to link (on Android: a folder of <abi>/ installs)")
+if(TSSM_FFMPEG_ROOT)
+  set(_ffmpeg_root ${TSSM_FFMPEG_ROOT})
+  if(ANDROID AND EXISTS ${TSSM_FFMPEG_ROOT}/${ANDROID_ABI})
+    set(_ffmpeg_root ${TSSM_FFMPEG_ROOT}/${ANDROID_ABI})
+  endif()
+  find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h PATHS ${_ffmpeg_root}/include
+            NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+  foreach(_fflib avcodec avformat avutil swscale swresample)
+    string(TOUPPER ${_fflib} _FFLIB)
+    find_library(FFMPEG_${_FFLIB}_LIBRARY ${_fflib} PATHS ${_ffmpeg_root}/lib
+                 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+  endforeach()
+endif()
 find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
 find_library(FFMPEG_AVCODEC_LIBRARY avcodec)
 find_library(FFMPEG_AVFORMAT_LIBRARY avformat)
@@ -188,6 +209,11 @@ if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIBRARY AND FFMPEG_AVFORMAT_LIBRARY
   set(FMV_LIBRARIES ${FFMPEG_AVFORMAT_LIBRARY} ${FFMPEG_AVCODEC_LIBRARY}
                     ${FFMPEG_SWSCALE_LIBRARY} ${FFMPEG_SWRESAMPLE_LIBRARY}
                     ${FFMPEG_AVUTIL_LIBRARY})
+  if(ANDROID)
+    # Static archives there (tools/android/build_ffmpeg.sh): their own
+    # dependencies come along by name.
+    list(APPEND FMV_LIBRARIES m)
+  endif()
   set(FMV_INCLUDES ${FFMPEG_INCLUDE_DIR})
   set(FMV_DEFINES TSSM_HAVE_FFMPEG)
   message(STATUS "FMV decoder: ffmpeg (${FFMPEG_INCLUDE_DIR})")
@@ -570,7 +596,11 @@ if(TSSM_GUI)
                   "https://libsdl.org" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt")
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
-  if(FMV_INCLUDES)
+  if(FMV_INCLUDES AND ANDROID)
+    tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
+                    "Movie decoding. Linked statically into libmain.so, built by tools/android/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  elseif(FMV_INCLUDES)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
   endif()
@@ -792,7 +822,31 @@ endif()
 set(TSSM_EXE_SOURCES ${PC_DIR}/tssm_main.cpp)
 
 if(ANDROID)
-  add_library(main SHARED ${TSSM_EXE_SOURCES})
+  # The game is libmain.so, which SDL's Java half (SDLActivity) loads and
+  # whose SDL_main it calls on a thread of its own. docs/ANDROID.md.
+  #
+  # iAndroidMain.cpp is that SDL_main: it sets up the app's directories and
+  # the log (iAndroid.cpp), then calls the game's main, which
+  # iAndroidGameMain.h renames to tssmGameMain inside zMain.cpp only.
+  # zMain.cpp itself is unchanged; its main falls off the end after
+  # iSystemExit (retail OSPanics there), which is only well defined while the
+  # function is main, hence -fno-strict-return once it is renamed.
+  add_library(main SHARED ${TSSM_EXE_SOURCES}
+    ${PC_DIR}/android/iAndroid.cpp
+    ${PC_DIR}/android/iAndroidDocument.cpp
+    ${PC_DIR}/android/iAndroidMain.cpp
+    ${PC_DIR}/android/iAndroidPerf.cpp)
+  set_source_files_properties(${SB_DIR}/Game/zMain.cpp TARGET_DIRECTORY tssm_game PROPERTIES
+    COMPILE_OPTIONS "-include;${PC_DIR}/android/iAndroidGameMain.h;-fno-strict-return")
+  target_link_libraries(main PRIVATE log android)
+  if(FMV_INCLUDES)
+    # FFmpeg's static archives, hidden inside libmain.so. Its aarch64 assembly
+    # addresses its own tables PC-relative, which a shared object may only do
+    # to a symbol that cannot be preempted. Not SDL's archive: JNI_OnLoad has
+    # to stay exported.
+    target_link_options(main PRIVATE
+      "LINKER:--exclude-libs,libavformat.a:libavcodec.a:libswscale.a:libswresample.a:libavutil.a")
+  endif()
   set(TSSM_GAME_TARGET main)
 else()
   add_executable(tssm ${TSSM_EXE_SOURCES})

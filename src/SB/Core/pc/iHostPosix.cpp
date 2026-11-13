@@ -497,10 +497,23 @@ S32 iHostClaimInstance(const char* key, U32* holder)
     // descriptor closes, which it does however the process ends, so a file
     // left behind by a crash claims nothing.
     char dir[512];
+#ifdef __ANDROID__
+    // files/locks, not the cache: the system may empty the cache while the
+    // game runs, and a lock file deleted under its holder stops nothing. The
+    // co-op app takes the save folder's lock through SaveShareProvider.
+    const char* internal = iAndroidDir("TSSM_ANDROID_INTERNAL");
+    if (internal == NULL)
+    {
+        return -1;
+    }
+    snprintf(dir, sizeof(dir), "%s/locks", internal);
+    iHostMakeDir(dir);
+#else
     if (!iHostTempDir(dir, sizeof(dir)))
     {
         return -1;
     }
+#endif
 
     char path[700];
     snprintf(path, sizeof(path), "%s/%s.lock", dir, key != NULL ? key : "tssm");

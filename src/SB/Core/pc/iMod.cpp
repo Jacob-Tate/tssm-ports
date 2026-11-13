@@ -548,6 +548,19 @@ namespace
         sDefaultFolder = iHostExeDir(exe, sizeof(exe)) ? Slashes(exe) + "/mods" : "mods";
         sFolder.clear();
 
+#ifdef __ANDROID__
+        // Android: iHostExeDir is the app's internal storage, which only
+        // `adb shell run-as` reaches. The mods go in the external files folder
+        // instead (Android/data/<package>/files/mods), beside the imported game
+        // files and the log, where a computer can copy them over USB.
+        std::string internalFolder = sDefaultFolder;
+        const char* external = getenv("TSSM_ANDROID_EXTERNAL");
+        if (external != NULL && external[0] != '\0')
+        {
+            sDefaultFolder = StripTrailingSlash(Slashes(external)) + "/mods";
+        }
+#endif
+
         std::string named;
         const char* env = getenv("TSSM_MODS_DIR");
         if (env != NULL && env[0] != '\0')
@@ -573,6 +586,12 @@ namespace
         char data[512];
         std::vector<std::string> candidates;
         candidates.push_back(sDefaultFolder);
+#ifdef __ANDROID__
+        if (internalFolder != sDefaultFolder)
+        {
+            candidates.push_back(internalFolder);
+        }
+#endif
         if (iHostUserDataDir(data, sizeof(data)))
         {
             candidates.push_back(Slashes(data) + "/tssm/mods");

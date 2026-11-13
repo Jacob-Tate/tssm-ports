@@ -1,0 +1,158 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The Android app: SDL's Java half, three small activities of our own
+// (LauncherActivity, ImportActivity, GameActivity), and the game itself as
+// libmain.so, built by the repository's CMakeLists.txt. docs/ANDROID.md.
+//
+// Properties (gradle -P<name>=<value>):
+//
+//   tssm.abis      ABIs to build, comma-separated. Each gets its own APK
+//                  (app-<abi>-debug.apk). Default armeabi-v7a,arm64-v8a.
+//   tssm.backends  TSSM_RENDER_BACKENDS: GL3 (default), VULKAN, or GL3;VULKAN.
+//   tssm.ffmpeg    A folder of FFmpeg builds, one per ABI (<folder>/<abi>/
+//                  include and lib), from tools/android/build_ffmpeg.sh. The
+//                  movies play with it; without it they are skipped. The
+//                  environment variable TSSM_FFMPEG_ANDROID works too.
+//   tssm.icon      A folder made by tools/make_icons.ps1 from a picture,
+//                  outside the repository (docs/ICON.md). Its android/res
+//                  overrides the launcher icon; without it the APK keeps the
+//                  default one in src/main/res.
+
+// third_party/SDL's own Java half, compiled straight out of the submodule so
+// the two halves of SDL cannot drift apart.
+def sdlJava = file('../../third_party/SDL/android-project/app/src/main/java')
+
+def tssmAbis = (project.findProperty('tssm.abis') ?: 'armeabi-v7a,arm64-v8a')
+        .split(',').collect { it.trim() }.findAll { !it.isEmpty() }
+def tssmBackends = project.findProperty('tssm.backends') ?: 'GL3'
+def tssmFfmpeg = project.findProperty('tssm.ffmpeg') ?: System.getenv('TSSM_FFMPEG_ANDROID') ?: ''
+
+// The launcher icon from a local picture: <tssm.icon>/android/res, added to
+// the debug and release resources, which take precedence over main's. It has
+// mipmap-*dpi/ic_launcher.png (legacy launchers), mipmap-anydpi-v26/
+// ic_launcher.xml with its foreground and background layers, and nothing
+// else, so only @mipmap/ic_launcher changes (the manifest and the long-press
+// shortcut use it).
+def tssmIcon = project.findProperty('tssm.icon') ?: ''
+def tssmIconRes = null
+if (!tssmIcon.isEmpty()) {
+    tssmIconRes = new File(file(tssmIcon), 'android/res')
+    if (!new File(tssmIconRes, 'mipmap-anydpi-v26/ic_launcher.xml').isFile()) {
+        throw new GradleException("tssm.icon: ${tssmIconRes} has no mipmap-anydpi-v26/ic_launcher.xml. " +
+                'Make the folder with tools/make_icons.ps1 (docs/ICON.md).')
+    }
+    logger.lifecycle("tssm: launcher icon from ${tssmIconRes}")
+}
+
+def cmakeArgs = [
+    // The game is C++ and librw is C++; the shared runtime would be a second
+    // .so in the APK for nothing.
+    '-DANDROID_STL=c++_static',
+    '-DANDROID_PLATFORM=android-24',
+    '-DTSSM_RENDER_BACKENDS=' + tssmBackends,
+]
+if (!tssmFfmpeg.isEmpty()) {
+    cmakeArgs += '-DTSSM_FFMPEG_ROOT=' + file(tssmFfmpeg).absolutePath.replace('\\', '/')
+}
+
+android {
+    namespace = 'io.github.tssmport.game'
+    compileSdk = 35
+
+    // The NDK the SDL submodule's own template pins (r28c).
+    ndkVersion = '28.2.13676358'
+
+    defaultConfig {
+        applicationId = 'io.github.tssmport.game'
+
+        // 24: GLES 3 where the device has it, and the storage behaviour the
+        // import screen is written against.
+        minSdk = 24
+        targetSdk = 35
+
+        versionCode = 16
+        versionName = '0.9'
+
+        externalNativeBuild {
+            cmake {
+                arguments(*cmakeArgs)
+
+                // Just the game. Without this, AGP builds every target the
+                // CMake project defines.
+                targets 'main'
+            }
+        }
+    }
+
+    // One APK per ABI: arm64-v8a, the 64-bit build, for phones that run only
+    // 64-bit apps (it widens the assets' 4-byte pointer slots as they load,
+    // as the Windows x64 build does), and armeabi-v7a, the 32-bit build, for
+    // older phones. docs/ANDROID.md.
+    splits {
+        abi {
+            enable true
+            reset()
+            include(*tssmAbis)
+            universalApk false
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            jniDebuggable = true
+
+            // Optimised, with symbols (stripped in the APK). AGP builds a
+            // debug variant's native code as CMake Debug, which is -O0.
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+                }
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += sdlJava
+        }
+        if (tssmIconRes != null) {
+            debug {
+                res.srcDirs += tssmIconRes
+            }
+            release {
+                res.srcDirs += tssmIconRes
+            }
+        }
+    }
+
+    // libmain.so compressed in the APK and extracted at install: a smaller
+    // file to copy to the phone.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            // The port's one build file, three directories up.
+            path = file('../../CMakeLists.txt')
+            version = '3.22.1'
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}

@@ -61,13 +61,11 @@ TREEDOME = [
     "compat/intrin.h",
     "compat/math.h",
     "compat/mem.h",
-    "compat/string.h",
     "intrin.cpp",
     # the host seam (iHost.h and its two backends are adapted: see below)
     "iStub.h",
     # window and render size
     "iWindow.h",
-    "iWindowSDL.cpp",
     "iWindowNull.cpp",
     "iScreen.h",
     "iScreen.cpp",
@@ -149,6 +147,18 @@ TREEDOME_ADAPTED = [
     "iSndHost.h",
     "iSndHostSDL.cpp",
     "iSndHostNull.cpp",
+    # strupr for POSIX hosts (zMain.cpp calls it with only <string.h>)
+    "compat/string.h",
+    # the Android glue: BFBB_ -> TSSM_, bfbbGameMain ->
+    # tssmGameMain, tssm-log.txt, a provenance line at the top
+    "android/iAndroid.h",
+    "android/iAndroid.cpp",
+    "android/iAndroidGameMain.h",
+    "android/iAndroidMain.cpp",
+    # the touch controls' letters fade with their buttons (input.touch_opacity)
+    "rw/touch_overlay.cpp",
+    # Android: the frame-rate request to the surface, GL context loss
+    "iWindowSDL.cpp",
     # the movie device closes and opens again with the game's (iAudioSDL.h)
     "iFMVAudioSDL.cpp",
 ]
@@ -187,7 +197,6 @@ GC_VERBATIM = [
     "iScrFX.h",
     "iAsync.h",
     "iARAMTmp.h",
-    "iMemMgr.h",
     "iPad.h",
     "ngcrad3d.h",
 ]
@@ -209,7 +218,7 @@ for _h in ["rpcollis.h", "rphanim.h", "rpmatfx.h", "rpptank.h", "rpskin.h", "rpu
     SHADOWS["rwsdk/" + _h] = "include/rwsdk/" + _h
 for _f in ["iAnimSKB.h", "iWad.h", "iWad.cpp", "iCamera.cpp", "iModel.cpp", "iCutscene.cpp", "iScrFX.cpp", "iSnd.h",
            "iSnd.cpp", "iFMV.h", "iFMV.cpp", "isavegame.h", "isavegame.cpp", "iTRC.h", "iTRC.cpp",
-           "iDraw.h", "iDraw.cpp", "iPad.cpp", "iSystem.h", "iSystem.cpp", "iMemMgr.cpp",
+           "iDraw.h", "iDraw.cpp", "iPad.cpp", "iSystem.h", "iSystem.cpp", "iMemMgr.h", "iMemMgr.cpp",
            "iTime.h", "iTime.cpp", "iFile.h", "iFile.cpp", "iARAMTmp.cpp", "iAsync.cpp",
            "iException.h", "iException.cpp"]:
     SHADOWS[_f] = "src/SB/Core/gc/" + _f

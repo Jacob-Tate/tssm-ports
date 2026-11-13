@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: import (or re-import) the game's files. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="import_files"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/import_short"
+        android:shortcutLongLabel="@string/import_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.tssmport.game"
+            android:targetClass="io.github.tssmport.game.LauncherActivity">
+            <extra android:name="import" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>

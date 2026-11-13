@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fullscreen and no title bar, as SDL's own template: the game draws
+         every pixel it is given and has its own pause. -->
+    <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen" />
+
+    <!-- LauncherActivity only decides where to go, so its window is
+         see-through and appears without an animation. -->
+    <style name="LauncherTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

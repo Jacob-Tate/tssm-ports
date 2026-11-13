@@ -89,6 +89,10 @@ namespace iGui
     // A dimmed line of explanation under a control.
     void Note(const char* fmt, ...);
 
+    // A touch screen's words in place of a PC's keys: on a phone, and on a
+    // desktop given the phone's touch sizes for a look at its layout.
+    bool TouchWords();
+
     // A highlighted "applies after a restart" tag after the last item, when
     // `key` differs from the value the session started with.
     void RestartTag(const char* key);
@@ -122,7 +126,8 @@ namespace iGui
 
     // A whole file in or out, through SDL's file streams, so a path the
     // system's dialog answered with works whatever it is (an Android
-    // content:// URI included). `why` gets a sentence on failure.
+    // content:// URI included; those go through the app's own Java,
+    // android/iAndroidDocument.h). `why` gets a sentence on failure.
     bool ReadWholeFile(const char* path, std::vector<unsigned char>& out, char* why,
                        size_t whySize);
     bool WriteWholeFile(const char* path, const unsigned char* data, size_t n, char* why,

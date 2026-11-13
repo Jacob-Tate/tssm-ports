@@ -41,6 +41,11 @@ The game looks for the `mods` folder in this order and uses the first one that e
 4. `mods/` in the per-user data folder: `%APPDATA%/tssm/mods` on Windows,
    `~/.local/share/tssm/mods` on Linux.
 
+On Android, step 3 is the app's external files folder instead,
+`Android/data/io.github.tssmport.game/files/mods` (beside the imported game files and the log,
+reachable from a computer over USB), followed by the app's internal `files/mods` and
+`files/tssm/mods`. docs/ANDROID.md.
+
 `[assets] mods = off` in `config.ini` (or the environment variable `TSSM_MODS=0`) switches all mods
 off without uninstalling any of them.
 

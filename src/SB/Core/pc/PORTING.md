@@ -50,9 +50,9 @@ The game code is compiled as the same 35 units the GameCube build compiles
 
 | Area | Files |
 |---|---|
-| compat | `compat/_stdfloatmath.h`, `compat/cmath`, `compat/intrin.h`, `compat/math.h`, `compat/mem.h`, `compat/string.h`, `intrin.cpp` |
+| compat | `compat/_stdfloatmath.h`, `compat/cmath`, `compat/intrin.h`, `compat/math.h`, `compat/mem.h`, `intrin.cpp` |
 | host seam | `iStub.h` (`iHost.h` and its backends: adapted, below) |
-| window, render size | `iWindow.h`, `iWindowSDL.cpp`, `iWindowNull.cpp`, `iScreen.h`, `iScreen.cpp` |
+| window, render size | `iWindow.h`, `iWindowNull.cpp`, `iScreen.h`, `iScreen.cpp` (`iWindowSDL.cpp`: adapted, below) |
 | config.ini | `iConfig.h`, `iConfigEdit.h`, `iConfigEdit.cpp`, `iConfigTable.h` |
 | input devices | `iPadStick.h`, `iPadStick.cpp`, `iCameraLook.h`, `iCameraLook.cpp`, `iTouchOverlay.h`, `iTouchOverlay.cpp` (the rest of treedome's input layer is adapted, below) |
 | audio device | `iSndReverb.h`, `iSndReverb.cpp` (the seam and its backends are adapted, below) |
@@ -70,14 +70,16 @@ The game code is compiled as the same 35 units the GameCube build compiles
 | `rw/renderstate.cpp` | `RwRenderStateGet` answers the alpha-test function and reference (read back from librw) |
 | `rw/engine.cpp` | `RwGameCubeSetAlphaCompare` collapses a test written the same on both sides, which is how TSSM's alpha discard writes it |
 | `rw/texture.cpp` | mods: `gRwTextureReplaceHook`, called for each texture `RwTexDictionaryStreamRead` reads (after the raster conversion), which `iModTexture.cpp` sets so a mod's image can replace the raster. Marked `TSSM-ADAPTED`. OpenGL: a converted texture keeps the alpha kind (opaque, keyed, graded) of its top level, which librw's per-level `rasterFromImage` otherwise takes from the last level (`docs/RENDERING.md`) |
+| `iWindowSDL.cpp` | Android only (`__ANDROID__`): the frame-rate cap is requested as the surface's rate (`ANativeWindow_setFrameRate`, Android 11 and later), again for each new surface; `SDL_EVENT_RENDER_DEVICE_RESET` for the game's window (a lost GL context) is logged, shown in a dialog and closes the game (docs/ANDROID.md) |
+| `rw/touch_overlay.cpp` | a button's letter fades with the button when `input.touch_opacity` makes it faint, so a label never floats over a button that is hardly there |
 | `iConfig.cpp` | the first line of a written config.ini names TSSM |
-| `iConfigTable.cpp` | the settings of BfBB features not imported are removed (toon, hipoly, world lighting, day/night, fonts, cheats, fixes, Xbox screen-pass switches, menus, soundtrack, load-screen and shadow tuning, button glyphs, `video.profile`, `video.draw_distance`, `video.per_pixel_lighting`); help texts name TSSM's folders; TSSM's `[input]` settings: `preset`, `layout`, `button_icons`, `keyboard`, `stick_curve`, `deadzone`, `trigger_threshold`, `camera_sensitivity`, `camera_invert_x/y`, `mouse_camera`, `mouse_sensitivity`, `rumble`, `touch_controls`, `test`; `[assets] mods` and `mods_folder` (the mods folder) are added |
+| `iConfigTable.cpp` | the settings of BfBB features not imported are removed (toon, hipoly, world lighting, day/night, fonts, cheats, fixes, Xbox screen-pass switches, menus, soundtrack, load-screen and shadow tuning, button glyphs, `video.profile`, `video.draw_distance`, `video.per_pixel_lighting`); help texts name TSSM's folders; TSSM's `[input]` settings: `preset`, `layout`, `button_icons`, `keyboard`, `stick_curve`, `deadzone`, `trigger_threshold`, `camera_sensitivity`, `camera_invert_x/y`, `mouse_camera`, `mouse_sensitivity`, `rumble`, `touch_controls`, `touch_drag_look`, `touch_scale`, `touch_opacity`, `test`; `[assets] mods` and `mods_folder` (the mods folder) are added |
 | `iPadBind.h`, `iPadBind.cpp`, `iPadBindTable.cpp` | TSSM's rows, named after the Xbox controller (`a b x y lt rt white black back start`, the d-pad, and the keyboard's `move_*`/`camera_*`/`walk` rows), each setting the bits the Xbox release sets; presets `xbox`, `playstation`, `switch`, `gamecube` (Z chords as on the console); a quiet parser and a formatter for a settings screen. docs/CONTROLS.md |
 | `iPadLayout.h`, `iPadLayout.cpp` | TSSM's move layout: `input.layout` xbox (the Xbox release's move buttons) or gamecube, as `XPAD_MOVE` in `xPad.h` reads it |
 | `iPadHost.h`, `iPadHostSDL.cpp`, `iPadHostNull.cpp` | raw sticks (the curve is `iPad.cpp`'s), analog triggers kept and clicking at `input.trigger_threshold`, the keyboard alongside a pad (`input.keyboard`), kinds `xbox`/`playstation`/`switch`/`gamecube`, rumble strength, the bindings and their generation for the prompts; the `TSSM_PAD` probe became `TSSM_INPUT_TEST` (`iPadTest.cpp`); the null backend also stands in for the SDL-only prompts and input test; while another copy of the game is the window in front, the pads read as connected and idle (`iHostOtherCopyInFront`), since SDL hands pad input to a window that is not in front |
 | `iPadKeyboard.h`, `iPadKeyboardSDL.cpp` | stick rows instead of fixed WASD/IJKL, mouse buttons and wheel as keys, the mouse camera (relative mode, as C-stick deflection), a test source |
 | `iPadTokens.h`, `iPadTokens.cpp` | share/capture, paddles, touchpad and the GameCube trigger clicks; `mouse1`-`mouse5`, `wheelup`, `wheeldown`; labels per controller family |
-| `iPadTouch.h`, `iPadTouch.cpp` | TSSM's small buttons (Back, black); the drag also turns TSSM's camera through the C-stick (TSSM's `zCamera.cpp` has no `iCameraLook` hook) |
+| `iPadTouch.h`, `iPadTouch.cpp` | TSSM's small buttons (Back, black); a right on-screen stick for the camera, fed in as the controller's right stick, with the face buttons raised to make room; each finger owned by the control it landed on until it lifts, read in order from SDL's touch events by a watch; the safe area; the old drag kept behind `input.touch_drag_look` (as C-stick deflection: TSSM's `zCamera.cpp` has no `iCameraLook` hook); size and opacity settings |
 | `iConfig.cpp` | also: the `[pad]`/`[keyboard]` comments and row descriptions are TSSM's (`iPadBindDescribe`) |
 | `iFile.h`, `iFile.cpp` | TSSM's interface: `const` names in `iFileLoad`/`iFileSetPath`, `iFileFind`'s flags argument, `iFileExists`, `iFileGetSectorSize`, `xFileDriveType`; backslashes become slashes in `iFileFullPath` (gc does it); the PLAT check accepts TSSM's Xbox id `BX`; the asset-override hook (BfBB's code menus) is gone. Mods (`iMod.h`): `iFileInit` starts the mod manager; a loose file from the mods folder is asked for after the single mod folder (same platform check); a package a mod replaces assets in is opened as a view (`tag_iFile::view`, read through `iModPkgRead`); `iFileLoad` applies INI overlays to the `.ini` files it loads |
 | `iTime.h`, `iTime.cpp` | TSSM's `iTimeGetGame`, `iFuncProfileFuncs`; the tick rate is also `OS_TIMER_CLOCK`, which `xFont.cpp` and `zGame.cpp` use inline |
@@ -90,7 +92,9 @@ The game code is compiled as the same 35 units the GameCube build compiles
 | `iFMVAudioSDL.cpp` | the movie device closes and opens again with the game's (`iAudioSDL.h`); while it is closed the movie keeps time on a stand-in queue drained at its rate; a queue that stops moving for a second asks for a restart. The device is closed before its stream is destroyed: destroying a stream that is still bound makes SDL unbind it in `SDL_UnbindAudioStreams`, which unlocks the wrong device if SDL moves the device to a new default meanwhile, and the game froze in a movie that way. Marked `TSSM-ADAPTED` |
 | `iSndData.h`, `iSndData.cpp` | treedome's sample cache (lazy, LRU, pinned while playing), keyed by asset id and package; the bytes come from a package range iSnd.cpp names (from the package's own table of contents), decoded by `iSndXbox.cpp`; no soundtrack override; `TSSM_SND_DUMP` |
 | `tssm_main.cpp` | `bfbb_main.cpp` renamed: crash handler, watchdog, unbuffered stdout, banner; starts the log's tee before anything prints (`iLog.h`), and the crash and abort reports are appended to `crash.log` as well (formatted on the stack) before the log is drained |
-| `iLog.h`, `iLog.cpp` | the game's own log: stdout and stderr each go through a pipe whose thread writes to where they went before and to `last_run.log` (the run before kept as `last_run.prev.log`) in `%APPDATA%\tssm`, or beside `TSSM_SAVE_DIR`'s folder, or at `TSSM_LOG` (`off` for none); held in memory until `iSystemInit` knows the run is the game and not a save tool; one process per log file; `crash.log` beside it |
+| `iLog.h`, `iLog.cpp` | the game's own log: stdout and stderr each go through a pipe whose thread writes to where they went before and to `last_run.log` (the run before kept as `last_run.prev.log`) in `%APPDATA%\tssm`, or beside `TSSM_SAVE_DIR`'s folder, or at `TSSM_LOG` (`off` for none); held in memory until `iSystemInit` knows the run is the game and not a save tool; one process per log file; `crash.log` beside it. On Android no tee: the platform's log is the log, and `iLogUsePlatformLog` puts `crash.log` beside it |
+| `compat/string.h` | also defines `strupr` on POSIX hosts (Android, Linux, macOS): `zMain.cpp` calls it with only `<string.h>` included, which the Microsoft CRT covers and POSIX does not. Marked `TSSM-ADAPTED`; `compat/extras.h` now defines it only for MinGW |
+| `android/iAndroid.h`, `android/iAndroid.cpp`, `android/iAndroidGameMain.h`, `android/iAndroidMain.cpp` | the Android glue (docs/ANDROID.md): `BFBB_` to `TSSM_` (`TSSM_ANDROID_INTERNAL`/`_CACHE`/`_EXTERNAL`, `TSSM_ASSETS`), `bfbbGameMain` to `tssmGameMain`, the log is `tssm-log.txt` under the logcat tag `tssm`, the run before kept as `tssm-log.prev.txt`; `iAndroidLogDrain` for the crash handler, and `iLogUsePlatformLog` for `crash.log`; no `BFBB_PROFILE` (TSSM has no video profile) |
 
 ### TSSM `src/SB/Core/gc`, verbatim (`VERBATIM.txt`)
 
@@ -98,7 +102,9 @@ The game code is compiled as the same 35 units the GameCube build compiles
 `iCollideFast.h`, `iColor.h`, `iCutscene.h`, `iDebug.h`, `iEnv.h`, `iEnv.cpp`,
 `iFX.h`, `iLight.h`, `iLight.cpp`, `iMath.h`, `iMath.cpp`, `iMath3.h`,
 `iMath3.cpp`, `iModel.h`, `iMorph.h`, `iMorph.cpp`, `iParMgr.h`, `iParMgr.cpp`,
-`iScrFX.h`, `iAsync.h`, `iARAMTmp.h`, `iMemMgr.h`, `iPad.h`, `ngcrad3d.h`.
+`iScrFX.h`, `iAsync.h`, `iARAMTmp.h`, `iPad.h`, `ngcrad3d.h`. `iMemMgr.h` was one; it
+now also declares `iMemCheckLow` (below) and is checked against gc's through
+`SHADOWED.txt` instead.
 
 The `.cpp` copies are compiled inside `pc/iWad.cpp`, as on the console, because
 they lean on `iWad.h` for their includes.
@@ -115,7 +121,7 @@ they lean on `iWad.h` for their includes.
 | `iSnd.h` | `iSndGroupHandle` is a `U32` (an empty enum holding a pointer on the console; C++ forbids the cast). 32 bits because it shares a union with a `U32` in two asset structs. `iSndInfo` keeps only `channel` and `iSndFileInfo` keeps `uAssetID`, `uFlags`, `isStreamed()`/`isLooping()` (what shared code reads) over the PC's table indices; the FMOD/FSB/DSP-ADPCM structs are gone. Two PC-only declarations: `iSndEffectShutdown`, `iCSSoundPull` |
 | `iFMV.h` | `MOVIE` keeps its Bink handle (xFMV.cpp reads it) and loses the DVD file |
 | `iMemMgr.cpp` | TSSM's `MemoryManagerMulti` (fixed pools, resource arena, general heap) on treedome's low-4 GB arena from `iHostReserveLow`; the 4-byte pool is pointer-sized on 64-bit |
-| `iSystem.h`, `iSystem.cpp` | includes `<dolphin.h>` (the PC subset, below) as gc's does; TSSM's two-step RenderWare start (`iSystemInit`, then `iSystemInitGraphics`) with treedome's host pieces: config.ini first, the asset check (Xbox `BX` packs), the window before the device, `iVSync` sleeping to 60 Hz; the log opened once the save tools are past (`iLogStart`); the save folder claimed for this process before the window opens (a second copy on the same folder brings the first forward and exits) and the load screen's no-saves hook set; ARAM is host memory; `iSystemGetWidthHeight` answers the render size |
+| `iSystem.h`, `iSystem.cpp` | includes `<dolphin.h>` (the PC subset, below) as gc's does; TSSM's two-step RenderWare start (`iSystemInit`, then `iSystemInitGraphics`) with treedome's host pieces: config.ini first, the asset check (Xbox `BX` packs), the window before the device, `iVSync` sleeping to 60 Hz; the log opened once the save tools are past (`iLogStart`); the save folder claimed for this process before the window opens (a second copy on the same folder brings the first forward and exits; not on Android, which runs one process per app) and the load screen's no-saves hook set; ARAM is host memory; `iSystemGetWidthHeight` answers the render size |
 | `iTRC.h`, `iTRC.cpp` | TSSM's 40-function interface minus ROMFont and the OS thread bookkeeping; no disc, no error screen (treedome's answer) |
 | `iException.h`, `iException.cpp` | the out-of-memory crash reports on the console and in a message box, then exits |
 | `iARAMTmp.cpp` | retail's algorithm with ARAM as a malloc'd buffer and the ARQ DMA as `memcpy` |
@@ -150,6 +156,12 @@ negative w clipped every such quad (`docs/RENDERING.md`). Added from treedome:
 `rpcollbsptree.h` (its `RpCollisionData` removed: TSSM's `rpcollis.h` defines
 the RW 3.7 one), `driver/gcn/dlrendst.h`, `world/bageomet.h`. `SHADOWED.txt`
 records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
+
+On PC, `RwIm3DVertexSetRGBA` (`rwcore.h`) and `RwIm2DVertexSetRealRGBA` /
+`RwIm2DVertexSetIntRGBA` (`rwplcore.h`) write the colour as one 32-bit word in
+the PC's BGRA byte order instead of four byte stores. The bytes are the same;
+the four stores, reversed against the order the game passes them, crash NDK
+r28c's clang 19 when it compiles them for arm64 (`TSSM-ADAPTED`, docs/ANDROID.md).
 
 ### new
 
@@ -338,6 +350,9 @@ Each says at its site what it does not do.
   the save, story1.bik, BB02's opening cutscene and gameplay, the frames
   matching x86's (`tools/regress.py`). Not covered: MPHT, CRV, VOLU and SPLP
   assets (none in the Xbox data; a 64-bit load of one is reported).
+  Every allocator the game sees is below 4 GB (game arena from 0x04000000,
+  RenderWare heap at 0x0C000000), and `iMemCheckLow` (`iMemMgr.h`) stops the
+  game if iMemMgr or iLowHeap ever returns memory above it.
 - **`iFileLoad`** allocates with `RwMalloc`, as the console's does, because
   its callers free with `RwFree` (zMainReadINI).
 - **`s32`/`u32`** are `long` in `include/types.h` on every host, which is 64
@@ -366,7 +381,7 @@ prompt rewrites are `iPadPrompts.cpp`),
 (TSSM draws its own glyphs in `iPadPrompts.cpp`),
 `iSnd.cpp` (BfBB's Xbox sound front end: TSSM's is written for TSSM's
 xSndMgr; `iSndData.cpp` is adapted, above), `iCollide.cpp`/`iCollideFast.cpp` (TSSM has neither), `configurator/`
-(wxWidgets; optional), `android/` (Android comes after Windows), `res/` (BfBB's
+(wxWidgets; optional), `res/` (BfBB's
 icon and button glyphs), `tests/` (BfBB's interface tests), `bfbb_main.cpp`
 (became `tssm_main.cpp`), and treedome's own docs (`README.md`, `PORTING.md`,
 `LINKING.md`), whose lessons apply here and are worth reading in the treedome

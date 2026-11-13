@@ -38,6 +38,7 @@ b61086a47e8ba2e80b28d1702c9be3f99aee4a3b  src/SB/Core/gc/iDraw.h  ->  iDraw.h
 a12d8c100d577d1bc005c4f02604e565287d4509  src/SB/Core/gc/iPad.cpp  ->  iPad.cpp
 f535e5afd8767dcfd2f75287ece0bc83741a18e4  src/SB/Core/gc/iSystem.h  ->  iSystem.h
 be3d080dfb1ae85eec70dc67b8117fe1740b1f0b  src/SB/Core/gc/iSystem.cpp  ->  iSystem.cpp
+3b83e868f24c367fc480ca8dc1d21cb8eb0723dc  src/SB/Core/gc/iMemMgr.h  ->  iMemMgr.h
 5b05b369f1b1c1d0ad9e1e7a8e600b54d0cdaf8e  src/SB/Core/gc/iMemMgr.cpp  ->  iMemMgr.cpp
 5e8f2d3ae122ac964d4a2fcdbad4c32e7bb60cbc  src/SB/Core/gc/iTime.h  ->  iTime.h
 8894b49aa5c3ab6e2ff6fd44befa8a322cf0cf6e  src/SB/Core/gc/iTime.cpp  ->  iTime.cpp

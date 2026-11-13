@@ -3,8 +3,10 @@
 //
 // It drives SDL's own virtual controllers -- attached, pressed and unplugged
 // through SDL_AttachVirtualJoystick and friends, so the events go through the
-// same SDL gamepad code a USB pad's do -- and a stand-in keyboard and mouse
-// (iPadKeyboardSetTestSource). Each frame calls the GAME's xPadUpdate (the real
+// same SDL gamepad code a USB pad's do -- a stand-in keyboard and mouse
+// (iPadKeyboardSetTestSource), and the touch controls, with fingers posted as
+// SDL's touch events (SDL_PushEvent), which the touch layer watches for as it
+// does on Android. Each frame calls the GAME's xPadUpdate (the real
 // src/SB/Core/x/xPad.cpp, compiled into this test) and checks what the game
 // sees: mPad[0].on / pressed / released and the two sticks.
 //
@@ -13,6 +15,7 @@
 // The folder gets the test's config.ini (default: the system temp folder).
 // Exit status 0 when every check passes.
 
+#include "iConfig.h"
 #include "iPad.h"
 #include "iPadBind.h"
 #include "iPadControls.h"
@@ -23,6 +26,8 @@
 #include "iPadSettings.h"
 #include "iPadTest.h"
 #include "iPadTokens.h"
+#include "iPadTouch.h"
+#include "iTouchOverlay.h"
 #include "xPad.h"
 #include "xTRC.h"
 
@@ -681,6 +686,444 @@ static void TestMenus()
     Frame();
 }
 
+// ---- the touch screen -------------------------------------------------------------
+
+// The window the touch controls lay out in: a 16:9 phone held sideways.
+static const F32 kTouchW = 1920.0f;
+static const F32 kTouchH = 1080.0f;
+
+// One touch event, as SDL posts a touch screen's. Positions are fractions of
+// the window. The touch layer takes them from its watch, so the queue itself is
+// emptied after each frame.
+static void PostFinger(Uint32 type, SDL_FingerID id, F32 x, F32 y, SDL_TouchID touch = 1)
+{
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = type;
+    e.tfinger.touchID = touch;
+    e.tfinger.fingerID = id;
+    e.tfinger.x = x;
+    e.tfinger.y = y;
+    e.tfinger.pressure = 1.0f;
+    SDL_PushEvent(&e);
+}
+
+static void FingerDown(SDL_FingerID id, F32 x, F32 y)
+{
+    PostFinger(SDL_EVENT_FINGER_DOWN, id, x, y);
+}
+
+static void FingerMove(SDL_FingerID id, F32 x, F32 y)
+{
+    PostFinger(SDL_EVENT_FINGER_MOTION, id, x, y);
+}
+
+static void FingerUp(SDL_FingerID id, F32 x, F32 y)
+{
+    PostFinger(SDL_EVENT_FINGER_UP, id, x, y);
+}
+
+// A frame with the touch events it read taken off SDL's queue, which nothing
+// else in this test drains.
+static _tagxPad& TouchFrame()
+{
+    _tagxPad& p = Frame();
+    SDL_FlushEvents(SDL_EVENT_FINGER_DOWN, SDL_EVENT_FINGER_CANCELED);
+    return p;
+}
+
+struct Point
+{
+    F32 x;
+    F32 y;
+};
+
+static Point Control(const char* name)
+{
+    Point p = { -1.0f, -1.0f };
+    Check(iPadTouchControlAt(name, &p.x, &p.y), name);
+    return p;
+}
+
+// Pixels to window fractions.
+static F32 PX(F32 pixels)
+{
+    return pixels / kTouchW;
+}
+
+static F32 PY(F32 pixels)
+{
+    return pixels / kTouchH;
+}
+
+// SDL's stand-in mouse for a touch screen's first finger is not a mouse.
+static void TestTouchMouse()
+{
+    F32 dx;
+    F32 dy;
+    U32 buttons;
+    iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.which = SDL_TOUCH_MOUSEID;
+    e.motion.xrel = 50.0f;
+    e.motion.yrel = -20.0f;
+    SDL_PushEvent(&e);
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    e.button.which = SDL_TOUCH_MOUSEID;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.down = true;
+    SDL_PushEvent(&e);
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.which = SDL_PEN_MOUSEID;
+    e.motion.xrel = 9.0f;
+    SDL_PushEvent(&e);
+
+    iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+    Check(dx == 0.0f && dy == 0.0f, "a finger's stand-in mouse does not move the mouse camera");
+    CheckInt((S32)buttons, 0, "a finger's stand-in mouse does not hold the left button");
+
+    // A real mouse beside it still counts.
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.which = 1;
+    e.motion.xrel = 7.0f;
+    e.motion.yrel = 3.0f;
+    SDL_PushEvent(&e);
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    e.button.which = 1;
+    e.button.button = SDL_BUTTON_RIGHT;
+    e.button.down = true;
+    SDL_PushEvent(&e);
+
+    iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+    Check(fabsf(dx - 7.0f) < 0.01f && fabsf(dy - 3.0f) < 0.01f, "a real mouse's motion counts");
+    CheckInt((S32)buttons, (S32)SDL_BUTTON_RMASK, "a real mouse's button counts, the finger's not");
+    iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+    Check(dx == 0.0f && dy == 0.0f, "motion is taken once");
+
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.which = 1;
+    e.button.button = SDL_BUTTON_RIGHT;
+    SDL_PushEvent(&e);
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.which = SDL_TOUCH_MOUSEID;
+    e.button.button = SDL_BUTTON_LEFT;
+    SDL_PushEvent(&e);
+    iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+    CheckInt((S32)buttons, 0, "and lets go");
+
+    SDL_FlushEvents(SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_REMOVED);
+}
+
+static void TestTouch()
+{
+    KeysUp();
+    iConfigSet("input.touch_controls", "on");
+    iPadTouchInit();
+    iTouchOverlaySetWindowSize((S32)kTouchW, (S32)kTouchH);
+    iPadTouchTestInsets(0.0f, 0.0f, 0.0f, 0.0f);
+    TouchFrame();
+    Check(iPadTouchEnabled() && iPadTouchShowing(), "touch controls on and showing");
+
+    // ---- the layout
+    const Point ls = Control("left_stick");
+    const Point rs = Control("right_stick");
+    const char* const faces[4] = { "a", "b", "x", "y" };
+    Check(ls.x < 0.5f && rs.x > 0.5f, "the left stick on the left half, the right on the right");
+    Check(rs.y > 0.6f, "the right stick at the bottom");
+    for (S32 i = 0; i < 4; i++)
+    {
+        const Point f = Control(faces[i]);
+        Check(f.x > rs.x, "A B X Y right of the right stick");
+        // The ring (0.13 of the height) and a face button (0.07) apart.
+        const F32 dx = (f.x - rs.x) * kTouchW;
+        const F32 dy = (f.y - rs.y) * kTouchH;
+        Check(sqrtf(dx * dx + dy * dy) > (0.13f + 0.07f) * kTouchH,
+              "the right stick's ring does not reach a face button");
+    }
+
+    // ---- the left stick moves, and only moves
+    FingerDown(1, ls.x, ls.y);
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog1.x == 0 && p.analog1.y == 0, "left stick: centred where the thumb lands");
+        CheckBits(p.on, 0, "left stick: no button");
+    }
+    FingerMove(1, ls.x + PX(200.0f), ls.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog1.x, 127, "left stick pushed right walks right");
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "the left stick never turns the camera");
+        CheckBits(p.on, 0, "the left stick presses nothing (no stand-in mouse button)");
+    }
+    FingerMove(1, ls.x, ls.y - PY(200.0f));
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog1.y, -127, "left stick pushed up -> the game's up");
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "still no camera");
+    }
+    {
+        const iPadHostState* host = iPadHostGet(0);
+        Check((host->sources & IPAD_HOST_SOURCE_TOUCH) != 0 &&
+                  (host->sources & (IPAD_HOST_SOURCE_KEYBOARD | IPAD_HOST_SOURCE_MOUSE)) == 0,
+              "a finger on the stick is touch, not keyboard or mouse");
+        CheckStr(iPadPromptsActiveSet(), "touch", "prompts: the on-screen buttons while touching");
+    }
+
+    // ---- the right stick, alongside: the controller's right stick
+    FingerDown(2, rs.x, rs.y);
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "right stick: centred where the thumb lands");
+        CheckInt(p.analog1.y, -127, "the left stick keeps its finger");
+    }
+    FingerMove(2, rs.x + PX(200.0f), rs.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog2.x, 127, "right stick pushed right -> analog2 right, as a pad's");
+        CheckInt(p.analog1.y, -127, "and the left stick is still its own");
+    }
+    FingerMove(2, rs.x, rs.y + PY(200.0f));
+    CheckInt(TouchFrame().analog2.y, 127, "right stick pushed down -> analog2.y 127, as a pad's");
+    FingerUp(1, ls.x, ls.y - PY(200.0f));
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog1.x == 0 && p.analog1.y == 0, "left finger up: the stick lets go");
+        CheckInt(p.analog2.y, 127, "the right stick does not");
+    }
+    FingerUp(2, rs.x, rs.y + PY(200.0f));
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "right finger up: the camera stops");
+    }
+
+    // ---- a finger stays with what it landed on
+    FingerDown(3, ls.x, ls.y);
+    TouchFrame();
+    FingerMove(3, rs.x, rs.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog1.x, 127, "a left-stick finger dragged to the right stick still walks");
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "and is not handed the camera");
+    }
+    const Point a = Control("a");
+    const Point b = Control("b");
+    FingerMove(3, a.x, a.y);
+    CheckBits(TouchFrame().on, 0, "nor A, dragged over it");
+    FingerUp(3, a.x, a.y);
+    TouchFrame();
+
+    FingerDown(4, a.x, a.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckBits(p.on, XPAD_BUTTON_X, "A jumps");
+        CheckBits(p.pressed, XPAD_BUTTON_X, "pressed the frame it lands");
+    }
+    FingerMove(4, a.x + PX(10.0f), a.y - PY(10.0f));
+    CheckBits(TouchFrame().on, XPAD_BUTTON_X, "a thumb wobbling on A keeps it held");
+    FingerMove(4, b.x, b.y);
+    CheckBits(TouchFrame().on, 0, "rolled onto B: A lets go, and B is not pressed");
+    FingerMove(4, a.x, a.y);
+    CheckBits(TouchFrame().on, XPAD_BUTTON_X, "back on A: A again");
+    FingerMove(4, 0.5f, 0.5f);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckBits(p.on, 0, "dragged off into the screen: nothing");
+        Check(p.analog1.x == 0 && p.analog2.x == 0, "and no stick either");
+    }
+    FingerUp(4, 0.5f, 0.5f);
+    TouchFrame();
+
+    // ---- a second finger on the left half does not take the stick
+    FingerDown(5, ls.x, ls.y);
+    TouchFrame();
+    FingerMove(5, ls.x + PX(200.0f), ls.y);
+    TouchFrame();
+    FingerDown(6, 0.3f, 0.5f);
+    TouchFrame();
+    FingerMove(6, 0.05f, 0.5f);
+    CheckInt(TouchFrame().analog1.x, 127,
+             "a second finger on the left half does not take the stick");
+    FingerUp(5, ls.x + PX(200.0f), ls.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog1.x, 0, "the stick's finger lifts: the stick lets go, not passed on");
+    }
+    FingerMove(6, 0.2f, 0.4f);
+    CheckInt(TouchFrame().analog1.x, 0, "the other finger still does nothing");
+    FingerUp(6, 0.2f, 0.4f);
+    TouchFrame();
+
+    // ---- empty screen does nothing, unless drag look is on
+    const F32 emptyX = 0.6f;
+    const F32 emptyY = 0.3f;
+    FingerDown(7, emptyX, emptyY);
+    TouchFrame();
+    FingerMove(7, emptyX + PX(150.0f), emptyY + PY(80.0f));
+    {
+        _tagxPad& p = TouchFrame();
+        CheckBits(p.on, 0, "a finger on empty screen presses nothing");
+        Check(p.analog1.x == 0 && p.analog1.y == 0 && p.analog2.x == 0 && p.analog2.y == 0,
+              "a finger on empty screen moves nothing");
+    }
+    FingerUp(7, emptyX + PX(150.0f), emptyY + PY(80.0f));
+    TouchFrame();
+
+    char err[128];
+    Check(iPadControlsSetSetting("touch_drag_look", "on", err, sizeof(err)), "touch_drag_look on");
+    FingerDown(8, emptyX, emptyY);
+    TouchFrame();
+    FingerMove(8, emptyX + PX(150.0f), emptyY);
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog2.x < -32, "drag look: a drag right on the right half turns the view right");
+        CheckInt(p.analog1.x, 0, "and does not walk");
+    }
+    FingerUp(8, emptyX + PX(150.0f), emptyY);
+    // The drag is smoothed over a tenth of a second or so, in real time.
+    for (S32 i = 0; i < 10; i++)
+    {
+        SDL_Delay(100);
+        TouchFrame();
+    }
+    CheckInt(TouchFrame().analog2.x, 0, "drag look: the camera stops once the drag is spent");
+    FingerDown(9, ls.x, ls.y);
+    TouchFrame();
+    FingerMove(9, ls.x + PX(200.0f), ls.y);
+    {
+        _tagxPad& p = TouchFrame();
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "drag look: the left stick still never looks");
+    }
+    FingerUp(9, ls.x + PX(200.0f), ls.y);
+    TouchFrame();
+    Check(iPadControlsSetSetting("touch_drag_look", "off", err, sizeof(err)),
+          "touch_drag_look off");
+
+    // ---- each button its row
+    struct Row
+    {
+        const char* row;
+        U32 bits;
+    };
+    static const Row kRows[] = {
+        { "a", XPAD_BUTTON_X },
+        { "b", XPAD_BUTTON_TRIANGLE },
+        { "x", XPAD_BUTTON_O },
+        { "y", XPAD_BUTTON_SQUARE },
+        { "lt", XPAD_BUTTON_L1 },
+        { "rt", XPAD_BUTTON_R1 },
+        { "back", XPAD_BUTTON_SELECT | XPAD_BUTTON_Z },
+        { "black", XPAD_BUTTON_R2 | XPAD_BUTTON_Z },
+        { "start", XPAD_BUTTON_START },
+    };
+    for (U32 i = 0; i < sizeof(kRows) / sizeof(kRows[0]); i++)
+    {
+        const Point c = Control(kRows[i].row);
+        FingerDown(10, c.x, c.y);
+        char what[64];
+        snprintf(what, sizeof(what), "touch %s", kRows[i].row);
+        CheckBits(TouchFrame().on, kRows[i].bits, what);
+        FingerUp(10, c.x, c.y);
+        TouchFrame();
+    }
+
+    // ---- a tap shorter than a frame still presses for one
+    FingerDown(11, a.x, a.y);
+    FingerUp(11, a.x, a.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckBits(p.pressed, XPAD_BUTTON_X, "a tap inside one frame presses A");
+    }
+    CheckBits(TouchFrame().released, XPAD_BUTTON_X, "and lets go the next");
+
+    // ---- one finger id on two devices is two fingers; a mouse is not one
+    FingerDown(1, ls.x, ls.y);
+    PostFinger(SDL_EVENT_FINGER_DOWN, 1, a.x, a.y, SDL_PEN_TOUCHID);
+    TouchFrame();
+    FingerMove(1, ls.x + PX(200.0f), ls.y);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckInt(p.analog1.x, 127, "finger 1 on the screen walks");
+        CheckBits(p.on, XPAD_BUTTON_X, "while the pen's 1 holds A");
+    }
+    PostFinger(SDL_EVENT_FINGER_UP, 1, a.x, a.y, SDL_PEN_TOUCHID);
+    {
+        _tagxPad& p = TouchFrame();
+        CheckBits(p.on, 0, "the pen lifts: A lets go");
+        CheckInt(p.analog1.x, 127, "the finger still walks");
+    }
+    FingerUp(1, ls.x + PX(200.0f), ls.y);
+    TouchFrame();
+    PostFinger(SDL_EVENT_FINGER_DOWN, 1, a.x, a.y, SDL_MOUSE_TOUCHID);
+    CheckBits(TouchFrame().on, 0, "a mouse's stand-in finger does not press A");
+    PostFinger(SDL_EVENT_FINGER_UP, 1, a.x, a.y, SDL_MOUSE_TOUCHID);
+    TouchFrame();
+
+    // ---- the safe area moves the controls in
+    iPadTouchTestInsets(100.0f, 150.0f, 0.0f, 40.0f);
+    {
+        const Point ls2 = Control("left_stick");
+        const Point rs2 = Control("right_stick");
+        const Point a2 = Control("a");
+        Check(fabsf((ls2.x - ls.x) * kTouchW - 100.0f) < 0.5f, "a left inset moves the left stick");
+        Check(fabsf((rs.x - rs2.x) * kTouchW - 150.0f) < 0.5f,
+              "a right inset moves the right stick");
+        Check(fabsf((a.y - a2.y) * kTouchH - 40.0f) < 0.5f, "a bottom inset raises the buttons");
+    }
+    iPadTouchTestInsets(0.0f, 0.0f, 0.0f, 0.0f);
+
+    // ---- the prompts
+    CheckStr(iPadPromptsLabelFor("touch", "a"), "xbox:A", "touch icons: A is the disc's Xbox A");
+    CheckStr(iPadPromptsLabelFor("touch", "y"), "xbox:Y", "touch icons: Y is the disc's Xbox Y");
+    CheckStr(iPadPromptsLabelFor("touch", "lt"), "L", "touch icons: LT is the on-screen L");
+    CheckStr(iPadPromptsLabelFor("touch", "back"), "=", "touch icons: Back is the on-screen =");
+    CheckStr(iPadPromptsLabelFor("touch", "start"), ">", "touch icons: Start is the on-screen >");
+    CheckStr(iPadPromptsLabelFor("touch", "white"), "-", "touch icons: no white button on screen");
+    sKeys[SDL_SCANCODE_SPACE] = true;
+    TouchFrame();
+    KeysUp();
+    TouchFrame();
+    CheckStr(iPadPromptsActiveSet(), "keyboard", "prompts: keys after a key");
+    FingerDown(12, a.x, a.y);
+    TouchFrame();
+    FingerUp(12, a.x, a.y);
+    TouchFrame();
+    CheckStr(iPadPromptsActiveSet(), "touch", "prompts: the on-screen buttons after a touch");
+
+    // ---- a controller in use puts them away; a touch brings them back
+    {
+        Pad pad = Attach(0x045e, 0x0b12, "Xbox Series X Controller (virtual)");
+        TouchFrame();
+        TouchFrame();
+        Button(pad, SDL_GAMEPAD_BUTTON_SOUTH, true);
+        TouchFrame();
+        Button(pad, SDL_GAMEPAD_BUTTON_SOUTH, false);
+        TouchFrame();
+        Check(!iPadTouchShowing(), "a controller in use hides the touch controls");
+        CheckStr(iPadPromptsActiveSet(), "xbox", "prompts: the pad's after the pad");
+        FingerDown(13, rs.x, rs.y);
+        TouchFrame();
+        Check(iPadTouchShowing(), "a touch brings them back");
+        FingerUp(13, rs.x, rs.y);
+        TouchFrame();
+        Detach(pad);
+        TouchFrame();
+        TouchFrame();
+    }
+
+    iConfigSet("input.touch_controls", "off");
+    iPadTouchInit();
+    TouchFrame();
+}
+
 int main(int argc, char** argv)
 {
     char dir[512];
@@ -720,6 +1163,8 @@ int main(int argc, char** argv)
     TestKeyboard();
     TestOtherPads();
     TestMenus();
+    TestTouchMouse();
+    TestTouch();
 
     xPadKill();
 

@@ -9,6 +9,7 @@
 #include "iPadKeyboard.h"
 #include "iPadSettings.h"
 #include "iPadTokens.h"
+#include "iPadTouch.h"
 #include "xPad.h"
 #include "xString.h"
 #include "xstransvc.h"
@@ -120,7 +121,9 @@ namespace
     {
         static const char* const kNames[] = { "push_trigger_text", "push_trigger_text_lower" };
 
-        const bool press = set != NULL && (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0);
+        const bool press =
+            set != NULL && (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0 ||
+                            strcmp(set, "touch") == 0);
 
         for (U32 i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
         {
@@ -672,15 +675,25 @@ namespace
         ICONS_SWITCH,
         ICONS_GAMECUBE,
         ICONS_KEYBOARD,
+        ICONS_TOUCH,
         ICONS_OFF
     };
 
     const char* const kIconNames[] = { "auto",     "xbox",     "playstation", "switch",
-                                       "gamecube", "keyboard", "off" };
+                                       "gamecube", "keyboard", "touch",       "off" };
+
+    // The device last used deliberately, for icons = auto.
+    enum LastDevice
+    {
+        LAST_NONE,
+        LAST_PAD,
+        LAST_KEYBOARD,
+        LAST_TOUCH
+    };
 
     IconChoice sIcons = ICONS_AUTO;
     bool sIconsRead;
-    bool sLastWasKeyboard;
+    LastDevice sLast;
     const char* sActiveSet;
     U32 sFrames;
     bool sDirty = true;
@@ -773,11 +786,21 @@ namespace
         const char* device = iPadHostDeviceName(0);
         bool padPresent = device != NULL && iHostStrCaseCmp(device, "keyboard") != 0;
 
-        if (sLastWasKeyboard || !padPresent)
+        if (sLast == LAST_TOUCH)
+        {
+            return "touch";
+        }
+        if (sLast == LAST_KEYBOARD)
         {
             return "keyboard";
         }
-        return kind != NULL ? kind : "xbox";
+        if (padPresent)
+        {
+            return kind != NULL ? kind : "xbox";
+        }
+        // Nothing used yet, or a pad that has gone: the touch controls when
+        // they are on screen (a phone has no keyboard to name).
+        return iPadTouchShowing() ? "touch" : "keyboard";
     }
 
     const iPadBind* RowBind(const iPadBind* binds, const char* row)
@@ -797,6 +820,36 @@ namespace
     {
         memset(&g, 0, sizeof(g));
         *retailInput = -100;
+
+        if (iHostStrCaseCmp(set, "touch") == 0)
+        {
+            // The on-screen controls (iPadTouch.h): their two sticks and A B
+            // X Y are an Xbox pad's, which is what the disc draws; the other
+            // buttons are drawn with the letter they carry on screen. The
+            // touch buttons press rows, so no binding comes into it.
+            if (slot.input < 0)
+            {
+                return false;
+            }
+
+            const char label = iPadTouchButtonLabel(slot.row);
+            const S32 face = label == 'A' ? PADIN_A :
+                             label == 'B' ? PADIN_B :
+                             label == 'X' ? PADIN_X :
+                             label == 'Y' ? PADIN_Y :
+                                            -1;
+            if (face >= 0)
+            {
+                *retailInput = face;
+                return true;
+            }
+
+            const char text[2] = { label != 0 ? label : '-', '\0' };
+            g.style = label == '>' ? STYLE_ROUND : STYLE_PILL;
+            Colour(g, 70, 70, 75);
+            SetLabel(g, text);
+            return true;
+        }
 
         if (iHostStrCaseCmp(set, "keyboard") == 0)
         {
@@ -1091,26 +1144,33 @@ void iPadPromptsUpdate(const iPadHostState* host)
     ReadIcons();
 
     // The device last used, for icons = auto. Only a deliberate input counts:
-    // a key or a button, not a stick resting off-centre.
+    // a key or a button, not a stick resting off-centre. A finger counts only
+    // on a control (the touch layer reports nothing else), and the mouse the
+    // touch screen makes of a finger is not a mouse (iPadKeyboardSDL.cpp).
     if (host != NULL)
     {
         bool keys = (host->sources & (IPAD_HOST_SOURCE_KEYBOARD | IPAD_HOST_SOURCE_MOUSE)) != 0;
+        bool touch = (host->sources & IPAD_HOST_SOURCE_TOUCH) != 0;
         bool pad = (host->sources & IPAD_HOST_SOURCE_PAD) != 0 &&
                    (host->buttons != 0 || host->stick_x * host->stick_x +
                                                   host->stick_y * host->stick_y >
                                               0.25f);
-        if (keys && !sLastWasKeyboard)
+        if (keys)
         {
-            sLastWasKeyboard = true;
+            sLast = LAST_KEYBOARD;
         }
-        else if (pad && !keys && sLastWasKeyboard)
+        else if (touch)
         {
-            sLastWasKeyboard = false;
+            sLast = LAST_TOUCH;
+        }
+        else if (pad)
+        {
+            sLast = LAST_PAD;
         }
     }
 
     const char* set = ChooseSet();
-    U32 signature = (U32)iPadLayoutActive() | (sLastWasKeyboard ? 2u : 0u) | (U32)sIcons << 2 |
+    U32 signature = (U32)iPadLayoutActive() | (U32)sLast << 1 | (U32)sIcons << 3 |
                     iPadHostBindGeneration() << 8;
     if (set != sActiveSet || signature != sSignature)
     {

@@ -15,6 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __ANDROID__
+#include "android/iAndroidDocument.h"
+#endif
+
 namespace
 {
     SDL_Window* sWindow;
@@ -397,6 +401,12 @@ void iGui::HelpMarker(const char* text)
     }
 }
 
+bool iGui::TouchWords()
+{
+    return ImGui::GetCurrentContext() != NULL &&
+           (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_IsTouchScreen) != 0;
+}
+
 void iGui::Note(const char* fmt, ...)
 {
     char text[1024];
@@ -625,6 +635,13 @@ void iGui::PickSaveFile(const char* tag, const char* start, const FileFilter* fi
     }
 
     const int n = Filters(filters, count);
+#ifdef __ANDROID__
+    // The app's own picker: SDL's drops the suggested name (iAndroidDocument.h).
+    if (iAndroidShowSaveDocument(OnFolderPicked, NULL, start, n > 0 ? sFilters[0].pattern : NULL))
+    {
+        return;
+    }
+#endif
     SDL_ShowSaveFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
                            (start != NULL && start[0] != '\0') ? start : NULL);
 }
@@ -636,6 +653,22 @@ bool iGui::ReadWholeFile(const char* path, std::vector<unsigned char>& out, char
     // with a content:// URI, which only SDL's file streams open.
     out.clear();
     size_t n = 0;
+#ifdef __ANDROID__
+    // A picker's document through the app's own Java (iAndroidDocument.h).
+    if (iAndroidIsDocument(path))
+    {
+        char refused[256] = "";
+        void* doc = iAndroidReadDocument(path, &n, refused, sizeof(refused));
+        if (doc == NULL)
+        {
+            snprintf(why, whySize, "Could not read %s: %s", path, refused);
+            return false;
+        }
+        out.assign((const unsigned char*)doc, (const unsigned char*)doc + n);
+        SDL_free(doc);
+        return true;
+    }
+#endif
     void* data = SDL_LoadFile(path, &n);
     if (data == NULL)
     {
@@ -650,6 +683,19 @@ bool iGui::ReadWholeFile(const char* path, std::vector<unsigned char>& out, char
 bool iGui::WriteWholeFile(const char* path, const unsigned char* data, size_t n, char* why,
                           size_t whySize)
 {
+#ifdef __ANDROID__
+    // A picker's document through the app's own Java (iAndroidDocument.h).
+    if (iAndroidIsDocument(path))
+    {
+        char refused[256] = "";
+        if (!iAndroidWriteDocument(path, data, n, refused, sizeof(refused)))
+        {
+            snprintf(why, whySize, "Could not write %s: %s", path, refused);
+            return false;
+        }
+        return true;
+    }
+#endif
     if (!SDL_SaveFile(path, data, n))
     {
         snprintf(why, whySize, "Could not write %s: %s", path, SDL_GetError());

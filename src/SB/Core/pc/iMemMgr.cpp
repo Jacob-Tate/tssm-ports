@@ -345,6 +345,29 @@ void iMemExit()
     memInited = false;
 }
 
+void iMemCheckLow(const void* p, size_t size, const char* who)
+{
+    if (sizeof(void*) <= 4 || p == NULL)
+    {
+        return;
+    }
+
+    const unsigned long long end = (unsigned long long)(UPtr)p + size;
+    if (end <= 0x100000000ULL)
+    {
+        return;
+    }
+
+    printf("tssm: %s returned %p (%llu bytes), which reaches past 4 GB. The game keeps "
+           "pointers in 32-bit fields, so this one would be truncated; every allocator the "
+           "game sees has to stay below 4 GB (iMemMgr.h).\n",
+           who, p, (unsigned long long)size);
+    iHostPrintCallers("above 4 GB", 16);
+    fflush(stdout);
+    fprintf(stderr, "tssm: %s returned %p, above 4 GB\n", who, p);
+    abort();
+}
+
 void iMemMgrEnableRenderWareMemoryHack(bool hackEnabled)
 {
     sMemMgrEnableRenderWareMemoryHack = hackEnabled;
@@ -363,7 +386,9 @@ void* iMemMgrMalloc(size_t size, unsigned int hint)
         size -= 0x10;
     }
 
-    return memoryManager.Allocate((U32)size, 1);
+    void* mem = memoryManager.Allocate((U32)size, 1);
+    iMemCheckLow(mem, size, "iMemMgrMalloc");
+    return mem;
 }
 
 void* iMemMgrRealloc(void* mem, size_t newSize, unsigned int hint)
@@ -374,7 +399,9 @@ void* iMemMgrRealloc(void* mem, size_t newSize, unsigned int hint)
         newSize -= 0x10;
     }
 
-    return memoryManager.Reallocate(mem, (U32)newSize, 0);
+    void* grown = memoryManager.Reallocate(mem, (U32)newSize, 0);
+    iMemCheckLow(grown, newSize, "iMemMgrRealloc");
+    return grown;
 }
 
 void iMemMgrFree(void* mem)
@@ -384,7 +411,9 @@ void iMemMgrFree(void* mem)
 
 void* iMemMgrCalloc(size_t numObj, size_t sizeObj, unsigned int hint)
 {
-    return memoryManager.Allocate((U32)(numObj * sizeObj), 1);
+    void* mem = memoryManager.Allocate((U32)(numObj * sizeObj), 1);
+    iMemCheckLow(mem, numObj * sizeObj, "iMemMgrCalloc");
+    return mem;
 }
 
 bool iMemMgrCheckCollisionWithMallocHeap(void* mem, U32 size)

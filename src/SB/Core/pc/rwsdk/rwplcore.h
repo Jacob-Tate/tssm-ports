@@ -1070,9 +1070,33 @@ inline RwReal RwIm2DCameraZFromRecip(RwReal recipz)
 #define RwIm2DVertexGetU(vert) ((vert)->u)
 #define RwIm2DVertexGetV(vert) ((vert)->v)
 
-#define RwIm2DVertexSetRealRGBA(vert, r, g, b, a)                                                      MACRO_START                                                                                        {                                                                                                      (vert)->emissiveColor.red = (RwUInt8)r;                                                            (vert)->emissiveColor.green = (RwUInt8)g;                                                          (vert)->emissiveColor.blue = (RwUInt8)b;                                                           (vert)->emissiveColor.alpha = (RwUInt8)a;                                                      }                                                                                                  MACRO_STOP
+// TSSM-ADAPTED (Android): the colour goes in as one 32-bit word. The PC
+// layout above is BGRA, the reverse of the order the game passes the bytes in,
+// and NDK r28c's clang 19 crashes compiling the four reversed byte stores for
+// AArch64 ("Cannot select: store (s16) ... bswap"; xFont.cpp's set_vert).
+// One word store is the same four bytes on every little-endian host.
+static inline void RwIm2DVertexPCSetRGBA(struct RwIm2DVertexRGBA* c, RwUInt8 r, RwUInt8 g,
+                                         RwUInt8 b, RwUInt8 a)
+{
+    RwUInt32 word = (RwUInt32)b | ((RwUInt32)g << 8) | ((RwUInt32)r << 16) | ((RwUInt32)a << 24);
+    __builtin_memcpy(c, &word, sizeof(word));
+}
 
-#define RwIm2DVertexSetIntRGBA(vert, r, g, b, a)                                                       MACRO_START                                                                                        {                                                                                                      (vert)->emissiveColor.red = r;                                                                     (vert)->emissiveColor.green = g;                                                                   (vert)->emissiveColor.blue = b;                                                                    (vert)->emissiveColor.alpha = a;                                                               }                                                                                                  MACRO_STOP
+#define RwIm2DVertexSetRealRGBA(vert, r, g, b, a)                                                  \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwIm2DVertexPCSetRGBA(&(vert)->emissiveColor, (RwUInt8)(r), (RwUInt8)(g), (RwUInt8)(b),    \
+                              (RwUInt8)(a));                                                       \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm2DVertexSetIntRGBA(vert, r, g, b, a)                                                   \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwIm2DVertexPCSetRGBA(&(vert)->emissiveColor, (RwUInt8)(r), (RwUInt8)(g), (RwUInt8)(b),    \
+                              (RwUInt8)(a));                                                       \
+    }                                                                                              \
+    MACRO_STOP
 
 #define RwIm2DVertexGetRed(vert) ((vert)->emissiveColor.red)
 #define RwIm2DVertexGetGreen(vert) ((vert)->emissiveColor.green)

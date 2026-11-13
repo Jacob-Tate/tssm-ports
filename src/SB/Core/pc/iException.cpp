@@ -1,5 +1,8 @@
 #include "iException.h"
 #include "iHost.h"
+#ifdef __ANDROID__
+#include "android/iAndroid.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,5 +19,9 @@ void iExceptionMemCrash(const char* loc, U32 size, const char* arg3)
     printf("tssm: FATAL -- %s\n", message);
     fflush(stdout);
     iHostErrorBox(TSSM_GAME_TITLE, message);
+#ifdef __ANDROID__
+    iAndroidEndProcess(-5);
+#else
     exit(-5);
+#endif
 }

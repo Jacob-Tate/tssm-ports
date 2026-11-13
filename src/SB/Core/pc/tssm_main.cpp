@@ -840,6 +840,14 @@ namespace
     // formats.
     char sSignalStack[65536];
 
+#ifdef __ANDROID__
+    // The game thread's own. An alternate signal stack is per thread, and on
+    // Android the thread that ran InstallDiagnostics (the UI thread, inside
+    // System.loadLibrary) is not the one the game runs on; sharing one buffer
+    // between two threads that can fault at once would be a second bug.
+    char sGameSignalStack[65536];
+#endif
+
     // crash.log (iLog.h): the fault and where the full report is. The
     // backtrace itself goes to stdout, and so to the log, through
     // iHostPrintCallers.
@@ -982,6 +990,25 @@ namespace
         }
     }
 }
+
+#ifdef __ANDROID__
+void iAndroidAdoptGameThread()
+{
+    // What InstallDiagnostics did for the thread it ran on, done again for
+    // this one. The handlers themselves are process-wide and stay installed.
+    sMainThread = pthread_self();
+
+    stack_t altstack;
+    memset(&altstack, 0, sizeof(altstack));
+    altstack.ss_sp = sGameSignalStack;
+    altstack.ss_size = sizeof(sGameSignalStack);
+    if (sigaltstack(&altstack, NULL) != 0)
+    {
+        printf("tssm: the game thread has no signal stack; a stack overflow will not be "
+               "reported\n");
+    }
+}
+#endif
 
 #endif
 

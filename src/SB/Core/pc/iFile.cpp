@@ -13,6 +13,10 @@
 
 #include <rwcore.h>
 
+#ifdef __ANDROID__
+#include "android/iAndroid.h"
+#endif
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -792,7 +796,11 @@ void iFileMissingPackage(U32 sid, S32 options, const char* filename)
     }
 
     iHostErrorBox(TSSM_GAME_TITLE, message);
+#ifdef __ANDROID__
+    iAndroidEndProcess(1);
+#else
     exit(1);
+#endif
 }
 
 // A file that is not there, said out loud.

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:installLocation="auto">
+
+    <!-- GLES 2.0 is the floor librw's GLES path falls back to; it asks for
+         3.1 first. -->
+    <uses-feature android:glEsVersion="0x00020000" />
+
+    <!-- None required: a device without a gamepad still installs, and one
+         with a gamepad gets it through SDL. -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.gamepad"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <!-- Controller rumble (input.rumble). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Only for using a game folder where it is instead of copying it in
+         (ImportActivity). Copying needs neither: the copy lives in the app's
+         own directory under Android/data. MANAGE_EXTERNAL_STORAGE is All
+         files access on Android 11 and later; the older permission covers
+         Android 10 and below. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <!-- The co-op app (its own package, the same signing key) plays on this
+         app's saves through SaveShareProvider. It declares this permission
+         too, so either app can be installed first. -->
+    <permission
+        android:name="io.github.tssmport.permission.SHARED_SAVES"
+        android:protectionLevel="signature" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
+        android:theme="@style/AppTheme"
+        android:enableOnBackInvokedCallback="false"
+        android:hardwareAccelerated="true"
+        android:isGame="true">
+
+        <!-- The launcher entry: the import screen when the game's files are
+             not there yet, the game otherwise. -->
+        <activity
+            android:name=".LauncherActivity"
+            android:label="@string/app_name"
+            android:theme="@style/LauncherTheme"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Copies the game's files in from a folder the player picks, or
+             remembers that folder to use where it is. -->
+        <activity
+            android:name=".ImportActivity"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode" />
+
+        <!-- The game. configChanges lists every change the activity handles
+             itself instead of being recreated: a restart destroys the EGL
+             context, and librw cannot rebuild its rasters and shaders. SDL
+             ends the process instead of recreating it
+             (SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY is unset), so a change
+             missing from this list closes the game without saving. density
+             is folding or unfolding, the Display size setting, DeX and an
+             external display; colorMode an HDR or wide-gamut switch;
+             touchscreen, mcc and mnc a stylus dock or a SIM change. -->
+        <activity
+            android:name=".GameActivity"
+            android:label="@string/app_name"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="sensorLandscape"
+            android:exported="true"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|density|colorMode|touchscreen|mcc|mnc|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true">
+
+            <!-- So a controller plugged in over USB reaches this activity. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+        </activity>
+
+        <!-- The saves, settings and one-copy lock, for the co-op app only.
+             call() is not covered by android:permission; the provider checks
+             every caller's signature itself. -->
+        <provider
+            android:name=".SaveShareProvider"
+            android:authorities="io.github.tssmport.game.saves"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:permission="io.github.tssmport.permission.SHARED_SAVES" />
+    </application>
+
+</manifest>

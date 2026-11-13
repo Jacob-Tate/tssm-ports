@@ -13,9 +13,20 @@
 
 namespace
 {
-    iPadSettings sSettings = {
-        IPAD_KEYBOARD_ALWAYS, IPAD_CURVE_XBOX, 0.30f, -1.0f, 1.0f, 0, 0, 1, 1.0f, 1.0f, IPAD_TEST_OFF,
-    };
+    iPadSettings sSettings = { IPAD_KEYBOARD_ALWAYS,
+                               IPAD_CURVE_XBOX,
+                               0.30f,
+                               -1.0f,
+                               1.0f,
+                               0,
+                               0,
+                               1,
+                               1.0f,
+                               1.0f,
+                               IPAD_TEST_OFF,
+                               0,
+                               1.0f,
+                               1.0f };
 
     F32 clampf(F32 v, F32 lo, F32 hi)
     {
@@ -80,6 +91,10 @@ void iPadSettingsLoad()
     s.mouse_sensitivity = clampf(iConfigGetFloat("input.mouse_sensitivity", 1.0f), 0.05f, 20.0f);
 
     s.rumble = clampf(iConfigGetFloat("input.rumble", 100.0f), 0.0f, 100.0f) * 0.01f;
+
+    s.touch_drag_look = iConfigGetBool("input.touch_drag_look", FALSE);
+    s.touch_scale = clampf(iConfigGetFloat("input.touch_scale", 1.0f), 0.5f, 1.2f);
+    s.touch_opacity = clampf(iConfigGetFloat("input.touch_opacity", 100.0f), 10.0f, 100.0f) * 0.01f;
 
     // TSSM_INPUT_TEST beats the file, so a test run needs no config edit.
     const char* test = getenv("TSSM_INPUT_TEST");

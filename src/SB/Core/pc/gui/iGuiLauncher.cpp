@@ -164,6 +164,17 @@ void iGuiLauncherRun()
     const char* when = (forced != NULL && forced[0] != '\0') ? forced :
                                                                iConfigGetString("gui.launcher", "auto");
 
+#ifdef __ANDROID__
+    // The app's import screen (android/.../ImportActivity.java) has found the
+    // game's files before the game starts, and SDL's folder picker hands back
+    // a content:// URI the game cannot open. Missing files are iSystem's
+    // error box here; only "always" shows the launcher, for its settings.
+    if (SDL_strcasecmp(when, "always") != 0)
+    {
+        return;
+    }
+#endif
+
     char why[512];
     const bool ready = iGui::CheckAssetFolder(EffectiveRoot(), why, sizeof(why));
 

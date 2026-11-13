@@ -23,6 +23,7 @@
 #include "iConfigTable.h"
 #include "iPadControls.h"
 #include "iPadHost.h"
+#include "iPadTouch.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -663,6 +664,7 @@ namespace
             { "switch", "Switch" },
             { "gamecube", "GameCube" },
             { "keyboard", "Keyboard" },
+            { "touch", "Touch controls" },
             { "off", "The disc's own" } },
           false },
         { "keyboard",
@@ -683,14 +685,21 @@ namespace
         { "mouse_camera", "Mouse turns the camera", {}, false },
         { "mouse_sensitivity", "Mouse camera speed", {}, false },
         { "rumble", "Rumble strength", {}, false },
-        { "touch_controls",
-          "Touch controls",
-          { { "auto", "Automatic (Android)" }, { "on", "On" }, { "off", "Off" } },
-          true },
         { "test",
           "Input test",
           { { "off", "Off" }, { "log", "Log what the game reads" }, { "overlay", "Log and draw" } },
           false },
+    };
+
+    // The on-screen controls (iPadTouch.h), in a section of their own.
+    const InputSetting kTouchSettings[] = {
+        { "touch_controls",
+          "Touch controls",
+          { { "auto", "Automatic (Android)" }, { "on", "On" }, { "off", "Off" } },
+          true },
+        { "touch_drag_look", "Drag on the right half turns the camera", {}, false },
+        { "touch_scale", "Size", {}, false },
+        { "touch_opacity", "Opacity", {}, false },
     };
 
     const char* WordLabel(const InputSetting& s, const char* value)
@@ -731,7 +740,7 @@ namespace
         const bool isInt = def->kind == ICONFIG_INT;
         const char* format = isInt ? "%d" : "%.2f";
         if (strcmp(s.name, "deadzone") == 0 || strcmp(s.name, "trigger_threshold") == 0 ||
-            strcmp(s.name, "rumble") == 0)
+            strcmp(s.name, "rumble") == 0 || strcmp(s.name, "touch_opacity") == 0)
         {
             format = "%d%%";
         }
@@ -905,8 +914,11 @@ namespace
         SDL_JoystickID* ids = SDL_GetGamepads(&n);
         if (ids == NULL || n == 0)
         {
-            ImGui::TextUnformatted("No controller connected: the keyboard and mouse play as "
-                                   "controller 1.");
+            ImGui::TextUnformatted(iPadTouchEnabled() ?
+                                       "No controller connected: the touch controls (and a "
+                                       "keyboard and mouse) play as controller 1." :
+                                       "No controller connected: the keyboard and mouse play as "
+                                       "controller 1.");
         }
         else
         {
@@ -926,12 +938,55 @@ namespace
                             live.layout != NULL ? live.layout : "?",
                             live.icons != NULL ? live.icons : "the disc's own");
     }
+
+    // A table of [input] settings, one row each.
+    void DrawSettingsTable(const char* id, const InputSetting* list, size_t count)
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp))
+        {
+            return;
+        }
+
+        // The longest label and its "(?)".
+        float labels = 0.0f;
+        for (size_t i = 0; i < count; i++)
+        {
+            const float w = ImGui::CalcTextSize(list[i].label).x;
+            labels = w > labels ? w : labels;
+        }
+        labels += ImGui::CalcTextSize(" (?)").x + style.ItemSpacing.x + style.CellPadding.x * 2.0f;
+        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, labels);
+        ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
+        for (size_t i = 0; i < count; i++)
+        {
+            DrawSetting(list[i]);
+        }
+        ImGui::EndTable();
+    }
+
+    // The touch controls' settings, and where everything is on screen.
+    void DrawTouch()
+    {
+        ImGui::SeparatorText("Touch controls");
+        iGui::Note("Left stick: anywhere on the left half. Right stick (the camera): bottom right, "
+                   "left of A B X Y. Each finger stays with the control it first touched until it "
+                   "lifts. Three fingers at once open this window.");
+        DrawSettingsTable("touch_settings", kTouchSettings,
+                          sizeof(kTouchSettings) / sizeof(kTouchSettings[0]));
+    }
 } // namespace
 
 void iGui::DrawControls()
 {
     ImGui::SeparatorText("Controllers");
     DrawDevices();
+
+    // On a phone the touch controls are what is being played with: first.
+    if (iPadTouchEnabled())
+    {
+        DrawTouch();
+    }
 
     ImGui::SeparatorText("Buttons");
     Note("Click a binding to change it. * marks one changed from the default; ! an input that "
@@ -1028,24 +1083,13 @@ void iGui::DrawControls()
          "lists what every button does.");
 
     ImGui::SeparatorText("Settings");
-    if (ImGui::BeginTable("input_settings", 2, ImGuiTableFlags_SizingStretchProp))
+    DrawSettingsTable("input_settings", kSettings, sizeof(kSettings) / sizeof(kSettings[0]));
+
+    if (!iPadTouchEnabled())
     {
-        // The longest label and its "(?)".
-        float labels = 0.0f;
-        for (size_t i = 0; i < sizeof(kSettings) / sizeof(kSettings[0]); i++)
-        {
-            const float w = ImGui::CalcTextSize(kSettings[i].label).x;
-            labels = w > labels ? w : labels;
-        }
-        labels += ImGui::CalcTextSize(" (?)").x + style.ItemSpacing.x + style.CellPadding.x * 2.0f;
-        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, labels);
-        ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
-        for (size_t i = 0; i < sizeof(kSettings) / sizeof(kSettings[0]); i++)
-        {
-            DrawSetting(kSettings[i]);
-        }
-        ImGui::EndTable();
+        DrawTouch();
     }
+
     if (sSettingError[0] != '\0')
     {
         ImGui::TextColored(ImVec4(1.0f, 0.47f, 0.43f, 1.0f), "%s", sSettingError);

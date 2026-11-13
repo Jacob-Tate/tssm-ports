@@ -621,6 +621,19 @@ static void ClaimSaveFolder()
         return;
     }
 
+#ifdef __ANDROID__
+    // The system runs one copy of an app, so the holder is the co-op app,
+    // which plays on these saves through SaveShareProvider. There is no
+    // window of it to bring forward, and Task Manager means nothing here.
+    printf("tssm: the co-op app (process %u) is using the saves in %s; closing\n", (unsigned)holder,
+           iSaveStoreRoot());
+    fflush(stdout);
+    iHostErrorBox(TSSM_GAME_TITLE,
+                  "The co-op version of the game is open and is using your saves.\n\n"
+                  "Close it (swipe it away in Recent apps), then start the game again.");
+    exit(0);
+#endif
+
     const S32 raised = iHostRaiseProcessWindow(holder);
     printf("tssm: the game is already running (process %u) with the saves in %s; this copy is "
            "closing%s\n",
