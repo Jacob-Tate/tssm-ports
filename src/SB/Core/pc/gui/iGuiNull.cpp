@@ -45,3 +45,7 @@ void iGuiSetAudioListener(iGuiAudioFn fn)
            iConfigGetInt("audio.movie_volume", 100) / 100.0f);
     }
 }
+
+void iGuiCoopTest(const char*)
+{
+}

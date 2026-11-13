@@ -1,7 +1,7 @@
-# The SpongeBob SquarePants Movie: Nintendo Switch port
+# The SpongeBob SquarePants Movie: Nintendo Switch port with co-op
 
 *The SpongeBob SquarePants Movie* game as a Nintendo Switch homebrew program
-(`tssm.nro`), built from the matching decompilation of the GameCube game
+(`tssm-coop.nro`), built from the matching decompilation of the GameCube game
 ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork)) and the PC port (the `pc` branch). It is the PC port's code
 built with devkitPro for the Switch: the same game code and platform layer, drawing
 through OpenGL on the console's Mesa driver.
@@ -11,6 +11,12 @@ through OpenGL on the console's Mesa driver.
 - It has been played on one console so far; `docs/SWITCH.md` lists what is still
   unchecked.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
+
+**This branch adds co-op for two players:** online over the internet (one player hosts and
+forwards one UDP port on their router), on the same home network (games are found
+automatically and joined with a short code), and, on Windows, two copies on one PC. Co-op is
+host-authoritative: the host's game runs the world for both players. The players' guides
+are `docs/HOSTING.txt`, `docs/JOINING.txt` and `docs/LAN.txt`.
 
 This repository and its branches
 --------------------------------
@@ -24,18 +30,18 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 |---|---|
 | `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
 | `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
-| `switch` (this one) | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
+| `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
 | `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
 | `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
 | `coop-android` | The co-op app for Android, a second app beside the normal one. Built on `android`. |
-| `coop-switch` | The co-op Switch program, `tssm-coop.nro`. Built on `switch`. |
+| `coop-switch` (this one) | The co-op Switch program, `tssm-coop.nro`. Built on `switch`. |
 
 Every branch builds from source; you bring your own game files.
 
 You need your own copy of the game
 ----------------------------------
 
-This repository contains **no game data**, and neither does `tssm.nro`. It reads the files
+This repository contains **no game data**, and neither does `tssm-coop.nro`. It reads the files
 of the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own copy of
 that disc and its files copied off it (about 1 GB). Never put those files in the
 repository.
@@ -50,7 +56,7 @@ with `DEVKITPRO` set on Linux or macOS.
    `pacman -S switch-dev switch-cmake switch-mesa switch-libdrm_nouveau switch-glad switch-pkg-config`
 2. The source and its submodules:
 
-       git clone --branch switch <this repository's address> tssm
+       git clone --branch coop-switch <this repository's address> tssm
        cd tssm
        git submodule update --init --depth 1
 
@@ -67,18 +73,20 @@ with `DEVKITPRO` set on Linux or macOS.
 
        sh tools/switch/build_port.sh <build folder> <prefix>
 
-   This makes `<build folder>/tssm.nro` (and `tssm.elf` beside it, which crash reports
-   refer to).
+   On this branch that makes `<build folder>/tssm-coop.nro`, the co-op program (and
+   `tssm-coop.elf` beside it, which crash reports refer to).
 
 `docs/SWITCH.md` explains each step and which versions were tested.
 
 Playing
 -------
 
-1. Copy `tssm.nro` to `/switch/tssm/tssm.nro` on the SD card, and your Xbox game files to
-   `/switch/tssm/assets/` (the folder with `boot.HIP`, `FMV/` and the level folders).
+1. Set up the normal game first (`tssm.nro` from the `switch` branch, with your Xbox game
+   files in `/switch/tssm/assets/`). Then copy `tssm-coop.nro` to `/switch/tssm-coop.nro`,
+   beside it. The co-op program uses the same folder: the same game files, saves and
+   settings.
 2. Start the Homebrew Menu **with full memory**: hold R while you start any game from the
-   HOME menu, then pick TSSM. (From the Album it gets too little memory, and says so.)
+   HOME menu, then pick TSSM co-op (port). (From the Album it gets too little memory, and says so.)
 3. Settings, saves and the log are written into `/switch/tssm/`.
 
 More documentation:
@@ -91,6 +99,8 @@ More documentation:
 | `docs/MODDING.md` | mods |
 | `docs/ICON.md` | using your own picture as the program's icon |
 | `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |
+| `docs/HOSTING.txt`, `docs/JOINING.txt`, `docs/LAN.txt` | co-op: the players' guides |
+| `docs/MULTIPLAYER.md` | co-op: the design and the network protocol |
 
 The GameCube build still works here
 -----------------------------------

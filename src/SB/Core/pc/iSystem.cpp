@@ -1,6 +1,8 @@
 #include "iSystem.h"
 #include "iAsync.h"
 #include "iBoot.h"
+#include "iCoop.h"
+#include "iCoopLocal.h"
 #include "iConfig.h"
 #include "iFile.h"
 #include "iFMV.h"
@@ -219,6 +221,12 @@ static void ApplyDisplayRateConfig()
 static void ApplyConfig()
 {
     sWindowMode = WindowModeFromConfig();
+    if (iCoopLocalGetRole() != ICOOP_LOCAL_OFF)
+    {
+        // Local co-op: both copies in ordinary windows, whatever video.mode
+        // says (two full-screen copies would cover each other).
+        sWindowMode = iWINDOW_WINDOWED;
+    }
 
     // The render size, before the window opens at it: the height as set, and a
     // width of the aspect's shape (iScreen.h). Wide takes the display's shape,
@@ -287,6 +295,7 @@ static void ApplyConfig()
 
     iBootSetScene(iConfigGetString("game.boot", ""));
     iBootSetIntroMovies(iConfigGetBool("game.intro_movies", TRUE));
+    iCoopLocalApplyBoot();
 
     // Where saves go, before xSaveGameInit resolves the root; empty is the
     // per-user data folder (isavegame.cpp).
@@ -684,6 +693,10 @@ void iSystemInit(U32 options)
     // too (iLog.h), the last run's kept as last_run.prev.log.
     iLogStart();
 
+    // Local co-op (iCoopLocal.h): which copy this is, before any setting is
+    // applied; Player 2 reads Player 1's session line here, at most 10 s.
+    iCoopLocalInit();
+
     // The launcher, when [gui] launcher asks for it or the game's files are not
     // where the settings say: before anything takes a setting it can change.
     iGuiLauncherRun();
@@ -702,6 +715,12 @@ void iSystemInit(U32 options)
     // and before the window opens or the saves are looked at (iSGStartup).
     ClaimSaveFolder();
     iSGSetNoGamesHook(iSaveTextNoGames);
+
+    // Online co-op (docs/MULTIPLAYER.md): [coop], TSSM_COOP_* and --host /
+    // --join. Off by default; when off nothing starts. After the asset and save
+    // folders are settled, because the game-files hash reads the one and
+    // caches into the other.
+    iCoopInit();
     iTimeInit();
     xPadInit();
     printf("tssm: platform layer up, input backend: %s\n", iPadHostName());
@@ -736,6 +755,7 @@ void iSystemInitGraphics()
 
 void iSystemExit()
 {
+    iCoopShutdown();
     iGuiShutdown();
     xDebugExit();
     xMathExit();

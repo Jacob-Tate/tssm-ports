@@ -19,12 +19,15 @@
 //   /switch/tssm/saves/        saves (isavegame: <user data>/tssm/saves)
 //   /switch/tssm/mods/         mods
 //   /switch/tssm/last_run.log  the log; crash.log beside it
+//   /switch/tssm/coop-log/     the co-op program's log and crash.log
+//                              (switch/iSwitch.cpp)
 // Unprefixed absolute paths ("/switch/...") are used throughout, not
 // "sdmc:/...": libnx resolves them against the SD card, which it makes the
 // default device, and iFile's path walker knows "/" as a root but not
 // "sdmc:".
 
 #include "iAudioSDL.h"
+#include "iCoop.h"
 #include "iLog.h"
 #include "iTime.h"
 #include "switch/iSwitch.h"
@@ -123,6 +126,60 @@ void iHostRelease(void* p, U32)
 // this). The link wraps pthread_create (CMakeLists.txt, -Wl,--wrap) so every
 // thread made without an explicit stack of at least this size gets this size.
 // The main thread's stack is hbloader's (1 MB), as on Windows.
+//
+// std::thread is co-op's alone here (its I/O thread, iCoop.cpp). The link
+// also wraps std::thread's start (CMakeLists.txt) to mark the pthread_create
+// it makes, and that thread moves itself off the game thread's core: a join's
+// key derivation and the first game-files hash would otherwise run on the
+// game's own core.
+
+namespace
+{
+    thread_local bool tStdThread;
+
+    struct Moved
+    {
+        void* (*start)(void*);
+        void* arg;
+    };
+
+    void* StartMoved(void* p)
+    {
+        const Moved m = *(Moved*)p;
+        free(p);
+        iSwitchMoveOffGameCore("co-op's network thread");
+        return m.start(m.arg);
+    }
+
+    struct StdThreadMark
+    {
+        StdThreadMark()
+        {
+            tStdThread = true;
+        }
+        ~StdThreadMark()
+        {
+            tStdThread = false;
+        }
+    };
+} // namespace
+
+// std::thread::_M_start_thread(unique_ptr<_State>, void (*)()): `this`, the
+// state (passed as the address of the caller's temporary, the ABI's rule for
+// a class with a destructor) and the dependency function, handed on as they
+// came.
+extern "C" void
+__real__ZNSt6thread15_M_start_threadESt10unique_ptrINS_6_StateESt14default_deleteIS1_EEPFvvE(
+    void* self, void* state, void (*depend)());
+
+extern "C" void
+__wrap__ZNSt6thread15_M_start_threadESt10unique_ptrINS_6_StateESt14default_deleteIS1_EEPFvvE(
+    void* self, void* state, void (*depend)())
+{
+    StdThreadMark mark;
+    __real__ZNSt6thread15_M_start_threadESt10unique_ptrINS_6_StateESt14default_deleteIS1_EEPFvvE(
+        self, state, depend);
+}
 
 extern "C" int __real_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
                                      void* (*start)(void*), void* arg);
@@ -131,6 +188,18 @@ extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* at
                                      void* (*start)(void*), void* arg)
 {
     const size_t kStack = 2u * 1024u * 1024u;
+
+    if (tStdThread)
+    {
+        Moved* m = (Moved*)malloc(sizeof(Moved));
+        if (m != NULL)
+        {
+            m->start = start;
+            m->arg = arg;
+            start = StartMoved;
+            arg = m;
+        }
+    }
 
     pthread_attr_t local;
     if (attr == NULL)
@@ -142,7 +211,12 @@ extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* at
         size_t have = 0;
         if (pthread_attr_getstacksize(attr, &have) == 0 && have >= kStack)
         {
-            return __real_pthread_create(thread, attr, start, arg);
+            const int rc = __real_pthread_create(thread, attr, start, arg);
+            if (rc != 0 && start == StartMoved)
+            {
+                free(arg);
+            }
+            return rc;
         }
         local = *attr;
     }
@@ -152,6 +226,10 @@ extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* at
     if (attr == NULL)
     {
         pthread_attr_destroy(&local);
+    }
+    if (rc != 0 && start == StartMoved)
+    {
+        free(arg);
     }
     return rc;
 }
@@ -497,6 +575,11 @@ void iSwitchGameBack()
     // As Android's foreground: every audio device closed and opened again, so
     // whatever the system did to them while the game was away cannot matter.
     iAudioSDLRestart(iAUDIOSDL_FOREGROUND);
+}
+
+void iSwitchGameStopCoop()
+{
+    iCoopShutdown();
 }
 
 const char* iSwitchCrashLogPath()

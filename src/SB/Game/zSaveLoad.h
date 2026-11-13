@@ -78,6 +78,11 @@ inline S32 zSaveLoadGetAutoSaveCard()
 S32 format(S32 num, S32 mode);
 S32 CardtoTgt(S32 card);
 S32 zSaveLoad_CardCount();
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the next save screen saves straight into slot `game` of the
+// first folder (TSSM_TEST_SAVE, iTestEvents.cpp).
+void zSaveLoad_PcTestSaveByHand(S32 game);
+#endif
 S32 zSaveLoad_CardPrompt(S32 cardNumber);
 S32 zSaveLoad_CardPromptFormat(S32 mode);
 S32 zSaveLoad_CardPromptSpace(S32 mode);

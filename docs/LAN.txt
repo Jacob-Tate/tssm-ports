@@ -1,0 +1,192 @@
+CO-OP ON YOUR HOME NETWORK
+The SpongeBob SquarePants Movie, PC port: co-op for two players
+
+Two devices on the same Wi-Fi (or the same home network) find each other's
+games in a list. One player hosts with one press, the other picks the game
+and types the short code shown on the host's screen. No address to type, no
+router to change.
+
+Co-op is for two players. A third device sees the game as "has a player".
+
+Over the internet (the other player is somewhere else), use HOSTING.txt and
+JOINING.txt instead.
+
+
+WHAT YOU NEED
+-------------
+1. The co-op version of the game on both devices (on a phone or a Switch
+   too, co-op is its own app), and the same co-op version: the bottom of the
+   Co-op tab says "Co-op version:" and eight letters and digits, and they
+   must be the same.
+2. Each player's own game files, the same release and region, and the same
+   mods turned on (or none).
+3. Both devices on the same Wi-Fi or home network. Not a guest network: those
+   usually keep devices apart.
+
+
+HOSTING
+-------
+Load your save (or start a new game) and play in the level you want to play
+together. Open the overlay with F1 (on a controller: hold Back and press
+Start) and go to the Co-op tab.
+
+Under "Host a game", press "Host on this network".
+
+  What you see: "Status: Waiting for a player", "Join code:" and the code in
+  large letters (three groups of four, for example K7QX-M2PD-9TRW), and the
+  line "Others on this network see NAME (Windows) in their list."
+
+Close the overlay and play. Until someone joins, the code also stays in the
+bottom right corner of the screen, so the other player can read it off the
+TV. (Options at the bottom of the Co-op tab: "When hosting on this network,
+show the join code on screen".)
+
+The first time, Windows may ask about the firewall (a "Windows Security"
+window naming tssm.exe). Tick "Private networks" and press "Allow access".
+Please don't press Cancel: Windows then blocks the game. The game never
+changes your firewall by itself.
+
+A new code is made every time you host.
+
+
+JOINING
+-------
+Open the overlay (F1, or Back+Start) and go to the Co-op tab. Type your name
+if you like. Under "Join a game", the list "Games on this network" fills by
+itself within a few seconds (the first time, the game checks its own files
+first: "checking your game files...").
+
+  What you see: a row for each game, for example
+  "Den PC   Windows   No Cheese!   waiting   Ready".
+
+Pick the game (click it or tap it) and press "Join". On a controller, move
+to it and press A, then Start. Then type the join code from the host's
+screen:
+
+- With a keyboard: just type it.
+- With a controller or a touch screen: the code pad opens, 32 keys of
+  letters and digits. On a controller: the d-pad moves, A types, B deletes
+  (on an empty code B closes the pad), Y opens the keyboard, Start joins.
+  "Code pad" opens it with a mouse too.
+
+Capitals, spaces and dashes do not matter, and the letters O, I and L count
+as the digits 0 and 1, so a code read aloud works however it is typed.
+
+  What you see: "Connecting...", "Checking the password...", then
+  "Connected" in green.
+
+If the code was wrong, "Try again" opens the code entry again, empty: type
+the code once more (each wrong try counts, and too many lock you out for a
+while).
+
+The list searches for a minute. After that it says so; "Search again"
+looks once more. A code entry you opened keeps working meanwhile.
+
+On a PC, Windows may ask about the firewall the first time the list searches
+(a "Windows Security" window naming tssm.exe). Tick "Private networks" and
+press "Allow access"; without it the list stays empty.
+
+
+WHAT THE LIST SAYS
+------------------
+Each row: the host's name, the device (Windows, Android, Switch, or "other
+device"), the host's level ("not in a level" on the title screen or in a
+movie), "waiting" or "has a player", and whether you can join:
+
+"Ready"
+    Same co-op version and game files: join.
+"Different version"
+    Pick it to see both codes: "yours ab12cd34, theirs 9f8e7d6c". Both need
+    the same co-op version.
+"Different game files"
+    Both need the same release and region, and the same mods (or none). The
+    row shows both game-files codes.
+"Full"
+    The game already has two players.
+
+Picking a game that is not Ready still lets you try; the host's game then
+says why it refuses.
+
+
+WHEN THE LIST STAYS EMPTY
+-------------------------
+After a few seconds the tab shows a checklist:
+
+- both devices on the same Wi-Fi or network (not a guest network);
+- the host is hosting, with "Visible on this network" ticked;
+- any VPN is off: on a phone, open the VPN app and pause or disconnect it
+  (some VPN apps keep the phone from finding games or being found even
+  while the home Wi-Fi works);
+- a PC host lets the game through Windows Firewall on private networks;
+- a phone or Switch has Wi-Fi on.
+
+"Search again" asks once more. If it still stays empty, join by address: the
+host's Co-op tab shows "On this network: 192.168.0.23:2171" (yours will
+differ). On the joining device, "Join by address" (open beside the
+checklist), type that address and the code, and press "Join".
+
+A PC that reaches the network through a virtual switch (Hyper-V's
+"external switch", which some virtual machine programs set up) is not
+counted as on a home network: its tab says "No home network found" and other
+devices do not see it. Join it, or from it, by address.
+
+Some routers keep Wi-Fi devices apart ("AP isolation", "client isolation").
+Then no game can reach another; use the main Wi-Fi, not a guest one. As a
+last resort, a phone's hotspot that both devices join works too, and uses no
+mobile data for the game.
+
+
+PRIVACY
+-------
+While you host with "Visible on this network" ticked, other devices on the
+same Wi-Fi see your co-op name, your device and your level. Nothing is shown
+to the internet. Untick "Visible on this network" to leave the list: others
+can still join with your address and the code. "Host over the internet"
+starts hosting with it unticked.
+
+Joining still needs the code: being in the list lets nobody in.
+
+
+ON A PHONE (ANDROID)
+--------------------
+The co-op app is "TSSM co-op", a second app beside SpongeBob Movie Port. It
+plays on that app's saves, settings and game files, so it needs
+SpongeBob Movie Port 0.9, build 14 or newer, from the same place as the
+co-op app (both must be built with the same key).
+
+- Only one of the two can be open at a time: they share the saves. Quit one
+  from its menu (or swipe it away in Recent apps) before you open the other.
+- The overlay opens with three fingers on the screen at once (on a
+  controller: hold Back and press Start). Then the Co-op tab, as above.
+- Hosting on the home network needs Wi-Fi. On mobile data the tab says so
+  and "Host on this network" is off; joining by address still works.
+
+
+ON A SWITCH
+-----------
+The co-op program is tssm-coop.nro, beside tssm.nro in /switch on the SD
+card. It uses the same folder, /switch/tssm (saves, settings and game files).
+Only one of the two can be open at a time.
+
+- The overlay opens when you hold - and press +. Then the Co-op tab, as
+  above. The code pad works with the stick, the d-pad and touch.
+- If the tab says Wi-Fi is off, turn it on in System Settings (Airplane Mode,
+  called Flight Mode in some regions, turns it off).
+
+Keeping the console safe on Wi-Fi. Playing co-op on a Switch with custom
+firmware means that Switch is on Wi-Fi. A console with custom firmware that
+connects to Nintendo can be banned from Nintendo's online service. The game
+itself never contacts Nintendo, but the console's system software does if it
+can. So:
+
+- Run the game from an emuMMC (the custom-firmware system on the SD card),
+  and keep your normal system (sysMMC) for Nintendo's online services. Never
+  sign into a Nintendo Account or the eShop on the emuMMC.
+- On the emuMMC, block Nintendo's servers: Atmosphere's DNS blocking (its
+  hosts files under /atmosphere/hosts/) or a DNS-blocking service set in the
+  emuMMC's Internet settings. Follow your custom-firmware guide's "blocking
+  Nintendo's servers" page, and check it works before turning Wi-Fi on.
+- Airplane Mode alone is not enough: co-op needs Wi-Fi, and a Switch can turn
+  Wi-Fi back on inside Airplane Mode, and then it reaches the internet again.
+- If you are not sure your setup is protected, play co-op on the PC and the
+  phone only.

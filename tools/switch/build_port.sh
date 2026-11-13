@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds the port for Nintendo Switch homebrew: <build dir>/tssm.nro (and
-# tssm.elf beside it, for addr2line on crash reports). docs/SWITCH.md.
+# Builds the co-op program for Nintendo Switch homebrew: <build dir>/tssm-coop.nro
+# (and tssm-coop.elf beside it, for addr2line on crash reports). docs/SWITCH.md.
 #
 #   build_port.sh <build dir> <prefix> [extra cmake arguments...]
 #
@@ -45,4 +45,4 @@ fi
 
 JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 cmake --build "$BUILD" -j"$JOBS"
-ls -l "$BUILD/tssm.nro"
+ls -l "$BUILD"/*.nro

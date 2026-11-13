@@ -25,6 +25,9 @@
 #include "xScene.h"
 #include "zGoo.h"
 #include "zSurface.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 U32 g_hash_tikianim[2] = { 0, 0 };
 char* g_strz_tikianim[2] = { "Unknown", "Idle01" };
@@ -759,6 +762,17 @@ void zNMETiki::Damage(en_npcdmg damtype, const xBase* who, const xVec3* vec_hit,
         }
     }
 
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.5, 6.1): as zNMECommon::Damage, once
+    // this player's own power-up level has passed the stone check above (the
+    // host checks it again with the level the claim carries).
+    if (iCoopWorldNoDamage((xBase*)this))
+    {
+        iCoopGuestHit((xBase*)this, (S32)damtype, (const F32*)vec_hit);
+        return;
+    }
+#endif
+
     if (flg_vuln)
     {
         psy_self->GoalSet(NME_GOAL_TIKI_DYING, 0);
@@ -781,6 +795,16 @@ S32 zNMETiki::TypeHandleMail(NMEMsg* mail)
 S32 zNMETiki::SetCarryState(en_carystat cs)
 {
     S32 i;
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.5): the guest's Patrick does not
+    // pick up an enemy the host owns (the host's game moves it; M3 sends the
+    // guest's grabs to the host). FALSE at once when co-op is off.
+    if (cs == zNMECARRY_ATTEMPTPICKUP && iCoopWorldGuestOwns((xBase*)this))
+    {
+        return 0;
+    }
+#endif
 
     if ((en_npctyp)itemType == NME_TYPE_TIKI_LOVEY)
     {
@@ -2417,6 +2441,11 @@ S32 zNMEGoalTikiDying::Exit(F32 dt, void* updCtxt)
 {
     zNMETiki* tiki = (zNMETiki*)GetOwner();
 
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 13): on the host, counted for the
+    // guest, whose copy breaks the same way. Nothing when co-op is off.
+    iCoopWorldDeathFx((xBase*)tiki);
+#endif
     zNMETiki_ExplodeFX(tiki);
 
     // not in the DWARF (only tiki and vel): holds the retrieved asset across the NULL test

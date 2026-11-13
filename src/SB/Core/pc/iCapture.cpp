@@ -51,6 +51,10 @@ namespace
     S32 sExitAfter;
     S32 sFrame;
     S32 sCaptured;
+    // iCaptureRequest: a file name for the next frame presented.
+    char sRequest[96];
+    bool sRequested;
+    bool sHooked;
     iTime sFirstFrameAt;
     char sDir[512];
 
@@ -273,6 +277,19 @@ namespace
             fflush(stdout);
         }
 
+        if (sRequested)
+        {
+            sRequested = false;
+            char path[640];
+            snprintf(path, sizeof(path), "%s%s", sDir, sRequest);
+            if (iFrameGrabWrite(path, 0))
+            {
+                sCaptured++;
+                printf("tssm: capture: frame %d -> %s (requested)\n", (int)sFrame, path);
+            }
+            fflush(stdout);
+        }
+
         iTestEventsFrame(sFrame);
         iTestSendFrame(sFrame);
         iAudioSDLTestFrame(sFrame);
@@ -353,6 +370,7 @@ void iCaptureInit()
     }
 
     iSnapshotSetFrameHook(OnFrame);
+    sHooked = true;
 
     printf("tssm: capture: %d frame range(s) into %s; exit after %s; %s\n", (int)sRangeCount,
            sDir[0] != '\0' ? sDir : "the working directory",
@@ -364,4 +382,18 @@ void iCaptureInit()
 S32 iCaptureFrameCount()
 {
     return sFrame;
+}
+
+bool iCaptureRequest(const char* name)
+{
+    // A plain file name of the caller's own making, written into
+    // TSSM_CAPTURE_DIR; only while the capture hook runs (a test run).
+    if (!sHooked || name == NULL || strlen(name) >= sizeof(sRequest) || strchr(name, '/') != NULL ||
+        strchr(name, '\\') != NULL || strstr(name, "..") != NULL)
+    {
+        return false;
+    }
+    snprintf(sRequest, sizeof(sRequest), "%s", name);
+    sRequested = true;
+    return true;
 }

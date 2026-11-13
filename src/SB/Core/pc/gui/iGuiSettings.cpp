@@ -982,6 +982,13 @@ void iGui::SettingsInterface()
 
     const char* path = iConfigPath();
     ImGui::Spacing();
+    if (iConfigReadOnly())
+    {
+        ImGui::TextWrapped(
+            "Local co-op, Player 2: this game reads Player 1's settings file and never writes it. "
+            "Your name, character, costumes, name tag, camera, stick feel and rumble are kept for "
+            "next time; any other change lasts until this game closes.");
+    }
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Settings file: %s", path != NULL ? path : "none (defaults only)");
 #ifndef __SWITCH__

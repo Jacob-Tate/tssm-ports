@@ -59,6 +59,14 @@ S32 iConfigGetBool(const char* key, S32 def)
     return it->second == "on" || it->second == "1" ? 1 : 0;
 }
 
+// Local co-op's Player 2 (iConfig.h), when a test says so.
+static bool sReadOnly;
+
+bool iConfigReadOnly()
+{
+    return sReadOnly;
+}
+
 void iModTextureInstall()
 {
 }
@@ -869,6 +877,28 @@ static void TestManager()
     CHECK(iModCount() == 2 && iModFind("ModB") == 0 && iModFind("ModA") == 1 &&
               !iModGet(1)->enabled && iModGet(0)->enabled,
           "mods.ini read back");
+
+    // Local co-op's Player 2: its log in its own folder, and mods.ini left alone.
+    {
+        std::string own = sScratch + "/player2";
+        MakeDirs(own);
+        iHostRemoveFile((own + "/mods.log").c_str());
+        iHostFileInfo before, after;
+        bool had = iHostStat((mods + "/mods.ini").c_str(), &before);
+        Setenv("TSSM_CONFIG_READONLY", (own + "/player2.ini").c_str());
+        sReadOnly = true;
+        iModInit();
+        CHECK(iHostPathExists((own + "/mods.log").c_str()),
+              "Player 2's mods.log in its own folder");
+        CHECK(iModMove(1, 0) && !iModSaveList(), "Player 2 does not write mods.ini");
+        CHECK(had && iHostStat((mods + "/mods.ini").c_str(), &after) && after.size == before.size &&
+                  after.mtime == before.mtime,
+              "mods.ini unchanged by Player 2");
+        sReadOnly = false;
+        Setenv("TSSM_CONFIG_READONLY", NULL);
+        iModInit();
+        CHECK(iModFind("ModB") == 0 && iModFind("ModA") == 1, "the saved order again");
+    }
 
     // A new mod not in mods.ini goes last; a higher priority goes later still.
     MakeDirs(mods + "/ModC/ini");

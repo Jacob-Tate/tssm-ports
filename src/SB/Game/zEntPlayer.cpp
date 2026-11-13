@@ -51,6 +51,9 @@
 #include "zMenuSB.h"
 #include "xLightKit.h"
 #include "xTRC.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 #include "xModelBucket.h"
 #include "zPlayerBase.h"
 #include "zTalkBox.h"
@@ -563,6 +566,14 @@ static U8 spongebobCostumeAtomicOrder[11][11] = {
     { 3, 4, 7, 8, 0, 5, 6, 1, 2, 9, 10 }, { 3, 4, 7, 8, 1, 2, 0, 5, 6, 9, 10 },
     { 3, 4, 7, 8, 0, 1, 2, 5, 6, 9, 10 },
 };
+#ifdef PLATFORM_PC
+// Online co-op (iCoopLook.cpp): which part each place in a SpongeBob costume's
+// model chain is, to show a partner's parts on another costume's chain.
+const U8* zEntPlayer_PcSpongeBobAtomicOrder(S32 costumeIndex)
+{
+    return costumeIndex >= 0 && costumeIndex < 11 ? spongebobCostumeAtomicOrder[costumeIndex] : NULL;
+}
+#endif
 char* sDirDecalBlendLabels[11] = {
     "BLENDZERO",      "BLENDONE",          "BLENDSRCCOLOR",    "BLENDINVSRCCOLOR",
     "BLENDSRCALPHA",  "BLENDINVSRCALPHA",  "BLENDDESTALPHA",   "BLENDINVDESTALPHA",
@@ -4926,6 +4937,21 @@ void zEntPlayer_SpongeBobInit(xEnt* ent, xEntAsset* asset, S32 costumeIndex)
         sbInfo = xSTFindAsset(0xCEC39425, &sbMINFSize);
         gCurrentCostume = COSTUME_SB_D;
     }
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 7.5): with the partner's outfit
+    // loaded too, this player's own (the list above takes the first it finds).
+    // NULL at once when co-op is off.
+    {
+        U32 pcSize;
+        void* pcInfo = iCoopLocalModelInfo(0, &pcSize);
+        if (pcInfo != NULL)
+        {
+            sbInfo = pcInfo;
+            sbMINFSize = pcSize;
+            gCurrentCostume = (ePlayerEnum)costumeIndex;
+        }
+    }
+#endif
 
     if (sbInfo)
     {
@@ -5070,6 +5096,18 @@ void zEntPlayer_PatrickInit(xEnt* ent, xEntAsset* asset, S32)
     {
         info = xSTFindAsset(0x68E977BF, &bufsize);
     }
+#ifdef PLATFORM_PC
+    // Online co-op (7.5): as in zEntPlayer_SpongeBobInit.
+    {
+        U32 pcSize;
+        void* pcInfo = iCoopLocalModelInfo(1, &pcSize);
+        if (pcInfo != NULL)
+        {
+            info = pcInfo;
+            bufsize = pcSize;
+        }
+    }
+#endif
 
     if (info)
     {
@@ -7328,6 +7366,12 @@ patrick_done:
 
         if (globals.player.DamageTimer <= 0.0f)
         {
+#ifdef PLATFORM_PC
+            // Online co-op (6.4): a guest in the host's level comes back
+            // beside the host in a bubble instead of losing a life (nothing
+            // is reset). FALSE at once when co-op is off.
+            if (!iCoopGuestRespawn())
+#endif
             zGameStateSwitch(2);
             HealthReset();
         }
@@ -10393,6 +10437,14 @@ void zEntPlayer_DamageKnockIntoAir(F32 height)
 
 S32 zEntPlayer_Damage(xBase* src, U32 damage, const xVec3* knockback)
 {
+#ifdef PLATFORM_PC
+    // Online co-op (6.2): during a stand-in the hit is the guest's; it goes
+    // to the guest's game with its knockback. 0 at once when co-op is off.
+    if (iCoopStandInActive())
+    {
+        return iCoopStandInHit(src, damage, knockback != NULL ? 2 : 0, (const F32*)knockback, 0);
+    }
+#endif
     if (!zEntPlayer_Damage(src, damage))
     {
         return 0;
@@ -10415,6 +10467,15 @@ S32 zEntPlayer_DamageNPCKnockBack(xBase* src, U32 damage, xVec3* npcPos, ePlayer
     F32 dx;
     F32 dz;
     F32 mag;
+
+#ifdef PLATFORM_PC
+    // Online co-op (6.2): during a stand-in the hit is the guest's; it goes
+    // to the guest's game, which knocks its own player back from npcPos.
+    if (iCoopStandInActive())
+    {
+        return iCoopStandInHit(src, damage, npcPos != NULL ? 1 : 0, (const F32*)npcPos, (S32)type);
+    }
+#endif
 
     if (gCurrentPlayer == eCurrentPlayerCar)
     {
@@ -10481,6 +10542,16 @@ S32 zEntPlayer_DamageNPCKnockBack(xBase* src, U32 damage, xVec3* npcPos, ePlayer
 
 S32 zEntPlayer_Damage(xBase* src, U32 damage)
 {
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.4, 6.2): during a stand-in the hit
+    // is the guest's, not this player's: it goes to the guest's game (the
+    // knockback variants hand theirs over before they get here). 0 at once
+    // when co-op is off.
+    if (iCoopStandInActive())
+    {
+        return iCoopStandInHit(src, damage, 0, NULL, 0);
+    }
+#endif
     zEntPlayerFX::HammerThrow::SetDust(false);
     zEntPlayerFX::HammerThrow::SetBlur(false);
     zEntPlayerFX::MotionBlur::Blurring = false;
@@ -10623,6 +10694,18 @@ en_plyrpup zEntPlayer_PowerupLevel(en_plyratak forThisAttack)
     {
         return ePowerupLevelDisabled;
     }
+
+#ifdef PLATFORM_PC
+    // Online co-op (6.1): while the host applies a guest's hit, the guest's
+    // power-up level (its claim's). FALSE at once when co-op is off.
+    {
+        S32 level;
+        if (iCoopClaimPowerup(&level))
+        {
+            return (en_plyrpup)level;
+        }
+    }
+#endif
 
     return (en_plyrpup)globals.player.g.PowerUp[forThisAttack - 1];
 }
@@ -14090,6 +14173,17 @@ void zEntPlayerEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
     xVec3 currVel;
     eSNDCurrentPlayer oldPlayer;
 
+#ifdef PLATFORM_PC
+    // Online co-op (5.4, 6.2): an event an enemy sends during a stand-in is
+    // meant for the guest: a hit goes to the guest's game, anything else is
+    // dropped; this player ignores it.
+    if (iCoopStandInActive())
+    {
+        iCoopStandInEvent(from, toEvent, toParam);
+        return;
+    }
+#endif
+
     if (cruise_bubble::event_handler(from, toEvent, toParam, toParamWidget))
     {
         return;
@@ -14146,6 +14240,16 @@ void zEntPlayerEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
     case eEventGivePowerUp:
         iParam = (S32)toParam[0];
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): the guest's moves are the
+        // host's save's; a move given here is asked of the host. FALSE at
+        // once when co-op is off.
+        if (iCoopProgressClaim(1, iParam))
+        {
+            break;
+        }
+#endif
+
         if (!globals.player.g.PowerUp[iParam])
         {
             globals.player.g.PowerUp[iParam] = 1;
@@ -14155,6 +14259,14 @@ void zEntPlayerEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
         break;
     case eEventUpgradePowerUp:
         iParam = (S32)toParam[0];
+
+#ifdef PLATFORM_PC
+        // Online co-op (13): as eEventGivePowerUp.
+        if (iCoopProgressClaim(2, iParam))
+        {
+            break;
+        }
+#endif
 
         if (iParam < 8)
         {

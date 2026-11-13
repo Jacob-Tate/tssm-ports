@@ -52,7 +52,9 @@ What it does, in order:
        two frames 12 apart (check_scroll; no reference needed).
      --quick leaves them out.
   6. runs every unit test of each width: save_selftest, tssm_input_test,
-     tssm_modtest, tssm_sndtest (boot.HIP and MN/mnuc.HIP) and tssm_widentest.
+     tssm_configtest, tssm_modtest, tssm_sndtest (boot.HIP and MN/mnuc.HIP),
+     tssm_widentest
+     and tssm_nettest (the co-op network code).
   7. prints a pass/fail table, writes report.json and report.html (the frames
      side by side with their references) into --out, and exits 0 when every row
      passed.
@@ -246,10 +248,14 @@ UNIT_TESTS = [
     # name, executable, arguments ({assets}, {scratch}), extra environment
     ("save_selftest", "save_selftest", ["{scratch}"], {}),
     ("tssm_input_test", "tssm_input_test", ["{scratch}"], {}),
+    # config.ini read only, as local co-op's Player 2 reads it (docs/MULTIPLAYER.md 12).
+    ("tssm_configtest", "tssm_configtest", ["{scratch}"], {}),
     ("tssm_modtest", "tssm_modtest", ["{assets}", "{scratch}"], {}),
     ("tssm_sndtest boot.HIP", "tssm_sndtest", ["{assets}/boot.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_sndtest mnuc.HIP", "tssm_sndtest", ["{assets}/MN/mnuc.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_widentest", "tssm_widentest", ["{assets}"], {}),
+    # The co-op network code (docs/MULTIPLAYER.md): no game, sockets on 127.0.0.1 only.
+    ("tssm_nettest", "tssm_nettest", [], {}),
 ]
 
 EXE = ".exe" if os.name == "nt" else ""

@@ -93,4 +93,17 @@ void iGuiSetPanel(iGuiPanel panel, iGuiPanelFn draw, void* user);
 typedef void (*iGuiAudioFn)(F32 master, F32 music, F32 sfx, F32 movies);
 void iGuiSetAudioListener(iGuiAudioFn fn);
 
+// Tests (TSSM_TEST_COOP_TAB, iTestEvents.cpp): what the Co-op tab's fields,
+// buttons and switches do, through the tab's own code, with the overlay open
+// or not. `actions` is a comma-separated list: name=, port=, address=,
+// password= (typed into the form; never logged), host, join, tryagain, stop,
+// and nametag=, follow=, reconnect=, quality= (on or off). docs/GUI.md lists
+// the home network's.
+void iGuiCoopTest(const char* actions);
+
+// Tests: the next frame drawn with the overlay open (`hud`: closed, the co-op
+// HUD layer alone) is written to `path` as a PNG, once any other capture is
+// done.
+void iGuiTestShot(const char* path, bool hud);
+
 #endif

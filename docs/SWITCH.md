@@ -8,7 +8,12 @@ and pack but wait for their own run on the console; "Stubs and gaps" below
 says what is still unchecked.
 
 Using custom firmware online can get a console banned. Play offline (airplane
-mode, or an emuMMC setup).
+mode, or an emuMMC setup), except for co-op, which needs Wi-Fi: read
+"Keeping the console safe on Wi-Fi" below first.
+
+This branch builds the co-op program, `tssm-coop.nro`: the same game with
+home-network co-op, as a separate file beside `tssm.nro` (section "Co-op on
+the home network").
 
 ## For players
 
@@ -35,6 +40,7 @@ The program writes everything else into the same folder:
 | `/switch/tssm/mods/` | mods (docs/MODDING.md) |
 | `/switch/tssm/last_run.log` | the log of the last run (`last_run.prev.log`: the one before) |
 | `/switch/tssm/crash.log` | crash reports |
+| `/switch/tssm/coop-log/` | the co-op program's own `last_run.log`, `last_run.prev.log` and `crash.log` |
 
 Nothing goes into the console's own save system: that belongs to the game used
 to start the Homebrew Menu.
@@ -140,6 +146,82 @@ controller type stay the PC's).
 HOME and Capture belong to the system. The game's clock stops while the HOME
 menu is open, while a system applet is in front and while the console sleeps.
 
+## Co-op on the home network (tssm-coop.nro)
+
+`tssm-coop.nro` is the co-op version of the game: online co-op and co-op on
+the home network (docs/LAN.txt), with a PC, a phone or another Switch. It is a
+program of its own; `tssm.nro` stays the normal game, without co-op. In the
+Homebrew Menu it is "TSSM co-op (port)", with a red CO-OP band on its icon,
+and its version ends in the co-op version code (`0.9-021cbdd5`, say): the
+Co-op tab shows the same eight letters and digits, and every device in a game
+needs the same ones.
+
+**Where it goes:** `/switch/tssm-coop.nro`, beside `tssm.nro`. It uses the
+normal game's folder, `/switch/tssm/`: the same game files, the same saves and
+the same `config.ini`. So progress made in either program is there in the
+other. What is its own:
+
+- its log, in `/switch/tssm/coop-log/`, so that starting one program never
+  replaces the other's last log, and a crash report goes with the right
+  program;
+- the `[coop]` lines in `config.ini` (your name, the last host's address, the
+  tab's switches). The normal game leaves lines it does not know as they are
+  when it saves its settings, so the two share the file. It mentions each such
+  line once at start in its own log ("unknown setting ... ignored");
+- `coop_files.cache` in the saves folder: the co-op program's record of the
+  game files it has checked, so the check is quick after the first time.
+
+Only one of the two may be open at a time. A program suspended in title mode
+and another started from the Album could otherwise share the folder, so each
+holds the save folder's one-copy claim (a lock file held open, "One copy at a
+time" below) while it runs, and the second says the game is already open and
+closes. Saves are written the same
+way in both: a new file, then the old one replaced, backups kept.
+
+**Starting it:** as the game: title takeover (hold R while starting a game),
+then "TSSM co-op (port)".
+
+**Playing:** open the settings window (hold -, press +), Co-op tab.
+
+- **Joining:** the list "Games on this network" shows the games other devices
+  host. Pick one with the controller or a tap, then enter the host's code on
+  the **code pad**: 32 keys, moved over with the stick or the D-pad and
+  pressed with the bottom button, or tapped. The console's keyboard opens for
+  the code field as well. "Join by address" stays below, for the internet or
+  when the list stays empty. With Wi-Fi off, the list says so.
+- **Hosting:** "Host on this network" shows a code, large, for the other player
+  to type. "Copy" is not offered: the Switch has no clipboard.
+- **HOME and sleep:** the game pauses, and its network stops with it. Back
+  within about 10 seconds, the game goes on; longer, the session ends and a
+  joining player joins again by themselves for a minute. After sleep the
+  console's Wi-Fi takes a few seconds to come back; co-op makes its network
+  connections again by itself.
+
+### Keeping the console safe on Wi-Fi
+
+Co-op needs the Switch on Wi-Fi. A Switch with custom firmware that connects to
+Nintendo's servers can be banned from Nintendo's online services (the eShop,
+online play, updates), for good. That is about the console, not the game:
+
+- **The game contacts nothing but the other player's device.** Only numeric
+  addresses on your home network (or the one you type to join over the
+  internet); no names are looked up, nothing signs in, and nothing is sent to
+  Nintendo or anyone else. The questions "is there a game here?" go only to
+  your home network's broadcast address.
+- **The console's own system software does** contact Nintendo whenever it can:
+  update checks, error reports, news, a signed-in account. With Wi-Fi on, that
+  happens in the background, whichever program runs.
+
+So before turning Wi-Fi on for co-op, make sure the console cannot reach
+Nintendo: run the game from an emuMMC (the custom-firmware system on the SD
+card), never sign into a Nintendo Account or the eShop there, and block
+Nintendo's servers on it (Atmosphere's DNS blocking in `/atmosphere/hosts/`,
+or a blocking DNS server in the Internet settings), and check that the block
+works. Airplane Mode (Flight Mode in some regions) alone does not help:
+co-op needs Wi-Fi, and a Switch can turn Wi-Fi back on inside it. If you are
+not sure the console is
+protected, play co-op on a PC and a phone only.
+
 ## Building
 
 Everything comes from devkitPro. The build runs in devkitPro's MSYS2 shell
@@ -169,8 +251,8 @@ Everything comes from devkitPro. The build runs in devkitPro's MSYS2 shell
 
        sh tools/switch/build_port.sh <build dir> <prefix>
 
-   This makes `<build dir>/tssm.nro`, and `tssm.elf` beside it (keep the two
-   together: crash reports are offsets into that `tssm.elf`).
+   This makes `<build dir>/tssm-coop.nro`, and `tssm-coop.elf` beside it
+   (keep the two together: crash reports are offsets into that ELF).
 
 `build_port.sh` says why it passes what it passes. The CMake side is the
 `TSSM_SWITCH` branch of `CMakeLists.txt`: SDL3 from the prefix
@@ -183,6 +265,13 @@ sponge block drawn by `tools/switch/draw_default_icon.ps1`). The version shown
 is `TSSM_SWITCH_VERSION` (0.9). CMake caches it, so a build directory
 configured with an older default keeps that one until it is configured again
 or given `-DTSSM_SWITCH_VERSION=0.9`.
+
+On this branch the .nro is the co-op program: `tssm-coop.nro`, the NACP name
+"TSSM co-op (port)", the version `TSSM_SWITCH_VERSION` plus a dash and the
+co-op version code (`tools/switch/coop_nacp.cmake` reads it from the
+`coop_id.h` the build makes), and the icon `TSSM_ICON_DIR`'s `icon-coop.jpg`,
+else `dist/switch/default_icon_coop.jpg`. `tools/switch/make_coop_icon.ps1`
+makes either from the plain icon by adding the CO-OP band.
 
 The FFmpeg in a .nro is linked statically. Its notice in the About tab says
 so; the LGPL's terms for a static link (offering the object files for
@@ -212,6 +301,30 @@ offsets into the image:
     aarch64-none-elf-addr2line -f -C -e tssm.elf 0x2a5f10
 
 Atmosphere also writes its own report to `sd:/atmosphere/crash_reports/`.
+
+The co-op program's log (`/switch/tssm/coop-log/last_run.log`) names the
+partner, so it is served on TCP 28772 only to a test: when the program was
+sent with nxlink, or with the co-op test kit armed (below). Started from the
+Homebrew Menu, nothing on the console listens for it.
+
+### The co-op test kit
+
+`--coop-test` on the command line
+(`nxlink -a <console IP> tssm-coop.nro --coop-test`) runs a test with files of
+its own, and only while `/switch/tssm/coop-test/armed` exists (an empty file;
+delete it to disarm). Without that file the argument is ignored and the log
+says so. Armed, the program takes from `/switch/tssm/coop-test/`:
+
+| File | What |
+|---|---|
+| `config.ini` | the test's settings (`[coop] mode = host` or `join`, `address`, `name`, `[game] boot`); written with the defaults if missing |
+| `saves/`, `mods/` | the test's saves and mods (none: the game files alone) |
+| `password.txt` | the join code or password, first line; never on the command line, never in the log |
+| `env.txt` | test settings, one `TSSM_NAME=value` a line (`TSSM_COOP_LOG=5` for the cost line, say); only names starting `TSSM_`; the folder's own five (config, saves, mods, log, password) cannot be changed here |
+| `last_run.log`, `crash.log` | the test's log |
+
+The player's own `config.ini`, saves and log are not read or written by a
+test; the game files in `/switch/tssm/assets/` are only read.
 
 ## How it works
 
@@ -271,6 +384,21 @@ Notes:
 - **Threads.** libnx's default thread stack is small; every thread made without
   a larger stack gets 2 MB (`pthread_create` is wrapped at link time). The main
   thread has hbloader's 1 MB.
+- **Co-op's network thread** is the program's only `std::thread`. Its start is
+  wrapped at link time too, and the thread moves itself to cores 1 and 2, off
+  core 0, the game thread's: a join's key derivation and the first check of
+  the game files would otherwise take the game's own core. The log says where
+  it runs (`co-op's network thread: cores 1 and 2 ...`), or that the system
+  refused and it stays where it started.
+- **Sockets.** They come up at boot with 6 BSD service sessions instead of
+  libnx's 3 (the log says how many it got; with 3 it still works). Co-op never
+  blocks in a socket call: it polls without waiting and sleeps 2 ms between
+  polls, so it holds no session while it waits. Co-op's addresses come from
+  nifm (the console's one current network). The applet hook only raises flags
+  for co-op (`iNetSock.h`): after sleep the network thread makes every co-op
+  socket again, bound to the same port, and after the HOME menu or an applet
+  it makes again those that report an error; a socket whose calls fail as dead
+  is made again each second until it works.
 - **Quitting.** hbloader runs the .nro inside its own process and, when it
   returns, loads the Homebrew Menu into the same memory, so nothing of the
   game may be left running or mapped. Every `exit()` goes through
@@ -278,7 +406,9 @@ Notes:
   (port 28772; polled with a stop flag, because a blocked `accept` can keep
   `socketExit` waiting for ever), the SDL audio thread, librw's GL context and
   SDL itself (window, EGL and with it Mesa's GPU session, controllers), then
-  runs `exit()` as usual. libnx's `userAppExit` then closes the sockets and the
+  runs `exit()` as usual. Co-op stops right after the log server: a goodbye to
+  the other player and its network thread joined, while the sockets are
+  certainly up. libnx's `userAppExit` then closes the sockets and the
   RomFS, unmaps the low memory last and returns. Each step writes a
   `tssm: switch: quit:` line to `last_run.log` first, synced, so a quit that
   stops halfway shows where. A step that takes more than 10 seconds makes a
@@ -375,12 +505,21 @@ What is known not to work or not to exist yet, with the place to change it:
   Homebrew Menu.
 - **The quit** (Notes above) is untested on a console. A good one ends the log
   with `quit: exit(0): back to the Homebrew Menu`, `stopping the log server`,
-  `stopping audio`, `destroying the GL context`, `stopping SDL`, `exiting`,
+  `stopping co-op`, `stopping audio`, `destroying the GL context`, `stopping SDL`, `exiting`,
   the `widen: at exit` report, `closing sockets and the RomFS`, `releasing
   the save folder's claim`, two `low memory ... released` and `returning to
   the Homebrew Menu`.
 - **Touch** (the SDL patch, the settings window's taps and the three-finger
   toggle) is untested on a console.
+- **Co-op** has not run on a console. Unchecked there: whether the console
+  sends and receives the home network's broadcasts (if not, the list stays
+  empty and joining by address still works); csrng (if it cannot start, the
+  kernel's generator is used and the log says so); the six sessions; the
+  network thread's core; the sockets after sleep; the keyboard and the code
+  pad with Joy-Cons and touch; the cost of co-op on the console's CPU and the
+  memory it takes inside the game's pools; that a save made in
+  `tssm-coop.nro` loads in `tssm.nro`; that the second of two open programs
+  is refused by the claim (One copy at a time, above).
 - **The exception handler** is libnx's documented hook; that hbloader's process
   reaches it is untested.
 - **Folder and file dialogs**: SDL has none; the built-in browser stands in

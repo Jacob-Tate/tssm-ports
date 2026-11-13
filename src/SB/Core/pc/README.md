@@ -130,6 +130,34 @@ overlays, with a load order in `mods/mods.ini`. `docs/MODDING.md` has the
 details, `tools/modkit.py` lists and extracts what a package holds, and
 `tssm_modtest` checks the system against your assets.
 
+## Online co-op
+
+Two players, each with their own copy of the game and its files, can play in the
+same level over the internet or a home network: one hosts (the overlay's
+**Co-op** tab, `[coop] mode = host` or `tssm --host[=port]`), the other joins by
+the host's numeric address and join code (`tssm --join=203.0.113.7:2171`). The
+host forwards UDP port 2171 on their router. Only game state travels, never
+game files. `docs/MULTIPLAYER.md` is the design and the guide; `config.ini`'s
+`[coop]` section and `TSSM_COOP`, `TSSM_COOP_PORT`, `TSSM_COOP_ADDR`,
+`TSSM_COOP_NAME`, `TSSM_COOP_PASSWORD`, `TSSM_COOP_BIND=loopback`,
+`TSSM_COOP_FOLLOW=0|1`, `TSSM_COOP_RECONNECT=0|1`, `TSSM_COOP_LOG=<n>`,
+`TSSM_COOP_NETSIM=<delay_ms,jitter_ms,loss_pct>` and
+`TSSM_COOP_SYNC_CAPTURE=<every_ms>:<count>` set it up from outside (the last
+three for tests). In the same level the host's enemies, moving platforms,
+breakable objects and pickups are the guest's too, the guest's hits count on
+the host, the host leads the way from level to level (both start each level
+together) and its cutscenes play on both. Each player picks their character
+(LB or Z in play, or the Co-op tab) and costume (`[coop] character`,
+`costume_spongebob`, `costume_patrick`). A guest whose connection drops joins
+again by itself for a minute (`[coop] reconnect`), and both see the
+connection's quality on screen (`[coop] quality`). `docs/HOSTING.txt` and
+`docs/JOINING.txt` are the two players' guides (plain text, for the release).
+With none of them, co-op is off and nothing of it runs.
+`tssm_nettest` tests the network code on its own and `tools/coop_test.py` runs
+two copies on one PC through 127.0.0.1 (`--scene BB02|DE01|TT01|PT01`,
+`--variant netsim|wrong-password|wrong-version|wrong-files|no-answer|kick|blackout|
+follow|levels|look|...`, `--guest-exe` for the 32-bit build).
+
 ## Unattended runs
 
 For unattended runs (`iCapture.h`): `TSSM_CAPTURE_FRAMES=<n,a-b,a-b/step>`
@@ -138,7 +166,26 @@ writes those presented frames as `frame_NNNNN.png` into `TSSM_CAPTURE_DIR`, and
 `TSSM_INPUT=<frame:button[+button][/frames],...>` plays port 0 from a script
 (e.g. `400:start,1000:a`; real controllers are ignored while it is set);
 `TSSM_TEST_WARP=<frame:type,...>` emits screen warps at the player,
-`TSSM_TEST_PLACE=<frame:x:y:z[:yaw],...>` puts the player down at a spot and
+`TSSM_TEST_PLACE=<frame:x:y:z[:yaw],...>` puts the player down at a spot
+(`TSSM_TEST_PLACE_CAMERA=reset` brings the camera along),
+`TSSM_TEST_SCENE=<frame>:<SCEN>` goes to another level,
+`TSSM_TEST_KILL=<frame>:<radius>` defeats the nearest enemy,
+`TSSM_TEST_FACE=<first>-<last>/<every>:<id>:<dist>` keeps putting the player a
+step from an entity, facing it, and `TSSM_TEST_HEALTH=<frame>:<n>` sets the
+player's health (co-op's fight tests),
+`TSSM_TEST_STALL=<frame>:<seconds>` stops the game thread for a while (as a
+held window does; co-op's stall tests),
+`TSSM_TEST_BLACKOUT=<frame>:<seconds>` cuts co-op's connection for a while and
+`TSSM_TEST_COOP_KICK=<frame>` kicks the guest (co-op's drop and kick tests;
+`TSSM_TEST_COOP_BUILD_SALT` and `TSSM_TEST_COOP_ASSET_SALT` make a copy's
+version or game files differ),
+`TSSM_TEST_EVENT=<frame>:<id>:teleport|cutscene|run` sends a level's object
+(a portal, a cutscene, a fly-through) its own event (co-op's level change and
+cutscene tests; a teleport, like `TSSM_TEST_SCENE`, waits until the game is in
+plain play, with no pause or task screen open, as a portal can only be walked
+into then), `TSSM_TEST_COSTUMES=all` offers co-op every costume and
+`TSSM_TEST_COOP_LOOK=<character>,<sb>,<pat>` starts with those co-op choices,
+and
 `TSSM_TEST_CAMLOG=<n>` logs the camera every n frames (`iTestEvents.h`), and `TSSM_HDR_VIEW=mask|glow` shows the glow pass's input
 or output (`docs/RENDERING.md`, which covers the console's screen effects on
 PC). Keep captures of game frames out of the repository.
@@ -169,7 +216,8 @@ averages (16x16 pixels) against a tolerance per kind of frame; the x64 frames ar
 also compared with the x86 ones. It checks that each run exited by itself at the
 last frame and, on x64, that the asset widening ran with nothing left over, then
 runs every unit test of both widths (`save_selftest`, `tssm_input_test`,
-`tssm_modtest`, `tssm_sndtest` on boot.HIP and mnuc.HIP, `tssm_widentest`) and
+`tssm_modtest`, `tssm_sndtest` on boot.HIP and mnuc.HIP, `tssm_widentest`,
+`tssm_nettest`) and
 prints a pass/fail table; `report.html` in the run folder shows each frame
 beside its reference. Two short level runs per width (about 25 seconds for
 both) cover what that path never shows. Each boots its level directly through

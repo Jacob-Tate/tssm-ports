@@ -45,6 +45,8 @@ DEFAULTS = {
     # The Switch .nro's default icon: the same plain sponge block,
     # drawn by tools/switch/draw_default_icon.ps1.
     "dist/switch/default_icon.jpg": "88c7a1acb6728499fb0d06ed997ca640b2644af6",
+    # The co-op .nro's default icon: the same sponge block with a CO-OP band.
+    "dist/switch/default_icon_coop.jpg": "3fb4407be7e4021ae44a35e16c57877035f52d6d",
 }
 
 IMAGE_EXTENSIONS = {

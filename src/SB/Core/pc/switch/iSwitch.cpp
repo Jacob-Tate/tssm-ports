@@ -4,6 +4,9 @@
 // The libnx side (iSwitch.h): nothing of the game's is included here.
 #include "iSwitch.h"
 
+// Co-op's socket seam: only the C library's types.
+#include "iNetSock.h"
+
 // struct in_addr, which libnx's nxlink.h uses without including.
 #include <netinet/in.h>
 
@@ -117,11 +120,13 @@ namespace
     //
     // Runs on the game thread: SDL pumps applet messages (appletMainLoop) from
     // SDL_PumpEvents.
+    // Co-op only gets flags (iNetSock.h): its I/O thread owns the sockets.
     void Away(const char* why)
     {
         if (!sAway)
         {
             sAway = true;
+            iNet::net_note_away(true);
             iSwitchGameAway();
             printf("tssm: switch: %s; the game clock is paused\n", why);
         }
@@ -132,6 +137,7 @@ namespace
         if (sAway)
         {
             sAway = false;
+            iNet::net_note_away(false);
             iSwitchGameBack();
             printf("tssm: switch: %s; the game clock runs again\n", why);
         }
@@ -158,6 +164,7 @@ namespace
             }
             break;
         case AppletHookType_OnResume:
+            iNet::net_note_wake();
             Back("woke from sleep");
             break;
         case AppletHookType_OnOperationMode:
@@ -402,9 +409,10 @@ namespace
 
     // The PC pulls the log instead of nxlink pushing it: Windows Firewall blocks
     // nxlink's incoming connection by default, but not the PC connecting out.
-    // Whoever connects to TCP 28772 gets last_run.log as it is now; the
-    // connection then closes. It sends only the game's own log and reads
-    // nothing from the network, and only to a test: started by nxlink.
+    // Whoever connects to TCP 28772 gets the log as it is now; the connection
+    // then closes. It sends only the game's own log and reads nothing from the
+    // network. The co-op log holds the partner's name, so this program serves
+    // it only to a test: started by nxlink, or with the test kit armed.
     constexpr int kLogServerPort = 28772;
 
     // The exit has to stop and join this thread before socketExit: closing
@@ -437,7 +445,8 @@ namespace
             fcntl(c, F_SETFL, fcntl(c, F_GETFL, 0) & ~O_NONBLOCK);
             struct timeval tv = { 2, 0 };
             setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            FILE* f = fopen("last_run.log", "rb");
+            const char* path = iSwitchLogPath();
+            FILE* f = (path != NULL && path[0] != '\0') ? fopen(path, "rb") : NULL;
             if (f != NULL)
             {
                 char buf[4096];
@@ -679,6 +688,11 @@ void iSwitchQuit(int code)
     Step("stopping the log server");
     StopBackground();
 
+    // Co-op's goodbye and its I/O thread, while the sockets are certainly up;
+    // its atexit handler then finds nothing left to do.
+    Step("stopping co-op");
+    iSwitchGameStopCoop();
+
     // The SDL audio thread runs the port's mixers, which read the game's
     // sound state, and hbloader unmaps the code it runs. Each user of audio
     // holds a reference, so it is released until SDL has really stopped it.
@@ -777,6 +791,170 @@ int iSwitchNxlinkSocket()
     return sNxlinkSocket;
 }
 
+extern "C" {
+extern int __system_argc;
+extern char** __system_argv;
+}
+
+namespace
+{
+    constexpr u32 kBsdSessions = 6;
+    u32 sSessions; // the BSD sessions the sockets came up with; 0: no sockets
+    Result sSocketsResult; // the six-session attempt's
+
+    // ------------------------------------------------------------------ co-op
+
+    // The co-op program shares kSwitchRoot with the normal game (saves, game
+    // files, config.ini) but keeps its log and crash.log in a folder of their
+    // own: starting one program never turns over the other's last run, and a
+    // crash report goes with the right .elf.
+    constexpr char kCoopLogDir[] = "/switch/tssm/coop-log";
+
+    // `--coop-test` on nxlink's command line, honoured only while
+    // kCoopTestDir/armed exists: config.ini, saves, mods and the log in that
+    // folder, the password from its password.txt, test settings from its
+    // env.txt. A test never reads or writes the player's own files.
+    constexpr char kCoopTestDir[] = "/switch/tssm/coop-test";
+    bool sCoopTest;
+    bool sCoopTestRefused; // asked for without the armed file
+    bool sCoopPassword; // password.txt gave one
+    char sCoopEnvNames[256]; // env.txt's names, for the log
+
+    bool CoopTestAsked()
+    {
+        for (int i = 1; i < __system_argc && __system_argv != NULL; i++)
+        {
+            if (__system_argv[i] != NULL && strcmp(__system_argv[i], "--coop-test") == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void TrimLine(char* s)
+    {
+        size_t n = strlen(s);
+        while (n > 0 &&
+               (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
+        {
+            s[--n] = '\0';
+        }
+    }
+
+    // TSSM_ then capitals, digits and underscores; never one of the settings
+    // the test folder fixes.
+    bool TestEnvName(const char* name)
+    {
+        static const char* const kFixed[] = { "TSSM_CONFIG", "TSSM_SAVE_DIR", "TSSM_MODS_DIR",
+                                              "TSSM_LOG", "TSSM_COOP_PASSWORD" };
+        if (strncmp(name, "TSSM_", 5) != 0 || name[5] == '\0')
+        {
+            return false;
+        }
+        for (const char* c = name; *c != '\0'; c++)
+        {
+            if (!((*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '_'))
+            {
+                return false;
+            }
+        }
+        for (const char* f : kFixed)
+        {
+            if (strcmp(name, f) == 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void ReadTestFiles()
+    {
+        char path[128];
+        snprintf(path, sizeof(path), "%s/password.txt", kCoopTestDir);
+        FILE* f = fopen(path, "rb");
+        if (f != NULL)
+        {
+            char line[96];
+            if (fgets(line, sizeof(line), f) != NULL)
+            {
+                TrimLine(line);
+                if (line[0] != '\0' && strlen(line) <= 64)
+                {
+                    setenv("TSSM_COOP_PASSWORD", line, 1);
+                    sCoopPassword = true;
+                }
+            }
+            memset(line, 0, sizeof(line));
+            fclose(f);
+        }
+
+        snprintf(path, sizeof(path), "%s/env.txt", kCoopTestDir);
+        f = fopen(path, "rb");
+        if (f == NULL)
+        {
+            return;
+        }
+        char line[320];
+        while (fgets(line, sizeof(line), f) != NULL)
+        {
+            TrimLine(line);
+            char* eq = strchr(line, '=');
+            if (line[0] == '#' || eq == NULL)
+            {
+                continue;
+            }
+            *eq = '\0';
+            if (!TestEnvName(line))
+            {
+                continue;
+            }
+            setenv(line, eq + 1, 1);
+            const size_t used = strlen(sCoopEnvNames);
+            snprintf(sCoopEnvNames + used, sizeof(sCoopEnvNames) - used, "%s%s",
+                     used > 0 ? " " : "", line);
+        }
+        fclose(f);
+    }
+
+    void CoopFolders()
+    {
+        mkdir(kSwitchDataParent, 0777);
+        mkdir(kSwitchRoot, 0777);
+        if (CoopTestAsked())
+        {
+            char armed[128];
+            snprintf(armed, sizeof(armed), "%s/armed", kCoopTestDir);
+            struct stat st;
+            if (stat(armed, &st) == 0)
+            {
+                sCoopTest = true;
+                char path[128];
+                snprintf(path, sizeof(path), "%s/config.ini", kCoopTestDir);
+                setenv("TSSM_CONFIG", path, 1);
+                snprintf(path, sizeof(path), "%s/saves", kCoopTestDir);
+                mkdir(path, 0777);
+                setenv("TSSM_SAVE_DIR", path, 1);
+                snprintf(path, sizeof(path), "%s/mods", kCoopTestDir);
+                setenv("TSSM_MODS_DIR", path, 1);
+                snprintf(path, sizeof(path), "%s/last_run.log", kCoopTestDir);
+                setenv("TSSM_LOG", path, 1);
+                ReadTestFiles();
+                return;
+            }
+            sCoopTestRefused = true;
+        }
+        if (getenv("TSSM_LOG") == NULL)
+        {
+            mkdir(kCoopLogDir, 0777);
+            char path[128];
+            snprintf(path, sizeof(path), "%s/last_run.log", kCoopLogDir);
+            setenv("TSSM_LOG", path, 1);
+        }
+    }
+} // namespace
+
 void iSwitchEarly()
 {
     // First, so that refusing starts nothing the exit would have to stop.
@@ -794,20 +972,72 @@ void iSwitchEarly()
     sRomfsResult = romfsInit();
     sRomfs = R_SUCCEEDED(sRomfsResult);
 
+    // Before the log opens: where it goes, and a test's own folder.
+    CoopFolders();
+
     // Sent with `nxlink -s`: stdout and stderr go back to the PC as well as to
     // last_run.log. The socket is the log tee's to write to (iLog.cpp), not a
     // redirection of its own, so the log still gets everything. The PC can also
-    // pull last_run.log from TCP 28772 (StartLogServer), only when nxlink
-    // started the game.
-    if (R_SUCCEEDED(socketInitializeDefault()))
+    // pull the log from TCP 28772 (StartLogServer).
+    //
+    // Six BSD sessions, not libnx's three: co-op's I/O thread, the log's
+    // sends and the log server each hold one while in a call. The waits do
+    // not block (iNetSockPosix.cpp), so three still work if six are refused.
+    SocketInitConfig config = *socketGetDefaultInitConfig();
+    config.num_bsd_sessions = kBsdSessions;
+    sSocketsResult = socketInitialize(&config);
+    if (R_SUCCEEDED(sSocketsResult))
+    {
+        sSessions = kBsdSessions;
+    }
+    else if (R_SUCCEEDED(socketInitializeDefault()))
+    {
+        sSessions = socketGetDefaultInitConfig()->num_bsd_sessions;
+    }
+    if (sSessions > 0)
     {
         sSocketsUp = true;
         if (__nxlink_host.s_addr != 0)
         {
             sNxlinkSocket = ConnectNxlink(3000);
+        }
+        if (__nxlink_host.s_addr != 0 || sCoopTest)
+        {
             StartLogServer();
         }
     }
+}
+
+bool iSwitchSocketsUp()
+{
+    return sSocketsUp;
+}
+
+void iSwitchMoveOffGameCore(const char* who)
+{
+    // Core 3 is the system's. The ideal core may stay "don't care"; where
+    // that is refused, core 1 is named.
+    const u32 kCores12 = 0x6;
+    const u32 before = svcGetCurrentProcessorNumber();
+    Result rc = svcSetThreadCoreMask(CUR_THREAD_HANDLE, -1, kCores12);
+    if (R_FAILED(rc))
+    {
+        rc = svcSetThreadCoreMask(CUR_THREAD_HANDLE, 1, kCores12);
+    }
+    // The move happens at the next scheduling.
+    svcSleepThread(YieldType_WithCoreMigration);
+    const u32 now = svcGetCurrentProcessorNumber();
+    if (R_SUCCEEDED(rc))
+    {
+        printf("tssm: switch: %s: cores 1 and 2 (started on core %u, now on %u)\n", who,
+               (unsigned)before, (unsigned)now);
+    }
+    else
+    {
+        printf("tssm: switch: %s: stays on core %u (the core mask was refused: %#x)\n", who,
+               (unsigned)now, rc);
+    }
+    fflush(stdout);
 }
 
 void iSwitchStartup()
@@ -825,12 +1055,40 @@ void iSwitchStartup()
            (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
            (unsigned)HOSVER_MAJOR(hosversionGet()), (unsigned)HOSVER_MINOR(hosversionGet()),
            (unsigned)HOSVER_MICRO(hosversionGet()), hosversionIsAtmosphere() ? ", Atmosphere" : "");
-    printf("tssm: switch: romfs %s; nxlink %s; log server %s\n", sRomfs ? "mounted" : "not mounted",
-           sNxlinkSocket >= 0 ? "connected" : "not used",
-           sLogThreadUp ? "on TCP 28772 (started by nxlink)" : "off");
+    printf("tssm: switch: romfs %s; nxlink %s\n", sRomfs ? "mounted" : "not mounted",
+           sNxlinkSocket >= 0 ? "connected" : "not used");
     if (!sRomfs)
     {
         printf("tssm: switch: romfsInit failed: %#x\n", sRomfsResult);
+    }
+    if (sSessions == kBsdSessions)
+    {
+        printf("tssm: switch: sockets up with %u BSD sessions\n", (unsigned)sSessions);
+    }
+    else if (sSessions > 0)
+    {
+        printf("tssm: switch: sockets up with %u BSD sessions (%u refused: %#x)\n",
+               (unsigned)sSessions, (unsigned)kBsdSessions, sSocketsResult);
+    }
+    else
+    {
+        printf("tssm: switch: no sockets (%#x): co-op and the log server are off\n",
+               sSocketsResult);
+    }
+    printf("tssm: switch: log server %s\n",
+           sLogThreadUp ? "on TCP 28772 (started by nxlink or the co-op test)" : "off");
+    if (sCoopTest)
+    {
+        printf("tssm: switch: co-op test: config, saves, mods and log in %s; password %s; "
+               "env.txt: %s\n",
+               kCoopTestDir, sCoopPassword ? "from password.txt" : "not given",
+               sCoopEnvNames[0] != '\0' ? sCoopEnvNames : "none");
+    }
+    else if (sCoopTestRefused)
+    {
+        printf("tssm: switch: --coop-test ignored: %s/armed does not exist; the player's own "
+               "folder is used\n",
+               kCoopTestDir);
     }
 
     appletHook(&sHook, OnApplet, NULL);

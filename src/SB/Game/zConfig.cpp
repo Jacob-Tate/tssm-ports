@@ -5,6 +5,9 @@
 #include "xutil.h"
 #include "zEntPlayer.h"
 #include "zUICustom.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 struct ScenePlayerMapEntry
 {
@@ -235,6 +238,17 @@ U32 zConfig_getAlternateCostume(U32 normalPlayerTag)
 U32 zConfig_getAlternateCostume(ePlayerEnum player)
 {
     U32 altCostume;
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 7.4): the costume chosen for co-op,
+    // when it is unlocked in this save. FALSE at once when co-op is off.
+    if (iCoopCostumeOverride(zConfig_isPlayerSpongebob(player) ? 0 : (zConfig_isPlayerPatrick(player) ? 1 : -1),
+                             &altCostume))
+    {
+        xUtil_idtag2string(altCostume, 0);
+        return altCostume;
+    }
+#endif
 
     if (zConfig_isPlayerSpongebob(player))
     {

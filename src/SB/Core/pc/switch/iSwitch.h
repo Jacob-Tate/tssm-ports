@@ -38,6 +38,15 @@ void iSwitchStartup();
 // The log tee writes stdout and stderr to it (iLog.cpp).
 int iSwitchNxlinkSocket();
 
+// Whether the BSD sockets came up at boot (iSwitchEarly); co-op's net_init
+// answers with it rather than starting them again.
+bool iSwitchSocketsUp();
+
+// From a new thread, as its first act: it moves to cores 1 and 2, off the
+// game thread's core 0, and the log says where it runs (`who` names it).
+// Where the system refuses, it stays where it started.
+void iSwitchMoveOffGameCore(const char* who);
+
 // The .nro image's load address, so that diagnostics can print addresses as
 // offsets that addr2line reads against tssm.elf.
 uintptr_t iSwitchImageBase();
@@ -61,10 +70,10 @@ bool iSwitchReleaseAllLow();
 
 // The one way out (iSwitch.cpp). The link wraps exit() (CMakeLists.txt), so
 // every exit() comes here: the window's close, the overlay's and the
-// launcher's Quit, a fatal error. It stops the log server, the audio thread,
-// the GL context and SDL, then runs exit() as usual; userAppExit then releases
-// the low memory and returns to the Homebrew Menu. Each step is a line in the
-// log, written before the step runs.
+// launcher's Quit, a fatal error. It stops the log server, co-op, the audio
+// thread, the GL context and SDL, then runs exit() as usual; userAppExit then
+// closes the sockets, releases the low memory and returns to the Homebrew
+// Menu. Each step is a line in the log, written before the step runs.
 void iSwitchQuit(int code) __attribute__((noreturn));
 
 // One "tssm: switch: quit: ..." line, written to the log file and synced
@@ -90,6 +99,10 @@ void iSwitchCrashLog(const char* what);
 // it again and restarts the audio devices (iTimeResume, iAudioSDLRestart).
 void iSwitchGameAway();
 void iSwitchGameBack();
+
+// The quit's co-op step (iHostSwitch.cpp): iCoopShutdown, which says goodbye
+// to the partner and joins the co-op I/O thread.
+void iSwitchGameStopCoop();
 
 // The log's paths and drain (iLog.h), for the libnx side's crash handler.
 const char* iSwitchCrashLogPath();
