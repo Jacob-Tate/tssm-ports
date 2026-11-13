@@ -65,7 +65,8 @@ enum iAudioSDLReason
 };
 
 // Asks for every user to be closed and opened again at the next poll. Any
-// thread.
+// thread. iAUDIOSDL_FOREGROUND replaces a reason still pending, and is not
+// held back.
 void iAudioSDLRestart(iAudioSDLReason why);
 
 // The restarts carried out so far, for tests and the log.

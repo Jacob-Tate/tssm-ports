@@ -1,17 +1,16 @@
-# The SpongeBob SquarePants Movie: PC port
+# The SpongeBob SquarePants Movie: Nintendo Switch port
 
-A native Windows version of *The SpongeBob SquarePants Movie* game, built from the
-matching decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
-this repository starts from). The
-game's own decompiled code runs unchanged in behaviour; a new platform layer
-(`src/SB/Core/pc`) replaces the GameCube one, draws through librw (Direct3D 9, Direct3D
-11 or OpenGL 3), and uses SDL 3 for the window, controllers and sound.
+*The SpongeBob SquarePants Movie* game as a Nintendo Switch homebrew program
+(`tssm.nro`), built from the matching decompilation of the GameCube game
+([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork)) and the PC port (the `pc` branch). It is the PC port's code
+built with devkitPro for the Switch: the same game code and platform layer, drawing
+through OpenGL on the console's Mesa driver.
 
-- Windows, 64-bit (x64) and 32-bit (x86). The code also has Linux and macOS paths, but
-  they are not tested.
-- Widescreen, any resolution, high frame rates, MSAA, a settings window (F1, or Back +
-  Start on a controller), controller and keyboard bindings, mods, and save import and
-  export with Dolphin and the GameCube.
+- For consoles running custom firmware (Atmosphere) and the Homebrew Menu. Using custom
+  firmware online can get a console banned: play offline.
+- It has been played on one console so far; `docs/SWITCH.md` lists what is still
+  unchecked.
+- This branch still builds the Windows version too, exactly as on the `pc` branch.
 
 This repository and its branches
 --------------------------------
@@ -23,9 +22,9 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 
 | Branch | What it is for |
 |---|---|
-| `pc` (this one) | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
+| `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
 | `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
-| `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
+| `switch` (this one) | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
 | `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
 | `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
 | `coop-android` | The co-op app for Android, a second app beside the normal one. Built on `android`. |
@@ -36,58 +35,62 @@ Every branch builds from source; you bring your own game files.
 You need your own copy of the game
 ----------------------------------
 
-This repository contains **no game data**. The port reads the files of the **Xbox**
-release of *The SpongeBob SquarePants Movie*, so you need your own copy of that disc and
-its files copied off it (about 1 GB): the folder that directly holds `boot.HIP`,
-`font.HIP` and `FMV\`. Never put those files in the repository.
+This repository contains **no game data**, and neither does `tssm.nro`. It reads the files
+of the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own copy of
+that disc and its files copied off it (about 1 GB). Never put those files in the
+repository.
 
-Building on Windows
--------------------
+Building
+--------
 
-You need:
+Everything comes from devkitPro. Build in devkitPro's MSYS2 shell on Windows, or any shell
+with `DEVKITPRO` set on Linux or macOS.
 
-- Visual Studio 2022 or its Build Tools, with the "Desktop development with C++" workload
-  and a Windows SDK
-- LLVM (`clang++`), CMake 3.16 or newer, Ninja, Python 3 and git
-- optional, for the game's movies: FFmpeg from vcpkg,
-  `vcpkg install ffmpeg[core,avcodec,avformat,swresample,swscale]:x64-windows`
-  (and `:x86-windows` for a 32-bit build). Without it the movies are skipped.
+1. devkitPro with the Switch packages:
+   `pacman -S switch-dev switch-cmake switch-mesa switch-libdrm_nouveau switch-glad switch-pkg-config`
+2. The source and its submodules:
 
-Then, in a normal command prompt:
+       git clone --branch switch <this repository's address> tssm
+       cd tssm
+       git submodule update --init --depth 1
 
-    git clone --branch pc <this repository's address> tssm
-    cd tssm
-    git submodule update --init --depth 1
-    build-release.bat
+3. SDL 3 for the Switch (devkitPro's SDL fork), built with this repository's patches:
 
-`build-release.bat` finds Visual Studio by itself, and LLVM and CMake in their default
-install folders. It puts `tssm.exe` and the DLLs it needs in `bin\`.
-`build-release.bat GL3 x86` builds one renderer, 32-bit; `build-debug.bat` makes a debug
-build. `src/SB/Core/pc/README.md` lists the CMake options and the rest.
+       git clone --depth 1 --branch switch-sdl-3.4 https://github.com/devkitPro/SDL.git <sdl>
+       sh tools/switch/build_sdl.sh <sdl> <sdl build folder> <prefix>
+
+4. Optional, for the movies: FFmpeg from its own source (LGPL-only settings):
+
+       sh tools/switch/build_ffmpeg.sh <ffmpeg source> <work folder> <prefix>
+
+5. The port:
+
+       sh tools/switch/build_port.sh <build folder> <prefix>
+
+   This makes `<build folder>/tssm.nro` (and `tssm.elf` beside it, which crash reports
+   refer to).
+
+`docs/SWITCH.md` explains each step and which versions were tested.
 
 Playing
 -------
 
-1. Start `bin\tssm.exe`. On the first run it writes `config.ini` beside itself.
-2. Point the game at your Xbox files: set `path` under `[assets]` in `config.ini` (or the
-   `TSSM_ASSETS` environment variable) to the folder that holds `boot.HIP`.
-3. F1, or Back + Start on a controller, opens the settings window.
-
-Saves go to `%APPDATA%\tssm\saves`, and the log of the last run to
-`%APPDATA%\tssm\last_run.log`.
+1. Copy `tssm.nro` to `/switch/tssm/tssm.nro` on the SD card, and your Xbox game files to
+   `/switch/tssm/assets/` (the folder with `boot.HIP`, `FMV/` and the level folders).
+2. Start the Homebrew Menu **with full memory**: hold R while you start any game from the
+   HOME menu, then pick TSSM. (From the Album it gets too little memory, and says so.)
+3. Settings, saves and the log are written into `/switch/tssm/`.
 
 More documentation:
 
 | File | What |
 |---|---|
-| `docs/CONTROLS.md` | the controls, and how each was worked out |
-| `docs/GUI.md` | the settings window and the launcher |
-| `docs/SAVES.md` | save files, and moving them to and from Dolphin or a GameCube |
-| `docs/MODDING.md` | mods: replacing textures, sounds, text and whole assets |
-| `docs/RENDERING.md`, `docs/WIDESCREEN.md` | how the console's screen effects and widescreen are done |
+| `docs/SWITCH.md` | building, playing, controls, testing on a console, how the Switch layer works |
+| `docs/CONTROLS.md` | the controls |
+| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube |
+| `docs/MODDING.md` | mods |
 | `docs/ICON.md` | using your own picture as the program's icon |
-| `src/SB/Core/pc/README.md` | building in detail, settings, switches and test runs |
-| `src/SB/Core/pc/PORTING.md` | where every file of the platform layer came from, and what is still stubbed |
+| `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |
 
 The GameCube build still works here
 -----------------------------------
@@ -154,3 +157,6 @@ needed to relink it with another FFmpeg).
 | Vulkan-Headers (Vulkan renderer only) | git submodule | Apache 2.0 / MIT |
 | FFmpeg (optional, for the movies) | not in the repository: you install or build it | LGPL 2.1 or later |
 | treedome (code adapted into `src/SB/Core/pc`) | copied, see `src/SB/Core/pc/PORTING.md` | CC0 1.0 |
+| libnx, Mesa, libdrm_nouveau | devkitPro's Switch packages, linked statically; notes in `dist/switch/licenses` | ISC, MIT, MIT |
+| newlib (the C library), libgcc, libstdc++ | devkitA64, linked statically | newlib's permissive licences; GPL 3 with the GCC Runtime Library Exception |
+| FFmpeg on the Switch (optional) | built by `tools/switch/build_ffmpeg.sh` and linked statically | LGPL 2.1 or later |

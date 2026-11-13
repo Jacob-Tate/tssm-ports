@@ -1,0 +1,74 @@
+Local fix for devkitPro/SDL branch switch-sdl-3.4 (c329016c0e338ab4397ad930f83330c9fe058348).
+
+SDL_switchtouch.c passed `false` (0) where SDL 3.4's SDL_SendTouch takes an
+SDL_EventType, so no finger ever went down or up: a tap was dropped as the lift
+of an unknown finger, and a drag became FINGER_DOWN (from SDL_SendTouchMotion)
+with no FINGER_UP after it. Both scans also set `found = false` where they meant
+true. Send SDL_EVENT_FINGER_DOWN / SDL_EVENT_FINGER_UP, mark a matched finger as
+found, and look for new fingers whatever the count (one finger lifted and
+another put down in the same poll keeps the count).
+
+Apply with: git -C <SDL clone> apply <this file>
+
+diff --git a/src/video/switch/SDL_switchtouch.c b/src/video/switch/SDL_switchtouch.c
+index b4c6716..d1f4c57 100644
+--- a/src/video/switch/SDL_switchtouch.c
++++ b/src/video/switch/SDL_switchtouch.c
+@@ -61,25 +61,23 @@ void SWITCH_PollTouch(Uint64 timestamp)
+ 
+     if (hidGetTouchScreenStates(&touchState, 1)) {
+         /* Finger down */
+-        if (touchStateOld.count < touchState.count) {
+-            for (i = 0; i < touchState.count; i++) {
+-                found = false;
+-
+-                for (j = 0; j < touchStateOld.count; j++) {
+-                    if (touchStateOld.touches[j].finger_id == touchState.touches[i].finger_id) {
+-                        found = false;
+-                        break;
+-                    }
+-                }
++        for (i = 0; i < touchState.count; i++) {
++            found = false;
+ 
+-                if (!found) {
+-                    SDL_SendTouch(timestamp, id,
+-                                  (SDL_FingerID)touchState.touches[i].finger_id + 1,
+-                                  window, false,
+-                                  (float)touchState.touches[i].x / rel_w,
+-                                  (float)touchState.touches[i].y / rel_h, 1);
++            for (j = 0; j < touchStateOld.count; j++) {
++                if (touchStateOld.touches[j].finger_id == touchState.touches[i].finger_id) {
++                    found = true;
++                    break;
+                 }
+             }
++
++            if (!found) {
++                SDL_SendTouch(timestamp, id,
++                              (SDL_FingerID)touchState.touches[i].finger_id + 1,
++                              window, SDL_EVENT_FINGER_DOWN,
++                              (float)touchState.touches[i].x / rel_w,
++                              (float)touchState.touches[i].y / rel_h, 1);
++            }
+         }
+ 
+         /* Scan for moves or up */
+@@ -88,7 +86,7 @@ void SWITCH_PollTouch(Uint64 timestamp)
+ 
+             for (j = 0; j < touchState.count; j++) {
+                 if (touchState.touches[j].finger_id == touchStateOld.touches[i].finger_id) {
+-                    found = false;
++                    found = true;
+                     /* Finger moved */
+                     if (touchState.touches[j].x != touchStateOld.touches[i].x || touchState.touches[j].y != touchStateOld.touches[i].y) {
+                         SDL_SendTouchMotion(timestamp, id,
+@@ -106,7 +104,7 @@ void SWITCH_PollTouch(Uint64 timestamp)
+                 SDL_SendTouch(timestamp, id,
+                               (SDL_FingerID)touchStateOld.touches[i].finger_id + 1,
+                               window,
+-                              false,
++                              SDL_EVENT_FINGER_UP,
+                               (float)touchStateOld.touches[i].x / rel_w,
+                               (float)touchStateOld.touches[i].y / rel_h, 1);
+             }

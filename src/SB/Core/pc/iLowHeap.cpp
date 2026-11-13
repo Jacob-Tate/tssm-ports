@@ -49,7 +49,15 @@ namespace
     // Block sizes stay below 4 GB: first-level indices 0..23.
     const int kFlCount = 32 - kFlShift + 1;
 
+#ifdef __SWITCH__
+    // Memory there is real from the moment it is mapped, not when first
+    // touched (iHostSwitch.cpp), so the reservation is what it costs. 64 MB is
+    // five times the measured peak to first gameplay (iLowHeap.h).
+    // TODO(switch): measure the peak over a whole playthrough.
+    const U32 kDefaultMB = 64;
+#else
     const U32 kDefaultMB = 256;
+#endif
 
     std::mutex sLock;
 

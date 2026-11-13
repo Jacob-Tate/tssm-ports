@@ -6,6 +6,7 @@
 #include "iPadHost.h"
 #include "iPadLayout.h"
 #include "iPadSettings.h"
+#include "iPadTokens.h"
 #include "iPadTouch.h"
 #include "iTouchOverlay.h"
 #include "xPad.h"
@@ -54,7 +55,7 @@ namespace
     // ---- the overlay ------------------------------------------------------
 
     void Shape(iTouchOverlayShape* shapes, S32& n, F32 x, F32 y, F32 hw, F32 hh, bool round,
-               U8 r, U8 g, U8 b, bool lit, char label, F32 fill)
+               U8 r, U8 g, U8 b, bool lit, char label, F32 fill, char label2 = 0)
     {
         if (n >= ITOUCHOVERLAY_MAX_SHAPES)
         {
@@ -72,6 +73,7 @@ namespace
         s.b = b;
         s.a = lit ? 230 : (U8)(60 + 140 * fill);
         s.label = label;
+        s.label2 = label2;
     }
 
     void Overlay(const _tagxPad* pad, U32 on, const iPadHostState* host)
@@ -114,35 +116,37 @@ namespace
               ry + 1.6f * u * pad->analog2.y / 127.0f, 0.6f * u, 0.6f * u, true, 255, 230, 90,
               pad->analog2.x != 0 || pad->analog2.y != 0, 0, 0.0f);
 
-        // Face buttons, as the Xbox prints them.
+        // Face buttons, as the Xbox prints them; on the Switch, the letters
+        // printed in the same places, on its uncoloured buttons.
         F32 fx = ox + 12.5f * u;
         F32 fy = oy - 1.2f * u;
-        Shape(shapes, n, fx, fy + 1.4f * u, u, u, true, 60, 200, 60, (on & XPAD_BUTTON_X) != 0,
-              'A', 0.0f);
-        Shape(shapes, n, fx + 1.4f * u, fy, u, u, true, 220, 50, 50,
-              (on & XPAD_BUTTON_TRIANGLE) != 0, 'B', 0.0f);
-        Shape(shapes, n, fx - 1.4f * u, fy, u, u, true, 50, 110, 230, (on & XPAD_BUTTON_O) != 0,
-              'X', 0.0f);
-        Shape(shapes, n, fx, fy - 1.4f * u, u, u, true, 230, 190, 40,
-              (on & XPAD_BUTTON_SQUARE) != 0, 'Y', 0.0f);
+        const bool sw = iPadSwitchLabels();
+        Shape(shapes, n, fx, fy + 1.4f * u, u, u, true, sw ? 170 : 60, sw ? 170 : 200,
+              sw ? 170 : 60, (on & XPAD_BUTTON_X) != 0, sw ? 'B' : 'A', 0.0f);
+        Shape(shapes, n, fx + 1.4f * u, fy, u, u, true, sw ? 170 : 220, sw ? 170 : 50,
+              sw ? 170 : 50, (on & XPAD_BUTTON_TRIANGLE) != 0, sw ? 'A' : 'B', 0.0f);
+        Shape(shapes, n, fx - 1.4f * u, fy, u, u, true, sw ? 170 : 50, sw ? 170 : 110,
+              sw ? 170 : 230, (on & XPAD_BUTTON_O) != 0, sw ? 'Y' : 'X', 0.0f);
+        Shape(shapes, n, fx, fy - 1.4f * u, u, u, true, sw ? 170 : 230, sw ? 170 : 190,
+              sw ? 170 : 40, (on & XPAD_BUTTON_SQUARE) != 0, sw ? 'X' : 'Y', 0.0f);
 
-        // White and black, Back and Start.
+        // White and black, Back and Start (the Switch's - and +).
         Shape(shapes, n, fx + 2.6f * u, fy + 2.4f * u, 0.6f * u, 0.6f * u, true, 240, 240, 240,
               (on & XPAD_BUTTON_L2) != 0, 0, 0.0f);
         Shape(shapes, n, fx + 1.2f * u, fy + 3.0f * u, 0.6f * u, 0.6f * u, true, 90, 90, 90,
               (on & XPAD_BUTTON_R2) != 0, 0, 0.0f);
         Shape(shapes, n, ox + 5.5f * u, oy - 1.0f * u, 0.6f * u, 0.45f * u, false, 200, 200, 200,
-              (on & XPAD_BUTTON_SELECT) != 0, '=', 0.0f);
+              (on & XPAD_BUTTON_SELECT) != 0, sw ? '-' : '=', 0.0f);
         Shape(shapes, n, ox + 7.5f * u, oy - 1.0f * u, 0.6f * u, 0.45f * u, false, 200, 200, 200,
-              (on & XPAD_BUTTON_START) != 0, '>', 0.0f);
+              (on & XPAD_BUTTON_START) != 0, sw ? '+' : '>', 0.0f);
 
-        // Triggers, filled as far as they are pulled.
+        // Triggers, filled as far as they are pulled (the Switch's ZL, ZR).
         F32 tl = host != NULL ? host->trigger_l : 0.0f;
         F32 tr = host != NULL ? host->trigger_r : 0.0f;
         Shape(shapes, n, ox + 1.0f * u, oy - 5.2f * u, 1.6f * u, 0.7f * u, false, 200, 200, 200,
-              (on & XPAD_BUTTON_L1) != 0, 'L', tl);
+              (on & XPAD_BUTTON_L1) != 0, sw ? 'Z' : 'L', tl, sw ? 'L' : 0);
         Shape(shapes, n, ox + 13.0f * u, oy - 5.2f * u, 1.6f * u, 0.7f * u, false, 200, 200, 200,
-              (on & XPAD_BUTTON_R1) != 0, 'R', tr);
+              (on & XPAD_BUTTON_R1) != 0, sw ? 'Z' : 'R', tr, sw ? 'R' : 0);
 
         // Z on its own, which Back and black both carry.
         Shape(shapes, n, ox + 6.5f * u, oy - 3.4f * u, 0.8f * u, 0.45f * u, false, 120, 90, 220,

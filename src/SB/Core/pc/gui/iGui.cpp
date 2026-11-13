@@ -21,6 +21,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 #include "gui/iGuiRender.h"
 
@@ -85,6 +86,10 @@ namespace
     iPadHostState sQuiet[IPAD_MAX_CONTROLLERS];
 
     S32 sSelectTab = -1;
+#ifdef __SWITCH__
+    // The tab drawn last frame, for L and R.
+    S32 sShownTab;
+#endif
 
     iGuiPanelFn sPanelFn[IGUI_PANEL_COUNT];
     void* sPanelUser[IGUI_PANEL_COUNT];
@@ -107,6 +112,30 @@ namespace
     bool sCapturing;
     bool sCapturesFinished;
     bool sExitWhenCaptured;
+
+    // TSSM_GUI_SCRIPT: input played into the overlay, a step at a given frame
+    // after it opened -- controller buttons, keys, taps, drags, captures --
+    // so a test can drive a tab (the Saves tab's file picker, say) the way a
+    // player would. TSSM_GUI_SCRIPT_SHOTS names the captures ("%s" = the
+    // step's name).
+    struct ScriptStep
+    {
+        S32 frame;
+        char action[96];
+    };
+    ScriptStep sScript[96];
+    S32 sScriptCount;
+    S32 sScriptFrame;
+    char sScriptShots[480];
+    ImGuiKey sScriptKey = ImGuiKey_None;
+    S32 sScriptKeyUp;
+    S32 sScriptMouseUp;
+    bool sScriptMouse; // the script has the mouse: its position wins every frame
+    float sMousePos[2];
+    float sDragFrom[2];
+    float sDragTo[2];
+    S32 sDragStart;
+    S32 sDragFrames;
 
     // ---------------------------------------------------------------------------
 
@@ -269,6 +298,210 @@ namespace
         {
             sSelectTab = sCaptureTab;
         }
+
+        // "30:tab:saves 40:a 60:down 80:shot:list 200:quit": steps apart by
+        // spaces or commas, each "<frame>:<action>". Actions: a b x y (the
+        // controller's face buttons by position: a is the bottom one), up
+        // down left right, l r, enter esc backspace tab space kup kdown,
+        // click:X:Y, drag:X:Y:X2:Y2, wheel:X:Y:N, tab:<name>, shot:<name>,
+        // quit.
+        const char* script = getenv("TSSM_GUI_SCRIPT");
+        for (const char* c = script; c != NULL && *c != '\0';)
+        {
+            while (*c == ' ' || *c == ',' || *c == '\n')
+            {
+                c++;
+            }
+            size_t len = strcspn(c, " ,\n");
+            if (len == 0)
+            {
+                break;
+            }
+            const char* colon = (const char*)memchr(c, ':', len);
+            if (colon != NULL && sScriptCount < (S32)(sizeof(sScript) / sizeof(sScript[0])))
+            {
+                ScriptStep& s = sScript[sScriptCount++];
+                s.frame = atoi(c);
+                snprintf(s.action, sizeof(s.action), "%.*s", (int)(len - (colon + 1 - c)),
+                         colon + 1);
+            }
+            c += len;
+        }
+        const char* shots = getenv("TSSM_GUI_SCRIPT_SHOTS");
+        snprintf(sScriptShots, sizeof(sScriptShots), "%s", shots != NULL ? shots : "");
+        if (sScriptCount > 0)
+        {
+            printf("tssm: gui: TSSM_GUI_SCRIPT: %d steps\n", (int)sScriptCount);
+        }
+    }
+
+    ImGuiKey ScriptKey(const char* name)
+    {
+        static const struct
+        {
+            const char* name;
+            ImGuiKey key;
+        } kKeys[] = {
+            { "up", ImGuiKey_GamepadDpadUp },
+            { "down", ImGuiKey_GamepadDpadDown },
+            { "left", ImGuiKey_GamepadDpadLeft },
+            { "right", ImGuiKey_GamepadDpadRight },
+            // By position, as SDL reports them: "a" is the bottom button.
+            { "a", ImGuiKey_GamepadFaceDown },
+            { "b", ImGuiKey_GamepadFaceRight },
+            { "x", ImGuiKey_GamepadFaceLeft },
+            { "y", ImGuiKey_GamepadFaceUp },
+            { "l", ImGuiKey_GamepadL1 },
+            { "r", ImGuiKey_GamepadR1 },
+            { "enter", ImGuiKey_Enter },
+            { "esc", ImGuiKey_Escape },
+            { "backspace", ImGuiKey_Backspace },
+            { "tab", ImGuiKey_Tab },
+            { "kdown", ImGuiKey_DownArrow },
+            { "kup", ImGuiKey_UpArrow },
+            { "space", ImGuiKey_Space },
+        };
+        for (size_t i = 0; i < sizeof(kKeys) / sizeof(kKeys[0]); i++)
+        {
+            if (strcmp(name, kKeys[i].name) == 0)
+            {
+                return kKeys[i].key;
+            }
+        }
+        return ImGuiKey_None;
+    }
+
+    // Between the backend's NewFrame and ImGui's: what the script presses
+    // this frame goes into ImGui's input queue as if a device had said it.
+    void PlayScript()
+    {
+        if (sScriptCount == 0)
+        {
+            return;
+        }
+        ImGuiIO& io = ImGui::GetIO();
+        sScriptFrame++;
+        // The backend drops this flag with no controller open; the script is one.
+        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+
+        if (sScriptKey != ImGuiKey_None && sScriptFrame >= sScriptKeyUp)
+        {
+            io.AddKeyEvent(sScriptKey, false);
+            sScriptKey = ImGuiKey_None;
+        }
+        // Once the script has clicked, its pointer is the one ImGui sees: the
+        // backend reports the real cursor every frame, and this comes after.
+        if (sDragFrames > 0)
+        {
+            const float t = (float)(sScriptFrame - sDragStart) / (float)sDragFrames;
+            const float k = t > 1.0f ? 1.0f : t;
+            sMousePos[0] = sDragFrom[0] + (sDragTo[0] - sDragFrom[0]) * k;
+            sMousePos[1] = sDragFrom[1] + (sDragTo[1] - sDragFrom[1]) * k;
+            if (t >= 1.0f)
+            {
+                sDragFrames = 0;
+                sScriptMouseUp = sScriptFrame + 2;
+            }
+        }
+        if (sScriptMouse)
+        {
+            io.AddMousePosEvent(sMousePos[0], sMousePos[1]);
+        }
+        if (sScriptMouseUp > 0 && sScriptFrame >= sScriptMouseUp)
+        {
+            io.AddMouseButtonEvent(0, false);
+            sScriptMouseUp = 0;
+        }
+
+        for (S32 i = 0; i < sScriptCount; i++)
+        {
+            const ScriptStep& s = sScript[i];
+            if (s.frame != sScriptFrame)
+            {
+                continue;
+            }
+            printf("tssm: gui: script %d: %s\n", (int)s.frame, s.action);
+            fflush(stdout);
+
+            float x = 0.0f;
+            float y = 0.0f;
+            float x2 = 0.0f;
+            float y2 = 0.0f;
+            if (strncmp(s.action, "shot:", 5) == 0)
+            {
+                char path[600];
+                if (strstr(sScriptShots, "%s") != NULL)
+                {
+                    snprintf(path, sizeof(path), sScriptShots, s.action + 5);
+                }
+                else
+                {
+                    snprintf(path, sizeof(path), "%s_%s.png", sScriptShots, s.action + 5);
+                }
+                iGuiRenderRequestCapture(path);
+            }
+            else if (strncmp(s.action, "tab:", 4) == 0)
+            {
+                for (S32 t = 0; t < TAB_COUNT; t++)
+                {
+                    if (SDL_strcasecmp(s.action + 4, kTabNames[t]) == 0)
+                    {
+                        sSelectTab = t;
+                    }
+                }
+            }
+            else if (sscanf(s.action, "drag:%f:%f:%f:%f", &x, &y, &x2, &y2) == 4)
+            {
+                sScriptMouse = true;
+                sMousePos[0] = x;
+                sMousePos[1] = y;
+                io.AddMousePosEvent(x, y);
+                io.AddMouseButtonEvent(0, true);
+                sDragFrom[0] = x;
+                sDragFrom[1] = y;
+                sDragTo[0] = x2;
+                sDragTo[1] = y2;
+                sDragStart = sScriptFrame;
+                sDragFrames = 12;
+            }
+            else if (sscanf(s.action, "click:%f:%f", &x, &y) == 2)
+            {
+                sScriptMouse = true;
+                sMousePos[0] = x;
+                sMousePos[1] = y;
+                io.AddMousePosEvent(x, y);
+                io.AddMouseButtonEvent(0, true);
+                sScriptMouseUp = sScriptFrame + 2;
+            }
+            else if (sscanf(s.action, "wheel:%f:%f:%f", &x, &y, &x2) == 3)
+            {
+                sScriptMouse = true;
+                sMousePos[0] = x;
+                sMousePos[1] = y;
+                io.AddMousePosEvent(x, y);
+                io.AddMouseWheelEvent(0.0f, x2);
+            }
+            else if (strcmp(s.action, "quit") == 0)
+            {
+                printf("tssm: gui: TSSM_GUI_SCRIPT done, exiting\n");
+                fflush(stdout);
+                exit(0);
+            }
+            else if (ScriptKey(s.action) != ImGuiKey_None)
+            {
+                if (sScriptKey != ImGuiKey_None)
+                {
+                    io.AddKeyEvent(sScriptKey, false);
+                }
+                sScriptKey = ScriptKey(s.action);
+                io.AddKeyEvent(sScriptKey, true);
+                sScriptKeyUp = sScriptFrame + 2;
+            }
+            else
+            {
+                printf("tssm: gui: script: no such step '%s'\n", s.action);
+            }
+        }
     }
 
     // After each frame the overlay drew: take the capture that is due, move to
@@ -332,7 +565,12 @@ namespace
     {
         if (ImGui::BeginPopupModal("Quit the game?", NULL, ImGuiWindowFlags_AlwaysAutoResize))
         {
+#ifdef __SWITCH__
+            ImGui::TextUnformatted("Return to the Homebrew Menu? Progress since the last save is "
+                                   "lost.");
+#else
             ImGui::TextUnformatted("Quit to the desktop? Progress since the last save is lost.");
+#endif
             ImGui::Spacing();
             if (ImGui::Button("Quit"))
             {
@@ -341,7 +579,7 @@ namespace
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            if (ImGui::Button("Cancel") || iGui::BackPressed())
             {
                 ImGui::CloseCurrentPopup();
             }
@@ -384,7 +622,12 @@ namespace
                                        ImGuiWindowFlags_NoScrollbar |
                                        ImGuiWindowFlags_NoScrollWithMouse;
 
-        if (ImGui::Begin("The SpongeBob SquarePants Movie  |  PC port###tssm_overlay", NULL, flags))
+#ifdef __SWITCH__
+        const char* const title = "The SpongeBob SquarePants Movie###tssm_overlay";
+#else
+        const char* const title = "The SpongeBob SquarePants Movie  |  PC port###tssm_overlay";
+#endif
+        if (ImGui::Begin(title, NULL, flags))
         {
             if (iGui::SaveError() != NULL)
             {
@@ -395,8 +638,14 @@ namespace
             if (iGui::AnyRestartPending())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 210, 80, 255));
+#ifdef __SWITCH__
+                ImGui::TextWrapped("Changes marked \"restart\" apply the next time the game is "
+                                   "started from the Homebrew Menu. Everything else has already "
+                                   "taken effect.");
+#else
                 ImGui::TextWrapped("Changes marked \"restart\" apply the next time the game "
                                    "starts. Everything else has already taken effect.");
+#endif
                 ImGui::PopStyleColor();
             }
 
@@ -411,6 +660,9 @@ namespace
                         (sSelectTab == t) ? ImGuiTabItemFlags_SetSelected : 0;
                     if (ImGui::BeginTabItem(kTabLabels[t], NULL, tabFlags))
                     {
+#ifdef __SWITCH__
+                        sShownTab = t;
+#endif
                         ImGui::BeginChild("tab", ImVec2(0.0f, -footer), ImGuiChildFlags_NavFlattened);
                         switch (t)
                         {
@@ -437,6 +689,24 @@ namespace
                 ImGui::EndTabBar();
             }
             sSelectTab = -1;
+#ifdef __SWITCH__
+            // L and R change the tab; the d-pad would have to climb past every
+            // row of a long tab. Not while a popup (the file browser pages
+            // with L and R) or an edit is open.
+            if (!ImGui::IsAnyItemActive() &&
+                !ImGui::IsPopupOpen(NULL,
+                                    ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false))
+                {
+                    sSelectTab = (sShownTab + TAB_COUNT - 1) % TAB_COUNT;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false))
+                {
+                    sSelectTab = (sShownTab + 1) % TAB_COUNT;
+                }
+            }
+#endif
 
             ImGui::Separator();
 
@@ -451,15 +721,27 @@ namespace
             }
             DrawQuitPopup();
 
+            // The GUI's own file browser, for the tabs that ask for a file
+            // where the system has no dialog.
+            iGui::DrawFilePicker();
+
             const char* keyName = SDL_GetScancodeName(sKey);
             ImGui::SameLine();
-            ImGui::TextDisabled("%s, Esc%s: close. The game takes no input while this is open.",
+#ifdef __SWITCH__
+            // No keyboard to name. The menu buttons go by position, as in the
+            // game: the bottom one (B) chooses, the right one (A) goes back.
+            ImGui::TextDisabled("B choose   A back   L/R tab   %s close", iGui::PadComboName());
+            (void)keyName;
+#else
+            ImGui::TextDisabled("%s, Esc%s%s: close. The game takes no input while this is open.",
                                 (keyName != NULL && keyName[0] != '\0') ? keyName : "F1",
-                                sPadCombo ? ", Back+Start" : "");
+                                sPadCombo ? ", " : "", sPadCombo ? iGui::PadComboName() : "");
+#endif
         }
         ImGui::End();
 
         if (sOpen && ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive() &&
+            !iGui::FilePickerTookEscape() &&
             !ImGui::IsPopupOpen(NULL, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
         {
             SetOpen(false);
@@ -493,6 +775,7 @@ namespace
 
         iGuiRenderNewFrame();
         ImGui_ImplSDL3_NewFrame();
+        PlayScript();
         ImGui::NewFrame();
 
         iGuiRenderBackground();
@@ -627,7 +910,12 @@ namespace
             code = SDL_SCANCODE_F1;
         }
         sKey = code;
+#ifdef __SWITCH__
+        // Docked with no keyboard nothing else opens the overlay.
+        sPadCombo = true;
+#else
         sPadCombo = iConfigGetBool("gui.pad_combo", TRUE) != 0;
+#endif
     }
 } // namespace
 
@@ -689,8 +977,14 @@ void iGuiInit()
     iGui::ApplyAudio();
     sReady = true;
 
-    printf("tssm: gui: overlay ready (%s, Dear ImGui %s); %s%s opens it\n", renderer,
-           IMGUI_VERSION, SDL_GetScancodeName(sKey), sPadCombo ? " or Back+Start" : "");
+#ifdef __SWITCH__
+    printf("tssm: gui: overlay ready (%s, Dear ImGui %s); %s opens it\n", renderer, IMGUI_VERSION,
+           iGui::PadComboName());
+#else
+    printf("tssm: gui: overlay ready (%s, Dear ImGui %s); %s%s%s opens it\n", renderer,
+           IMGUI_VERSION, SDL_GetScancodeName(sKey), sPadCombo ? " or " : "",
+           sPadCombo ? iGui::PadComboName() : "");
+#endif
     fflush(stdout);
 
     ReadDebugSwitches();

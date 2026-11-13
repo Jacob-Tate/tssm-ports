@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.13)
+project(tssm_hello C)
+add_executable(hello source/main.c)
+target_link_libraries(hello PRIVATE nx)
+nx_generate_nacp(hello.nacp NAME "TSSM toolchain hello" AUTHOR "TSSM port" VERSION "0.0.1")
+nx_create_nro(hello NACP hello.nacp)

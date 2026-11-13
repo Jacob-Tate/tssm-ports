@@ -5,10 +5,12 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
 #include "iHost.h"
+#include "iPadTokens.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -33,14 +35,19 @@ namespace
 
     void SDLCALL OnFolderPicked(void*, const char* const* files, int)
     {
-        SDL_LockMutex(sPickLock);
         if (files == NULL)
         {
+            // No dialog at all (SDL has none on this system, or it could not
+            // be shown): the GUI's own browser takes the request over, and
+            // every one after it. The request stays open meanwhile.
             printf("tssm: gui: the system's file dialog failed: %s\n", SDL_GetError());
             fflush(stdout);
-            sPickResult[0] = '\0';
+            iGui::NoteSystemDialogFailed();
+            return;
         }
-        else if (files[0] == NULL)
+
+        SDL_LockMutex(sPickLock);
+        if (files[0] == NULL)
         {
             sPickResult[0] = '\0'; // cancelled
         }
@@ -244,6 +251,17 @@ float iGui::AutoScale(SDL_Window* window)
         return 1.0f;
     }
 
+#ifdef __SWITCH__
+    // A handheld screen at arm's length and a television across a room both
+    // want more than 1080 lines' worth; the tab scrolls rather than shrinks.
+    {
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSize(window, &w, &h);
+        return h >= 1080 ? 1.5f : 1.25f;
+    }
+#endif
+
     // The display's own scaling, in the window's coordinates: on a system that
     // hands out pixels (Windows) that is the whole 150% or 200%; on one that
     // hands out points (macOS) the points already carry it.
@@ -315,7 +333,7 @@ void iGui::SetupContext()
     io.IniFilename = NULL;
     io.LogFilename = NULL;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__SWITCH__)
     io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
 #endif
 
@@ -336,8 +354,12 @@ void iGui::SetupContext()
     style.FramePadding = ImVec2(8.0f, 5.0f);
     style.ItemSpacing = ImVec2(10.0f, 7.0f);
     style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__SWITCH__)
     style.TouchExtraPadding = ImVec2(6.0f, 6.0f);
+#endif
+#ifdef __SWITCH__
+    // A finger can scroll a long tab only by its scroll bar.
+    style.ScrollbarSize = 22.0f;
 #endif
 
     // Deep water with a sponge-yellow accent.
@@ -387,7 +409,16 @@ void iGui::ApplyScale(float scale)
 void iGui::HelpMarker(const char* text)
 {
     ImGui::SameLine();
+#ifdef __SWITCH__
+    // Something the controller can land on, so its tooltip shows docked,
+    // where there is no touch.
+    ImGui::PushID(text);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::Selectable("(?)", false, ImGuiSelectableFlags_None, ImGui::CalcTextSize("(?)"));
+    ImGui::PopStyleColor();
+#else
     ImGui::TextDisabled("(?)");
+#endif
     if (ImGui::BeginItemTooltip())
     {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
@@ -395,6 +426,27 @@ void iGui::HelpMarker(const char* text)
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+#ifdef __SWITCH__
+    ImGui::PopID();
+#endif
+}
+
+bool iGui::BackPressed()
+{
+#ifdef __SWITCH__
+    // ImGui's own back button (the right face button) closes no modal, and
+    // the Switch has no Esc.
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+    {
+        return true;
+    }
+#endif
+    return ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+}
+
+const char* iGui::PadComboName()
+{
+    return iPadSwitchLabels() ? "- and +" : "Back+Start";
 }
 
 void iGui::Note(const char* fmt, ...)
@@ -420,7 +472,12 @@ void iGui::RestartTag(const char* key)
     ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "restart");
     if (ImGui::BeginItemTooltip())
     {
+#ifdef __SWITCH__
+        ImGui::TextUnformatted("Saved. Takes effect the next time the game is started from the "
+                               "Homebrew Menu.");
+#else
         ImGui::TextUnformatted("Saved. Takes effect the next time the game starts.");
+#endif
         ImGui::EndTooltip();
     }
 }
@@ -592,12 +649,27 @@ namespace
     }
 } // namespace
 
+void iGui::AnswerPick(const char* path)
+{
+    SDL_LockMutex(sPickLock);
+    snprintf(sPickResult, sizeof(sPickResult), "%s", path != NULL ? path : "");
+    sPicking = false;
+    sPickReady = true;
+    SDL_UnlockMutex(sPickLock);
+}
+
 void iGui::PickFolder(const char* tag, const char* start)
 {
     if (!BeginPick(tag))
     {
         return;
     }
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_FOLDER, start, NULL, 0);
+        return;
+    }
+    FilePickerRemember(PICK_FOLDER, start, NULL, 0);
 
     // The picker wants a native path; config.ini's are written with slashes,
     // which every system's dialog accepts.
@@ -612,6 +684,13 @@ void iGui::PickOpenFile(const char* tag, const char* start, const FileFilter* fi
         return;
     }
 
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_OPEN_FILE, start, filters, count);
+        return;
+    }
+    FilePickerRemember(PICK_OPEN_FILE, start, filters, count);
+
     const int n = Filters(filters, count);
     SDL_ShowOpenFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
                            (start != NULL && start[0] != '\0') ? start : NULL, false);
@@ -623,6 +702,13 @@ void iGui::PickSaveFile(const char* tag, const char* start, const FileFilter* fi
     {
         return;
     }
+
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_SAVE_FILE, start, filters, count);
+        return;
+    }
+    FilePickerRemember(PICK_SAVE_FILE, start, filters, count);
 
     const int n = Filters(filters, count);
     SDL_ShowSaveFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,

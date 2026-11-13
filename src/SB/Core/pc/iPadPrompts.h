@@ -34,9 +34,14 @@ struct iPadHostState;
 //      follows the device last used. The Xbox set on an Xbox pad with the
 //      default rows changes nothing.
 //
-//   3. The verb. The Xbox disc says "Pull RT to talk"; with a key, or a
-//      GameCube pad's R, it says "Press". push_trigger_text is rewritten in
-//      place when the longer word fits the asset.
+//   3. The verb. The Xbox disc says "Pull RT to talk"; with a key, a
+//      GameCube pad's R or the Switch's ZR, it says "Press".
+//      push_trigger_text is rewritten in place when the longer word fits the
+//      asset.
+//
+//   4. On the Switch (iPadSwitchLabels), the few sentences that spell a button
+//      out instead of drawing it: "Press the START button" says +, and TR02's
+//      race, which kept the PlayStation 2's "Press X ... L1", says B and ZR.
 //
 // All are re-applied every half second and whenever the layout, the bindings
 // or the device change, because a level load brings in fresh copies.
@@ -81,6 +86,12 @@ S32 iPadPromptsPatchMove(const iPadPromptMove& move, char* text, U32 size, iPadL
 // fits `capacity` (the bytes after the length word), updating the length.
 // TRUE if it changed.
 S32 iPadPromptsPatchVerb(U32* len, char* text, U32 capacity, bool press);
+
+// Replaces the first `from` in `text` with `to`, in place, when the result
+// fits `capacity` (the bytes after the length word), updating the length.
+// TRUE if it changed. For the Switch's names in sentences that spell a button
+// out ("Press the START button").
+S32 iPadPromptsPatchWords(U32* len, char* text, U32 capacity, const char* from, const char* to);
 
 // Which XPAD bits a pad_button texture's picture stands for on the Xbox disc,
 // by texture name; 0 for a name that is not a prompt picture.

@@ -34,6 +34,11 @@
 #include <unistd.h>
 #endif
 
+// Each thread's CPU time is read from /proc/self/task, which the Switch has not.
+#if !defined(_WIN32) && !defined(__SWITCH__)
+#define TSSM_PERF_THREADS
+#endif
+
 namespace
 {
     // --- clocks ---------------------------------------------------------------
@@ -85,9 +90,14 @@ namespace
 
     double CpuNs()
     {
+#ifdef CLOCK_THREAD_CPUTIME_ID
         struct timespec ts;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
         return ts.tv_sec * 1.0e9 + ts.tv_nsec;
+#else
+        // newlib on the Switch has no per-thread clock: the columns read as wall time there.
+        return WallNs();
+#endif
     }
 #endif
 
@@ -165,7 +175,7 @@ namespace
     Row sWorst[3];
     int sWorstCount;
 
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
     // Every thread's CPU time, from /proc/self/task, for the summary.
     struct ThreadTicks
     {
@@ -253,7 +263,7 @@ namespace
         sWorstCount = 0;
     }
 
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
     void ThreadsReport(double atMs)
     {
         static long hz = 0;
@@ -482,7 +492,7 @@ namespace
                    i + 1, (unsigned)r.frame, r.interval, r.wall[0], r.cpu[0], r.wall[1], r.cpu[1],
                    r.wall[2], r.cpu[2], r.wall[3], r.cpu[3], r.wall[4], r.cpu[4], r.gpu);
         }
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
         ThreadsReport(atMs);
 #endif
         fflush(stdout);
@@ -627,7 +637,7 @@ namespace
             fclose(sCsv);
             sCsv = NULL;
         }
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
         if (sThreadCsv != NULL)
         {
             fclose(sThreadCsv);
@@ -714,7 +724,7 @@ namespace
                           "tex_binds,tex_uploads,tex_kb,buf_uploads,buf_kb\n");
         }
 
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
         {
             char path[512];
             SiblingPath(sCsvPath, "perf-threads.csv", path, sizeof(path));
@@ -834,7 +844,7 @@ void iPerfSwapEnd()
         sFirstSwapEnd = now;
         sLastSwapEnd = now;
         ResetWindow(0.0);
-#if !defined(_WIN32)
+#ifdef TSSM_PERF_THREADS
         ThreadsReport(0.0);
 #endif
     }

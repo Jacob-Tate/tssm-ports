@@ -92,6 +92,12 @@
 #include "android/iAndroid.h"
 #endif
 
+#ifdef __SWITCH__
+// The Switch's start-up (RomFS, nxlink, the applet-mode check) and its crash
+// report, which is libnx's exception handler rather than a signal.
+#include "switch/iSwitch.h"
+#endif
+
 #ifdef _WIN32
 namespace
 {
@@ -813,6 +819,30 @@ namespace
     }
 }
 
+#elif defined(__SWITCH__)
+
+namespace
+{
+    // No signals for faults on the Switch: a data abort reaches libnx's
+    // exception handler, which switch/iSwitch.cpp provides (registers, the
+    // frame-pointer chain, crash.log). abort() still raises SIGABRT through
+    // newlib, so that one is caught here as on POSIX. No watchdog: there is no
+    // way to sample another thread's stack.
+    void AbortSignal(int)
+    {
+        printf("\ntssm: ABORT -- assertion or abort() call\n");
+        iHostPrintCallers("abort", 32);
+        iSwitchCrashLog("tssm: ABORT -- assertion or abort() call");
+        iLogDrain(1500);
+        _exit(3);
+    }
+
+    void InstallDiagnostics()
+    {
+        signal(SIGABRT, AbortSignal);
+    }
+}
+
 #else
 
 namespace
@@ -1029,6 +1059,11 @@ namespace
             // nothing printed before it survives.
             iAndroidOpenLog();
 #endif
+#ifdef __SWITCH__
+            // FIRST as well: the nxlink socket the log tee writes to, and the
+            // applet-mode screen, which may end the process here.
+            iSwitchEarly();
+#endif
             // Before anything prints: stdout and stderr through the log's
             // tee (iLog.h), and crash.log's place settled for the handlers.
             iLogBegin();
@@ -1040,9 +1075,16 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
+#ifdef __SWITCH__
+            printf("tssm: Switch port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#else
             printf("tssm: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#endif
                    kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
                    iFMVAudioName());
+#ifdef __SWITCH__
+            iSwitchStartup();
+#endif
             // TSSM_TEST_CRASH: at startup, or at a frame when it is a number
             // above 1 (iTestEvents.cpp).
             const char* testCrash = getenv("TSSM_TEST_CRASH");

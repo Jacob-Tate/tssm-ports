@@ -1,0 +1,30 @@
+Mesa 3D (devkitPro's switch-mesa package: libEGL, libglapi and the nouveau
+OpenGL driver), linked statically into tssm.nro.
+
+Mesa's core library and drivers are under the MIT licence below; a few other
+parts are under other permissive licences. Mesa's own licence page lists them:
+https://docs.mesa3d.org/license.html. The copyright notices are in the source
+files themselves: https://gitlab.freedesktop.org/mesa/mesa; devkitPro's
+package recipe (source and patches) is under switch/mesa in
+https://github.com/devkitPro/pacman-packages.
+
+TODO(switch): before any release, ship the exact copyright notices from the
+switch-mesa source this build used instead of this pointer.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.

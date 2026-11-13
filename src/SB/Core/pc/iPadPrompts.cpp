@@ -77,6 +77,39 @@ S32 iPadPromptsPatchMove(const iPadPromptMove& move, char* text, U32 size, iPadL
     return FALSE;
 }
 
+S32 iPadPromptsPatchWords(U32* len, char* text, U32 capacity, const char* from, const char* to)
+{
+    if (len == NULL || text == NULL || capacity == 0 || from == NULL || to == NULL)
+    {
+        return FALSE;
+    }
+
+    // The asset's own terminator bounds it; never read past the capacity.
+    U32 n = 0;
+    while (n < capacity && text[n] != '\0')
+    {
+        n++;
+    }
+    if (n == capacity)
+    {
+        return FALSE;
+    }
+
+    const U32 fromLen = (U32)strlen(from);
+    const U32 toLen = (U32)strlen(to);
+    char* at = strstr(text, from);
+    if (fromLen == 0 || at == NULL || n - fromLen + toLen + 1 > capacity)
+    {
+        return FALSE;
+    }
+
+    const U32 head = (U32)(at - text);
+    memmove(at + toLen, at + fromLen, n - head - fromLen + 1);
+    memcpy(at, to, toLen);
+    *len = n - fromLen + toLen;
+    return TRUE;
+}
+
 S32 iPadPromptsPatchVerb(U32* len, char* text, U32 capacity, bool press)
 {
     if (len == NULL || text == NULL || capacity == 0)
@@ -114,13 +147,67 @@ namespace
     iPadLayoutKind sAppliedLayout = IPAD_LAYOUT_XBOX;
     void* sMoveAsset[sizeof(kPadPromptMoves) / sizeof(kPadPromptMoves[0])];
 
+    // The Switch's names in the sentences that spell a button out instead of
+    // drawing its picture. Each pair is swapped both ways, so leaving the
+    // Switch set (input.button_icons) puts the disc's words back; both sides
+    // are distinctive enough to appear nowhere else in their asset.
+    struct WordSwap
+    {
+        const char* asset;
+        const char* disc;
+        const char* sw;
+    };
+
+    const WordSwap kSwitchWords[] = {
+        // The title screen.
+        { "PRESS START TEXT", "the START button", "the + button" },
+        // The controller-missing messages.
+        { "TRC_CONTROLLER_MISSING", "press START to", "press + to" },
+        { "text_no_controller", "press START to", "press + to" },
+        { "text_no_controller_pal", "press START to", "press + to" },
+        // TR02's Sonic Wave race still has the PlayStation 2's sentence: X is
+        // the PS2's accept (the Xbox's A, the Switch's B) and L1 the PS2's
+        // Sonic Wave (the Xbox's RT, the Switch's ZR). The other levels' copy
+        // of this asset asks a question without naming a button.
+        { "RingDescriptionText", "Press X to start the race, then press L1",
+          "Press B to start the race, then press ZR" },
+        { "RingReminderText", "Press X to start the race, then press L1",
+          "Press B to start the race, then press ZR" },
+    };
+
+    void ApplySwitchWords(const char* set)
+    {
+        // Anywhere else the disc's words stay as they are, untouched.
+        if (!iPadSwitchLabels())
+        {
+            return;
+        }
+        const bool sw = set != NULL && strcmp(set, "switch") == 0;
+
+        for (U32 i = 0; i < sizeof(kSwitchWords) / sizeof(kSwitchWords[0]); i++)
+        {
+            U32 size = 0;
+            void* asset = xSTFindAsset(xStrHash(kSwitchWords[i].asset), &size);
+            if (asset == NULL || size <= sizeof(U32))
+            {
+                continue;
+            }
+            const WordSwap& w = kSwitchWords[i];
+            iPadPromptsPatchWords((U32*)asset, (char*)asset + sizeof(U32), size - (U32)sizeof(U32),
+                                  sw ? w.disc : w.sw, sw ? w.sw : w.disc);
+        }
+    }
+
     // "Pull RT to talk": the Xbox's word for a trigger. Pressed with a key or
-    // a GameCube pad's R (whose own disc says "Press"), it should say press.
+    // a GameCube pad's R (whose own disc says "Press"), it should say press;
+    // so should the Switch's ZR, a button that clicks rather than a trigger.
     void ApplyVerb(const char* set)
     {
         static const char* const kNames[] = { "push_trigger_text", "push_trigger_text_lower" };
 
-        const bool press = set != NULL && (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0);
+        const bool press =
+            set != NULL && (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0 ||
+                            (iPadSwitchLabels() && strcmp(set, "switch") == 0));
 
         for (U32 i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
         {
@@ -773,6 +860,13 @@ namespace
         const char* device = iPadHostDeviceName(0);
         bool padPresent = device != NULL && iHostStrCaseCmp(device, "keyboard") != 0;
 
+        // The Switch has its pads and no keyboard to fall back to (and a PC
+        // labelled as one, scripted with no pad, should look the same).
+        if (iPadSwitchLabels() && !sLastWasKeyboard)
+        {
+            return "switch";
+        }
+
         if (sLastWasKeyboard || !padPresent)
         {
             return "keyboard";
@@ -1125,6 +1219,7 @@ void iPadPromptsUpdate(const iPadHostState* host)
 
     ApplyLayout(sDirty);
     ApplyVerb(set);
+    ApplySwitchWords(set);
     ApplyGlyphs(set);
 
     sActiveSet = set;

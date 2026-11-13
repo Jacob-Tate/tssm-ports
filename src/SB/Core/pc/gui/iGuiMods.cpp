@@ -114,10 +114,28 @@ namespace
         }
         else
         {
+#ifdef __SWITCH__
+            ImGui::TextWrapped("There is no mods folder yet. Make it, then put each mod in its own "
+                               "folder in %s.",
+                               iModDefaultFolder());
+#else
             ImGui::TextWrapped("There is no mods folder yet. Open it to make one at %s.",
                                iModDefaultFolder());
+#endif
         }
 
+#ifdef __SWITCH__
+        // Nothing on the console can show a folder; making one is all there is.
+        if (folder[0] == '\0')
+        {
+            if (ImGui::Button("Make the mods folder"))
+            {
+                iHostMakeDir(iModDefaultFolder());
+                iModRescan();
+            }
+            ImGui::SameLine();
+        }
+#else
         if (ImGui::Button("Open the mods folder"))
         {
             const char* dir = folder[0] != '\0' ? folder : iModDefaultFolder();
@@ -129,6 +147,7 @@ namespace
             iGui::OpenFolder(dir);
         }
         ImGui::SameLine();
+#endif
         if (ImGui::Button("Rescan"))
         {
             const S32 n = iModRescan();
@@ -322,10 +341,12 @@ namespace
             }
             ImGui::EndTable();
         }
+#ifndef __SWITCH__
         if (ImGui::Button("Open its folder"))
         {
             iGui::OpenFolder(m->path);
         }
+#endif
     }
 
     void DrawConflicts()
@@ -385,6 +406,11 @@ namespace
         snprintf(title, sizeof(title), "Log (%d)###log", (int)n);
         ImGui::SeparatorText(title);
 
+#ifdef __SWITCH__
+        // No filter (it would open the system keyboard), no clipboard to copy
+        // to and nothing to open mods.log with.
+        ImGui::Checkbox("Follow", &sFollowLog);
+#else
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
         ImGui::InputTextWithHint("##filter", "filter", sFilter, sizeof(sFilter));
         ImGui::SameLine();
@@ -415,6 +441,7 @@ namespace
             iGui::OpenFolder(path);
         }
         ImGui::EndDisabled();
+#endif
 
         if (ImGui::BeginChild("log", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 10.0f),
                               ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))

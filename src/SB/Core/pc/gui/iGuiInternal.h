@@ -86,6 +86,21 @@ namespace iGui
     // "(?)" with `text` as its tooltip.
     void HelpMarker(const char* text);
 
+    // A modal's Cancel: Esc, and on the Switch the controller's back button.
+    bool BackPressed();
+
+    // Every slider's flags. On the Switch a held button must not turn a
+    // slider into a text field: that opens the system keyboard.
+#ifdef __SWITCH__
+    const ImGuiSliderFlags kSliderFlags = ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput;
+#else
+    const ImGuiSliderFlags kSliderFlags = ImGuiSliderFlags_AlwaysClamp;
+#endif
+
+    // The controller's open-the-overlay combo by its buttons' names: "Back+Start",
+    // or on the Switch (iPadSwitchLabels) "- and +".
+    const char* PadComboName();
+
     // A dimmed line of explanation under a control.
     void Note(const char* fmt, ...);
 
@@ -104,6 +119,9 @@ namespace iGui
     // The system's folder picker, through SDL. Asynchronous: the answer
     // arrives on a later frame, and PollFolder hands it over once, tagged with
     // the `tag` it was asked with so the caller knows which field it was for.
+    // Where the system has no dialogs (the Switch), or with
+    // TSSM_FILE_PICKER=builtin, the GUI's own browser answers instead
+    // (iGuiFilePicker.h), through the same PollFolder.
     void PickFolder(const char* tag, const char* start);
     bool PickingFolder();
     bool PollFolder(const char* tag, char* out, size_t outSize);
@@ -119,6 +137,10 @@ namespace iGui
     };
     void PickOpenFile(const char* tag, const char* start, const FileFilter* filters, int count);
     void PickSaveFile(const char* tag, const char* start, const FileFilter* filters, int count);
+
+    // The answer to the request open now: a path, or NULL for Cancel. For the
+    // GUI's own browser (iGuiFilePicker.cpp).
+    void AnswerPick(const char* path);
 
     // A whole file in or out, through SDL's file streams, so a path the
     // system's dialog answered with works whatever it is (an Android

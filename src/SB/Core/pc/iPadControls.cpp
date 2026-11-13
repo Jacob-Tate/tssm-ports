@@ -237,7 +237,8 @@ const char* iPadControlsInputLabel(iPadBindDevice device, const char* token)
         {
             return token;
         }
-        const char* kind = iPadHostPadKind();
+        // The Switch names its own buttons, pad or none (iPadTokens.h).
+        const char* kind = iPadSwitchLabels() ? "switch" : iPadHostPadKind();
         if (kind == NULL)
         {
             kind = iPadBindActivePreset();

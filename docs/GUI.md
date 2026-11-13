@@ -28,6 +28,9 @@ the GUI and a setting typed into the file by hand are the same thing.
 | **Esc** | closes only |
 | **Resume** | closes only |
 
+On the Switch - and + open it (or three fingers, or `[gui] key` on a USB keyboard), B chooses, A
+goes back and L/R change the tab; docs/SWITCH.md, "The settings window", has the rest.
+
 The game does not take input while the overlay is open.
 
 The overlay's own controls:
@@ -41,7 +44,8 @@ The game keeps running behind the overlay, but it gets no input until the overla
 when the overlay closes stay hidden from the game until you let them go. Without this, the Start of
 Back+Start would reach the game as a fresh press and open the pause menu.
 
-**Quit game** asks first, then closes the game the same way the window's close button does.
+**Quit game** asks first, then closes the game the same way the window's close button does. On the
+Switch it returns to the Homebrew Menu.
 
 ### What applies when
 
@@ -137,6 +141,14 @@ These settings take effect at the next start, and are tagged **restart**:
   - **Backups** lists a slot's last three saves; **Restore** puts one back (what is there becomes
     backup 1). **Delete** empties a slot, keeping the save as backup 1.
   - `docs/SAVES.md` has the formats.
+  - **Where there is no system file dialog** (the Switch; or `[gui] file_picker = builtin` /
+    `TSSM_FILE_PICKER=builtin` on a PC) the GUI's own file browser stands in, see "The built-in file
+    browser" below: Import starts it in the import folder, and the exports need no dialog at all.
+    **Export** writes the slot's `.gci` into the export folder under the name Dolphin gives it,
+    **Every save as a .zip** writes `tssm-saves-YYYYMMDD-HHMMSS.zip` there, and **Every save into a
+    GCI folder** a new `gci-YYYYMMDD-HHMMSS/` folder. Nothing is written over: a second export of
+    the same name gets `-2`, `-3`. The status line says where each file went, and the tab says where
+    the two folders are.
 - **Mods:** the mods folder, with **Open**, **Rescan** and the **Use mods** switch, then the mods in
   load order: each switched on or off, moved with the arrows or by dragging its name, with what it
   replaces and how many conflicts it has; a click shows its description and counts. Then the
@@ -145,6 +157,37 @@ These settings take effect at the next start, and are tagged **restart**:
   `[assets] mod` is kept at the bottom. `docs/MODDING.md` is the modder's guide.
 - **About:** the version, the renderer and library versions in use, and the full license text of
   every third-party component.
+
+### The built-in file browser
+
+`iGuiFilePicker.cpp`. The system's dialogs come through SDL, and SDL has none on the Switch (its
+stubs answer "unsupported"). There, and wherever a system dialog fails at run time, the GUI's own
+browser answers the same `iGui::PickFolder` / `PickOpenFile` / `PickSaveFile` request, so the tabs
+that ask do not know which one answered.
+
+- **Which one:** `[gui] file_picker` = `auto` (the default: the system's dialog, and the built-in
+  browser from the first time a system file dialog fails, for the rest of the run; a failed folder
+  dialog -- Android's SDL has none -- hands over only that request), `system` or `builtin`.
+  `TSSM_FILE_PICKER` overrides the setting. The Switch always uses the built-in one.
+- **Folders:** saves to import are looked for in `<base>/import/`, exports go to `<base>/export/`,
+  both made when first needed. `<base>` is `/switch/tssm` on the Switch, the per-user data folder's
+  `tssm` elsewhere (`%APPDATA%/tssm` on Windows), or `TSSM_FILE_PICKER_DIR` when that is set.
+- **Opening a file or a folder:** a list of the folder's folders, then the files the dialog's
+  filter takes (Import: `.gci .gcs .raw .gcp .zip`; **Every file** shows the rest), sorted by name.
+  A long name is cut in the middle in the list and shown whole under it. **Up**, **SD card** (the
+  top of the drive on a PC) and **Import folder** (the folder it started in) move about. A folder
+  picker (the launcher's **Browse...**, the Mods tab's single mod folder) lists only folders and
+  has **Choose this folder**.
+- **Controller:** the d-pad or stick moves, the accept button (the button that presses buttons
+  everywhere else in the overlay) opens a folder or chooses a file, the back button returns to the
+  folder before or, in the first folder, cancels; the top face button goes up a folder, the left
+  one chooses the folder shown in a folder picker, and L and R move a page. The line at the bottom
+  names the buttons as the controller in hand prints them. Keyboard: arrows, Enter, Backspace,
+  Page Up/Down, Esc cancels.
+- **Touch and mouse:** a tap opens or chooses; dragging the list scrolls it (the row under the
+  finger is not chosen when it lets go), and so does the scroll bar.
+- **Saving a file** asks nothing: the file goes into the export folder under the name the caller
+  suggests, made unique.
 
 ### The launcher
 
@@ -173,6 +216,7 @@ that turns the "files not found" error into a folder picker.
 | `[gui] key` | `F1` | the key that opens the overlay. Any name SDL knows, such as `F1`, `F10` or `Insert`. |
 | `[gui] pad_combo` | `on` | whether Back+Start opens the overlay |
 | `[gui] scale` | `auto` | the overlay's size: `auto`, or a factor from 0.5 to 4 |
+| `[gui] file_picker` | `auto` | `auto`, `system` or `builtin`: which file and folder picker Import, Export and Browse use; see "The built-in file browser" |
 | `[audio] master_volume`, `music_volume`, `sfx_volume`, `movie_volume` | `100` | 0 to 100. At 100 the sound is exactly what it would be without them. They count in a build without the overlay too. See "Panels other modules fill" below. |
 
 `auto` scale takes the display's own scaling (150%, 200%), raises it for a big window so the text can be
@@ -197,6 +241,7 @@ All of the GUI is under `src/SB/Core/pc/gui/` and is port-only. The table below 
 | `iGuiMods.cpp` | the Mods tab, on the mod system (`iMod.h`) |
 | `iGuiTabs.cpp` | the About tab |
 | `iGuiUtil.cpp` | the look, scaling, the system's folder and file dialogs, whole-file reads and writes through SDL, the asset-folder check and the PNG writer |
+| `iGuiFilePicker.h/.cpp` | the built-in file browser, for where the system has no file dialog (the Switch) |
 | `iGuiSelfTest.cpp` | `TSSM_GUI_SELFTEST` |
 | `iGuiNull.cpp` | the whole interface as no-ops, built with `TSSM_GUI=OFF`, except that config.ini's volumes still reach the audio listener |
 
@@ -297,7 +342,9 @@ are handled.
   `window height / 1080`, and caps it so a window of about 900x620 units fits. The result is rounded to
   eighths. `[gui] scale` overrides it.
 - The overlay's font is ImGui's scalable default (`AddFontDefaultVector`) at 16 px times the scale.
-- On Android, `ImGuiConfigFlags_IsTouchScreen` and larger touch padding are set.
+- On Android and the Switch, `ImGuiConfigFlags_IsTouchScreen` and larger touch padding are set.
+- On the Switch the window is always the screen's size, and the automatic scale is 1.25, or 1.5 at
+  1080 lines (docked on a 1080p television), with a wider scroll bar for a finger.
 
 ### Panels other modules fill
 
@@ -404,6 +451,12 @@ All of these are environment variables.
 | `TSSM_GUI_SELFTEST_CONTINUE=1` | go on into the game after the selftest instead of exiting |
 | `TSSM_GUI_LAUNCHER=<auto\|always\|never>` | override `[gui] launcher` |
 | `TSSM_GUI_LAUNCHER_PLAY=<n>` | press Play after n frames, if the folder is good |
+| `TSSM_FILE_PICKER=<auto\|system\|builtin>` | override `[gui] file_picker` |
+| `TSSM_FILE_PICKER_DIR=<folder>` | the folder holding `import/` and `export/` for the built-in file browser |
+| `TSSM_GUI_SCRIPT=<steps>` | play input into the open overlay: steps apart by spaces or commas, each `<frame>:<action>`, the frame counted from the overlay opening. Actions: `a b x y` (face buttons by position, `a` the bottom one), `up down left right`, `l r`, `enter esc backspace tab space kup kdown`, `click:X:Y`, `drag:X:Y:X2:Y2`, `wheel:X:Y:N`, `tab:<name>`, `shot:<name>`, `quit`. With `TSSM_GUI_SELFTEST` this drives a tab without a game running. |
+| `TSSM_GUI_SCRIPT_SHOTS=<file.png>` | where `shot:<name>` writes; `%s` becomes the name |
+| `TSSM_GUI_PAD_HINTS=<xbox\|playstation\|switch>` | the built-in file browser's button hints for that controller, with none plugged in (for a capture) |
+| `TSSM_PAD_LABELS=switch` | (PC only) every label as the Switch build shows it: the game's prompts, the Controls tab, the hints (docs/SWITCH.md, Controls) |
 
 Example: every tab on OpenGL, letterboxed, written into a scratch folder:
 
@@ -428,9 +481,10 @@ tssm.exe          (with [video] backend = gl3, width = 640, height = 480, mode =
 - **Only the game's input is paused, not the game.** Opening the overlay mid-level leaves the level
   running, with SpongeBob standing still. Pausing the game itself would need a call into the game's
   pause path.
-- **The file dialogs** are SDL's. On Android the folder export (GCI folder) needs a folder path the
-  system's picker may not give; the zip and `.gci` exports and every import go through SDL's
-  streams and do not.
+- **The file dialogs** are SDL's, or the built-in browser where SDL has none (the Switch). On Android
+  the folder export (GCI folder) needs a folder path the system's picker may not give; the zip and
+  `.gci` exports and every import go through SDL's streams and do not. The built-in browser cannot
+  type a file name: it saves under a name it makes.
 - A debug build's Direct3D 11 device asks for the D3D11 debug layer (`D3D11_CREATE_DEVICE_DEBUG` in
   librw), which fails on a machine without the Windows "Graphics Tools" feature. A release build is not
   affected. This is librw's behaviour, not the GUI's.

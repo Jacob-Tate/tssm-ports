@@ -145,6 +145,10 @@ static iWindowMode sWindowMode = iWINDOW_BORDERLESS;
 
 static iWindowMode WindowModeFromConfig()
 {
+#ifdef __SWITCH__
+    // The window always fills the screen there (iWindowSDL.cpp).
+    return iWINDOW_WINDOWED;
+#endif
     const char* name = iConfigGetString("video.mode", "borderless");
 
     if (iHostStrCaseCmp(name, "fullscreen") == 0)
@@ -620,6 +624,19 @@ static void ClaimSaveFolder()
     {
         return;
     }
+
+#ifdef __SWITCH__
+    // The other program (tssm.nro or tssm-coop.nro), or a second copy, is
+    // suspended in title mode or open from the Album. No process id or Task
+    // Manager here.
+    printf("tssm: another program is using the saves in %s; closing\n", iSaveStoreRoot());
+    fflush(stdout);
+    iHostErrorBox(TSSM_GAME_TITLE,
+                  "The game (or its co-op version) is already open and is using your saves.\n\n"
+                  "Close it first (in the HOME Menu, select the suspended software and press X), "
+                  "then start this one again.");
+    exit(0);
+#endif
 
     const S32 raised = iHostRaiseProcessWindow(holder);
     printf("tssm: the game is already running (process %u) with the saves in %s; this copy is "

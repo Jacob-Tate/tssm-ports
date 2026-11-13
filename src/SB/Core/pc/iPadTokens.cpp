@@ -6,6 +6,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 static const iPadBindToken kPadTokens[] = {
     { "a", PADIN_A },           { "b", PADIN_B },
     { "x", PADIN_X },           { "y", PADIN_Y },
@@ -246,4 +249,48 @@ const char* iPadInputLabel(S32 input, const char* kind)
         }
     }
     return kXbox[input];
+}
+
+bool iPadSwitchLabels()
+{
+#ifdef __SWITCH__
+    return true;
+#else
+    static int sOn = -1;
+    if (sOn < 0)
+    {
+        const char* env = getenv("TSSM_PAD_LABELS");
+        sOn = (env != NULL && iHostStrCaseCmp(env, "switch") == 0) ? 1 : 0;
+    }
+    return sOn != 0;
+#endif
+}
+
+const char* iPadSwitchRowLabel(const char* row)
+{
+    // The row's Xbox button, whose position the Switch's label is read at.
+    struct Row
+    {
+        const char* name;
+        S32 input;
+    };
+    static const Row kRows[] = {
+        { "a", PADIN_A },         { "b", PADIN_B },      { "x", PADIN_X },
+        { "y", PADIN_Y },         { "lt", PADIN_LT },    { "rt", PADIN_RT },
+        { "white", PADIN_LB },    { "black", PADIN_RB }, { "back", PADIN_BACK },
+        { "start", PADIN_START },
+    };
+
+    if (row == NULL)
+    {
+        return NULL;
+    }
+    for (U32 i = 0; i < sizeof(kRows) / sizeof(kRows[0]); i++)
+    {
+        if (iHostStrCaseCmp(kRows[i].name, row) == 0)
+        {
+            return iPadInputLabel(kRows[i].input, "switch");
+        }
+    }
+    return NULL;
 }

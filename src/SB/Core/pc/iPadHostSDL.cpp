@@ -829,6 +829,12 @@ const char* iPadHostPadKind()
         return NULL;
     }
 
+#ifdef __SWITCH__
+    // SDL's Switch driver names every pad "Switch Controller" with no vendor
+    // or product, so SDL cannot type it; on a Switch every pad is one.
+    return "switch";
+#endif
+
     switch (SDL_GetGamepadType(sGamepad[slot]))
     {
     case SDL_GAMEPAD_TYPE_PS3:
@@ -857,6 +863,53 @@ const char* iPadHostInputForLabel(char letter)
     {
         return NULL;
     }
+
+#ifdef __SWITCH__
+    // SDL's Switch driver reports buttons by POSITION (its south button is the
+    // one printed B) and types the pad as a standard one, so it labels them the
+    // Xbox way. Which convention the face rows follow is a choice:
+    //
+    //   false  positional, the Xbox layout the port plays with everywhere: the
+    //          bottom button (printed B) jumps and accepts, the right one
+    //          (printed A) is the Xbox's B. Every label names the printed
+    //          letter (iPadSwitchLabels, iPadTokens.h), so prompts say B for
+    //          jump, A for back, Y for the Xbox's X and X for its Y.
+    //   true   by printed letter, Nintendo's convention: A (right) jumps and
+    //          accepts, B (bottom) cancels.
+    //
+    // The Xbox layout, by position, labelled with the
+    // printed letters (docs/SWITCH.md, Controls).
+    const bool kSwitchPrintedLetters = false;
+    if (kSwitchPrintedLetters)
+    {
+        switch (letter)
+        {
+        case 'A':
+            return "b"; // east
+        case 'B':
+            return "a"; // south
+        case 'X':
+            return "y"; // north
+        case 'Y':
+            return "x"; // west
+        default:
+            return NULL;
+        }
+    }
+    switch (letter)
+    {
+    case 'A':
+        return "a";
+    case 'B':
+        return "b";
+    case 'X':
+        return "x";
+    case 'Y':
+        return "y";
+    default:
+        return NULL;
+    }
+#endif
 
     // The four face positions and the token each one is called by. Walking
     // positions and asking SDL what is PRINTED on each is the only way round:

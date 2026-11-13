@@ -35,7 +35,11 @@ extern "C" {
 
 void iGui::DrawAbout()
 {
+#ifdef __SWITCH__
+    ImGui::SeparatorText("The SpongeBob SquarePants Movie (port)");
+#else
     ImGui::SeparatorText("The SpongeBob SquarePants Movie: PC port");
+#endif
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
 #ifdef NDEBUG
     const char* config = "release";
@@ -103,7 +107,12 @@ void iGui::DrawAbout()
             ImGui::TextDisabled("%s", n.what);
             if (n.url[0] != '\0')
             {
+#ifdef __SWITCH__
+                // Nothing on the console opens a link.
+                ImGui::TextDisabled("%s", n.url);
+#else
                 ImGui::TextLinkOpenURL(n.url);
+#endif
             }
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextUnformatted(n.text);

@@ -33,9 +33,14 @@ struct iTouchOverlayShape
     U8 b;
     U8 a;
 
-    // Drawn centred in white, or nothing when 0. A-Z and '>' (start) and '='
-    // (select); see kGlyphs in rw/touch_overlay.cpp.
+    // Drawn centred in white, or nothing when 0. Some of A-Z, '>' (start),
+    // '=' (select), and the Switch's '-' and '+'; see kGlyphs in
+    // rw/touch_overlay.cpp.
     char label;
+
+    // A second character after `label`, both centred together ("ZL", the
+    // Switch's trigger), or 0 for one.
+    char label2;
 };
 
 #define ITOUCHOVERLAY_MAX_SHAPES 64

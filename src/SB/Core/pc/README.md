@@ -81,7 +81,7 @@ button_icons, keyboard, stick_curve, deadzone, trigger_threshold,
 camera_sensitivity, camera_invert_x, camera_invert_y, mouse_camera,
 mouse_sensitivity, rumble, touch_controls, test`, `[audio] master_volume,
 music_volume, sfx_volume, movie_volume`, `[gui] launcher, key, pad_combo,
-scale`, and the `[pad]`/`[keyboard]` bindings). The controls, and how each
+scale, file_picker`, and the `[pad]`/`[keyboard]` bindings). The controls, and how each
 button was established, are in `docs/CONTROLS.md`. In the game, F1 (or
 Back+Start on a controller) opens the settings overlay, which edits the same
 file; `docs/GUI.md` describes it and the launcher, and lists the `TSSM_GUI_*`

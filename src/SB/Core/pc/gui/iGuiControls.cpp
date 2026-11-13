@@ -23,6 +23,7 @@
 #include "iConfigTable.h"
 #include "iPadControls.h"
 #include "iPadHost.h"
+#include "iPadTokens.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -35,9 +36,17 @@ namespace
 
     // A row's name as config.ini spells it, for a person: "a" -> "A",
     // "lt" -> "LT", "start" -> "Start", "up" -> "D-pad up", "move_up" ->
-    // "Move up".
+    // "Move up". On the Switch a game button is named by the Switch button in
+    // its place: "a" -> "B", "lt" -> "ZL", "start" -> "+".
     void RowLabel(const char* name, char* out, size_t size)
     {
+        const char* sw = iPadSwitchLabels() ? iPadSwitchRowLabel(name) : NULL;
+        if (sw != NULL)
+        {
+            snprintf(out, size, "%s", sw);
+            return;
+        }
+
         if (strcmp(name, "up") == 0 || strcmp(name, "down") == 0 || strcmp(name, "left") == 0 ||
             strcmp(name, "right") == 0)
         {
@@ -66,6 +75,15 @@ namespace
     {
         if (token[0] == '#' && token[1] != '\0' && token[2] == '\0')
         {
+            // On the Switch the letter is the Xbox's, found by position: the
+            // input it lands on is what to name. With no pad to ask (a PC
+            // labelled as the Switch), the Xbox's letter is its position.
+            if (iPadSwitchLabels())
+            {
+                const char* input = iPadHostInputForLabel(token[1]);
+                snprintf(buf, size, "%c", (char)SDL_tolower((unsigned char)token[1]));
+                return iPadControlsInputLabel(device, input != NULL ? input : buf);
+            }
             snprintf(buf, size, "%c", token[1]);
             return buf;
         }
@@ -459,6 +477,9 @@ namespace
         }
 
         ImGui::Separator();
+#ifndef __SWITCH__
+        // On the Switch it would open the system keyboard; pressing the new
+        // button covers a controller.
         if (ImGui::MenuItem("Type it..."))
         {
             sTyping.device = device;
@@ -466,6 +487,7 @@ namespace
             snprintf(sTyping.text, sizeof(sTyping.text), "%s", current);
             sOpenEdit = true;
         }
+#endif
         if (ImGui::MenuItem("Nothing (unbind)", NULL, false, current[0] != '\0'))
         {
             char err[128];
@@ -574,8 +596,13 @@ namespace
         if (ImGui::BeginItemTooltip())
         {
             ImGui::TextUnformatted(current[0] != '\0' ? current : "(nothing bound)");
+#ifdef __SWITCH__
+            ImGui::TextDisabled("%s. Choose it to change it.",
+                                isDefault ? "The default" : "Changed from the default (*)");
+#else
             ImGui::TextDisabled("%s. Click to change.",
                                 isDefault ? "The default" : "Changed from the default (*)");
+#endif
             ImGui::EndTooltip();
         }
         DrawEditPopup();
@@ -685,7 +712,11 @@ namespace
         { "rumble", "Rumble strength", {}, false },
         { "touch_controls",
           "Touch controls",
+#ifdef __SWITCH__
+          { { "auto", "Automatic (off)" }, { "on", "On" }, { "off", "Off" } },
+#else
           { { "auto", "Automatic (Android)" }, { "on", "On" }, { "off", "Off" } },
+#endif
           true },
         { "test",
           "Input test",
@@ -693,8 +724,56 @@ namespace
           false },
     };
 
+    // On the Switch, the words and help that name an Xbox button name the
+    // Switch's instead: the Xbox's X is the Switch's Y, its B the Switch's A.
+    struct SwitchWord
+    {
+        const char* setting;
+        const char* value; // NULL: the help text
+        const char* text;
+    };
+
+    const SwitchWord kSwitchTexts[] = {
+        { "layout", "xbox", "Xbox (Karate Spin on Y)" },
+        { "layout", "gamecube", "GameCube (Karate Spin on A)" },
+        { "layout", NULL,
+          "Which face button the moves use. xbox: Karate Spin on Y, SpongeBowl on A, as the "
+          "Xbox release. gamecube: Karate Spin on A, SpongeBowl on Y, as the GameCube release. "
+          "Menus are the same in both (B accept, A back). The game's button prompts follow." },
+        { "trigger_threshold", NULL,
+          "How far ZL and ZR must be pressed, as a percentage: auto (30) or 5 to 95. The "
+          "Switch's ZL and ZR only click, so every value works the same there." },
+    };
+
+    const char* SwitchText(const char* setting, const char* value)
+    {
+        if (!iPadSwitchLabels())
+        {
+            return NULL;
+        }
+        for (size_t i = 0; i < sizeof(kSwitchTexts) / sizeof(kSwitchTexts[0]); i++)
+        {
+            const SwitchWord& t = kSwitchTexts[i];
+            if (strcmp(t.setting, setting) != 0)
+            {
+                continue;
+            }
+            if (value == NULL ? t.value == NULL :
+                                (t.value != NULL && SDL_strcasecmp(t.value, value) == 0))
+            {
+                return t.text;
+            }
+        }
+        return NULL;
+    }
+
     const char* WordLabel(const InputSetting& s, const char* value)
     {
+        const char* sw = SwitchText(s.name, value);
+        if (sw != NULL)
+        {
+            return sw;
+        }
         for (S32 i = 0; i < 8 && s.words[i].value != NULL; i++)
         {
             if (SDL_strcasecmp(s.words[i].value, value) == 0)
@@ -751,14 +830,13 @@ namespace
                 v = (int)def->min;
             }
             changed = ImGui::SliderInt("##v", &v, (int)def->min, (int)def->max, format,
-                                       ImGuiSliderFlags_AlwaysClamp);
+                                       iGui::kSliderFlags);
             snprintf(text, sizeof(text), "%d", v);
         }
         else
         {
             float v = (float)atof(value);
-            changed = ImGui::SliderFloat("##v", &v, def->min, def->max, format,
-                                         ImGuiSliderFlags_AlwaysClamp);
+            changed = ImGui::SliderFloat("##v", &v, def->min, def->max, format, iGui::kSliderFlags);
             snprintf(text, sizeof(text), "%.2f", v);
         }
         if (changed)
@@ -791,8 +869,9 @@ namespace
         {
             char help[600];
             iConfigTableSummary(def, help, sizeof(help));
+            const char* sw = SwitchText(s.name, NULL);
             ImGui::SameLine();
-            iGui::HelpMarker(help);
+            iGui::HelpMarker(sw != NULL ? sw : help);
         }
 
         ImGui::TableSetColumnIndex(1);
@@ -910,6 +989,10 @@ namespace
         }
         else
         {
+#ifdef __SWITCH__
+            // SDL's Switch driver opens four controllers whatever is attached.
+            n = 1;
+#endif
             for (int i = 0; i < n; i++)
             {
                 const char* name = SDL_GetGamepadNameForID(ids[i]);
@@ -934,8 +1017,13 @@ void iGui::DrawControls()
     DrawDevices();
 
     ImGui::SeparatorText("Buttons");
+#ifdef __SWITCH__
+    Note("Choose a binding (B, or a tap) to change it. * marks one changed from the default; ! an "
+         "input that also presses another button.");
+#else
     Note("Click a binding to change it. * marks one changed from the default; ! an input that "
          "also presses another button.");
+#endif
 
     if (sMessage[0] != '\0')
     {
@@ -951,15 +1039,22 @@ void iGui::DrawControls()
     const float extra = style.ItemSpacing.x + ImGui::CalcTextSize("!").x + style.CellPadding.x * 2.0f;
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX;
-    if (ImGui::BeginTable("bindings", 4, flags))
+#ifdef __SWITCH__
+    const int columns = 3;
+#else
+    const int columns = 4;
+#endif
+    if (ImGui::BeginTable("bindings", columns, flags))
     {
         ImGui::TableSetupColumn("Game button", ImGuiTableColumnFlags_WidthFixed,
                                 ImGui::CalcTextSize("Camera right").x + style.CellPadding.x * 2.0f);
         ImGui::TableSetupColumn("Does", ImGuiTableColumnFlags_WidthStretch, 1.0f);
         ImGui::TableSetupColumn("Controller", ImGuiTableColumnFlags_WidthFixed,
                                 BindingWidth(IPAD_BIND_PAD) + extra);
+#ifndef __SWITCH__
         ImGui::TableSetupColumn("Keyboard, mouse", ImGuiTableColumnFlags_WidthFixed,
                                 BindingWidth(IPAD_BIND_KEYBOARD) + extra);
+#endif
         ImGui::TableHeadersRow();
 
         const S32 rows = iPadControlsRowCount();
@@ -988,8 +1083,10 @@ void iGui::DrawControls()
 
             ImGui::TableSetColumnIndex(2);
             BindingCell(IPAD_BIND_PAD, r, info);
+#ifndef __SWITCH__
             ImGui::TableSetColumnIndex(3);
             BindingCell(IPAD_BIND_KEYBOARD, r, info);
+#endif
 
             ImGui::PopID();
         }
@@ -1017,6 +1114,7 @@ void iGui::DrawControls()
         Save();
         Say(false, "Every controller binding follows the controller type again.");
     }
+#ifndef __SWITCH__
     ImGui::SameLine();
     if (ImGui::Button("Keyboard back to its defaults"))
     {
@@ -1024,6 +1122,7 @@ void iGui::DrawControls()
         Save();
         Say(false, "Every key is back to its default.");
     }
+#endif
     Note("Bindings are kept in config.ini's [pad] and [keyboard] sections. docs/CONTROLS.md "
          "lists what every button does.");
 
@@ -1042,6 +1141,16 @@ void iGui::DrawControls()
         ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
         for (size_t i = 0; i < sizeof(kSettings) / sizeof(kSettings[0]); i++)
         {
+#ifdef __SWITCH__
+            // Keyboard and mouse rows; config.ini still has them for a USB
+            // keyboard.
+            if (strcmp(kSettings[i].name, "keyboard") == 0 ||
+                strcmp(kSettings[i].name, "mouse_camera") == 0 ||
+                strcmp(kSettings[i].name, "mouse_sensitivity") == 0)
+            {
+                continue;
+            }
+#endif
             DrawSetting(kSettings[i]);
         }
         ImGui::EndTable();

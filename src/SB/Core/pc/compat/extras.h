@@ -7,7 +7,8 @@
 #include <string.h>
 #include <ctype.h>
 
-#if !defined(_WIN32) || defined(__MINGW32__)
+// newlib (the Switch's C library) has its own, declared in <string.h>.
+#if (!defined(_WIN32) || defined(__MINGW32__)) && !defined(__SWITCH__)
 static inline char* strupr(char* str)
 {
     for (char* p = str; *p != '\0'; p++)

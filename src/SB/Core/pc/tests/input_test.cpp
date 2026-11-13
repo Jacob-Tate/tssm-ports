@@ -333,6 +333,38 @@ static void TestTables()
               "no room for 'press': left alone");
     }
 
+    {
+        // The Switch's names in a sentence, there and back.
+        char title[24] = "Press the START button";
+        U32 len = 22;
+        Check(iPadPromptsPatchWords(&len, title, sizeof(title), "the START button",
+                                    "the + button") &&
+                  strcmp(title, "Press the + button") == 0 && len == 18,
+              "Switch: 'START' becomes '+'");
+        Check(!iPadPromptsPatchWords(&len, title, sizeof(title), "the START button",
+                                     "the + button"),
+              "already '+': nothing to do");
+        Check(iPadPromptsPatchWords(&len, title, sizeof(title), "the + button",
+                                    "the START button") &&
+                  strcmp(title, "Press the START button") == 0 && len == 22,
+              "back to 'START'");
+        char tight[8] = "a + b";
+        len = 5;
+        Check(!iPadPromptsPatchWords(&len, tight, sizeof(tight), "+", "START") &&
+                  strcmp(tight, "a + b") == 0,
+              "no room for the longer word: left alone");
+    }
+
+    // The Switch's names for the game's (Xbox-named) buttons, by position.
+    CheckStr(iPadSwitchRowLabel("a"), "B", "Switch: the Xbox's A is the button printed B");
+    CheckStr(iPadSwitchRowLabel("b"), "A", "Switch: the Xbox's B is the button printed A");
+    CheckStr(iPadSwitchRowLabel("x"), "Y", "Switch: the Xbox's X is the button printed Y");
+    CheckStr(iPadSwitchRowLabel("y"), "X", "Switch: the Xbox's Y is the button printed X");
+    CheckStr(iPadSwitchRowLabel("rt"), "ZR", "Switch: RT is ZR");
+    CheckStr(iPadSwitchRowLabel("start"), "+", "Switch: Start is +");
+    CheckStr(iPadSwitchRowLabel("back"), "-", "Switch: Back is -");
+    CheckStr(iPadSwitchRowLabel("up"), NULL, "Switch: the d-pad rows are not renamed");
+
     CheckBits(iPadPromptsTextureBits("pad_button3"), XPAD_BUTTON_TRIANGLE, "pad_button3 is B");
     CheckBits(iPadPromptsTextureBits("pad_button4"), XPAD_BUTTON_O, "pad_button4 is X");
 

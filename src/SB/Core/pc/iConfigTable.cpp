@@ -72,8 +72,12 @@ const iConfigSetting kConfigSettings[] = {
       "; this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "video", "mode", "borderless",
+#ifdef __SWITCH__
+      "Not used on the Switch: the picture always fills the screen.",
+#else
       "Window mode: borderless, fullscreen (exclusive) or windowed. Alt+Enter\n"
       "; switches between windowed and borderless.",
+#endif
       ICONFIG_ENUM, "borderless|fullscreen|windowed", kNone, kNone },
     { "video", "aspect", "wide",
       "Picture shape: wide (the display's shape: more of the world at the sides,\n"
@@ -106,12 +110,20 @@ const iConfigSetting kConfigSettings[] = {
       "; sides.",
       ICONFIG_FLOAT, NULL, 30.0f, 140.0f },
     { "video", "backend", "auto",
+#ifdef __SWITCH__
+      "Renderer: auto or gl3. The Switch build has gl3 only.",
+#else
       "Renderer: auto, d3d9, d3d11, gl3 or vulkan. auto picks the best one in this\n"
       "; build. Only gl3 and vulkan run outside Windows.",
+#endif
       ICONFIG_ENUM, "auto|d3d9|d3d11|gl3|vulkan", kNone, kNone },
     { "video", "pipeline", "auto",
+#ifdef __SWITCH__
+      "Direct3D 9 only; not used on the Switch.",
+#else
       "Direct3D 9 rendering path: auto, shader or fixed. fixed supports pre-2002\n"
       "; GPUs but has no glow, distortion or per-pixel lighting.",
+#endif
       ICONFIG_ENUM, "auto|shader|fixed", kNone, kNone },
     // TSSM: the console's screen passes, drawn by the port (src/SB/Core/pc/iHDRGlow.h,
     // iScreenWarp.h).
@@ -132,11 +144,22 @@ const iConfigSetting kConfigSettings[] = {
       "; (Z is Back, Z+L white, Z+R black). Lines in [pad] override it.",
       ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube", kNone, kNone },
     { "input", "layout", "auto",
+#ifdef __SWITCH__
+      // The Switch names the buttons by the letter printed where the Xbox's
+      // would be (docs/SWITCH.md, Controls).
+      "Which face button the moves use. xbox: Karate Spin on Y, SpongeBowl on A,\n"
+      "; as the Xbox release. gamecube: Karate Spin on A, SpongeBowl on Y, as the\n"
+      "; GameCube release. Menus are the same in both (B accept, A back). auto:\n"
+      "; xbox. The game's button prompts follow. [pad] names the buttons the\n"
+      "; Xbox's way: a is the bottom button (B), b the right one (A), x the left\n"
+      "; one (Y), y the top one (X).",
+#else
       "Which face button the moves use. xbox: Karate Spin on X, SpongeBowl on B,\n"
       "; as the Xbox release. gamecube: Karate Spin on B, SpongeBowl on X, as the\n"
       "; GameCube release. Menus are the same in both (A accept, B back). auto:\n"
       "; gamecube with a GameCube controller, xbox otherwise. The game's button\n"
       "; prompts follow.",
+#endif
       ICONFIG_ENUM, "auto|xbox|gamecube", kNone, kNone },
     { "input", "button_icons", "auto",
       "Button pictures in the game's prompts: auto (the device you last used),\n"
@@ -157,8 +180,13 @@ const iConfigSetting kConfigSettings[] = {
       "; own) or 0 to 90.",
       ICONFIG_INT, "auto", 0.0f, 90.0f },
     { "input", "trigger_threshold", "auto",
+#ifdef __SWITCH__
+      "How far ZL and ZR must be pressed, as a percentage: auto (30) or 5 to 95.\n"
+      "; The Switch's ZL and ZR only click, so every value works the same there.",
+#else
       "How far LT and RT must be pulled to press, as a percentage: auto (30, where\n"
       "; the GameCube code clicks) or 5 to 95.",
+#endif
       ICONFIG_INT, "auto", 5.0f, 95.0f },
     { "input", "camera_sensitivity", "1.0",
       "Right-stick camera speed. 1.0 is the original speed.",
@@ -180,7 +208,11 @@ const iConfigSetting kConfigSettings[] = {
       "; option still applies.",
       ICONFIG_INT, NULL, 0.0f, 100.0f },
     { "input", "touch_controls", "auto",
+#ifdef __SWITCH__
+      "On-screen touch controls: auto (off on the Switch), on or off.",
+#else
       "On-screen touch controls: auto (on for Android), on or off.",
+#endif
       ICONFIG_ENUM, "auto|on|off", kNone, kNone },
     { "input", "test", "off",
       "Input test: log prints what the game reads from the controller every time\n"
@@ -198,19 +230,39 @@ const iConfigSetting kConfigSettings[] = {
     { "audio", "movie_volume", "100", "Movie and cutscene volume, 0 to 100.", ICONFIG_INT, NULL,
       0.0f, 100.0f },
     { "gui", "launcher", "auto",
+#ifdef __SWITCH__
+      "Launcher window at startup, to choose the game's folder and settings: auto\n"
+      "; (only when the game's files are not found) or never. always is auto on the\n"
+      "; Switch.",
+#else
       "Launcher window at startup, to choose the game's folder and settings: auto\n"
       "; (only when the game's files are not found), always or never.",
+#endif
       ICONFIG_ENUM, "auto|always|never", kNone, kNone },
     { "gui", "key", "F1",
-      "Key that opens the settings overlay in the game.", ICONFIG_STRING, NULL, kNone,
-      kNone },
+#ifdef __SWITCH__
+      "Key on a USB keyboard that opens the settings overlay in the game.",
+#else
+      "Key that opens the settings overlay in the game.",
+#endif
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "gui", "pad_combo", "on",
+#ifdef __SWITCH__
+      "Not used on the Switch: - and + (hold -, press +) always open the settings\n"
+      "; overlay.",
+#else
       "Back+Start on a controller (hold Back, press Start) opens the settings overlay.",
+#endif
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "gui", "scale", "auto",
       "Size of the overlay and launcher: auto (from the display's scaling and the\n"
       "; window's height) or a factor from 0.5 to 4.",
       ICONFIG_FLOAT, "auto", 0.5f, 4.0f },
+    { "gui", "file_picker", "auto",
+      "File and folder picker for Import, Export and Browse: auto (the system's\n"
+      "; dialog where there is one, the built-in one where there is not, as on the\n"
+      "; Switch), system or builtin. TSSM_FILE_PICKER overrides it.",
+      ICONFIG_ENUM, "auto|system|builtin", kNone, kNone },
 };
 
 const S32 kConfigSettingCount = (S32)(sizeof(kConfigSettings) / sizeof(kConfigSettings[0]));

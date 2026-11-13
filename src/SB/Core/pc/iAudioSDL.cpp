@@ -442,7 +442,17 @@ void iAudioSDLDetach(iAudioSDLUser user)
 
 void iAudioSDLRestart(iAudioSDLReason why)
 {
-    // The first reason asked for is the one reported.
+    // The foreground is set rather than asked for, as the watch sets it: a
+    // restart still pending and held back (a stall) would otherwise keep its
+    // reason, and with it the hold, and the game would come back silent for
+    // up to 30 seconds. Otherwise the first reason asked for is the one
+    // reported.
+    if (why == iAUDIOSDL_FOREGROUND)
+    {
+        SDL_SetAtomicInt(&sPending, (int)why);
+        return;
+    }
+
     SDL_CompareAndSwapAtomicInt(&sPending, 0, (int)why);
 }
 

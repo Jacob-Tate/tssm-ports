@@ -9,6 +9,11 @@
 // a Dolphin GCI folder, restores a backup and deletes (which is itself
 // undoable: the save becomes backup 1).
 //
+// Where there is no system dialog (the Switch; TSSM_FILE_PICKER=builtin on a
+// PC) the GUI's own browser picks the file to import, starting in the import
+// folder, and exports go into the export folder under a name made here
+// (iGuiFilePicker.h); the status line says where each one went.
+//
 // The game in progress keeps writing to the slot it last saved to or loaded
 // from -- its autosave. Importing or restoring over that slot is allowed, but
 // only after saying that the next autosave will write over it again.
@@ -17,6 +22,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
 #include "iHost.h"
@@ -150,6 +156,15 @@ namespace
             }
         }
         return base;
+    }
+
+    // "20261029-142501": the moment, for the names of exports.
+    void Stamp(char* out, size_t size)
+    {
+        iHostCalendar c;
+        iHostLocalTime(&c);
+        snprintf(out, size, "%04d%02d%02d-%02d%02d%02d", (int)c.year + 1900, (int)c.mon + 1,
+                 (int)c.mday, (int)c.hour, (int)c.min, (int)c.sec);
     }
 
     // A file name from a save dialog, with `ext` added when it has none.
@@ -296,6 +311,28 @@ namespace
             Say(n <= 0, "%d save%s exported to %s; not exported: %s", (int)n, n == 1 ? "" : "s",
                 dir, skipped.c_str());
         }
+    }
+
+    // Every save into a GCI folder, without a dialog: a new folder in the
+    // export folder.
+    void ExportFolderBuiltin()
+    {
+        char exportDir[1024];
+        char name[64];
+        char dir[1200];
+        iGui::TransferDir("export", exportDir, sizeof(exportDir));
+        char stamp[32];
+        Stamp(stamp, sizeof(stamp));
+        snprintf(name, sizeof(name), "gci-%s", stamp);
+        iGui::UniquePath(exportDir, name, dir, sizeof(dir));
+        if (!iHostMakeDir(dir))
+        {
+            Say(true, "Could not make the folder %s.", dir);
+            return;
+        }
+        FinishExportFolder(dir);
+        // Nothing went in it (no saves): no empty folder left behind.
+        iHostRemoveDir(dir);
     }
 
     // --- import ----------------------------------------------------------------------
@@ -585,7 +622,7 @@ namespace
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        if (ImGui::Button("Cancel") || iGui::BackPressed())
         {
             ImGui::CloseCurrentPopup();
         }
@@ -759,8 +796,7 @@ namespace
             }
         }
 
-        if (close || (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-                      !ImGui::IsPopupOpen("Import over the autosave slot?")))
+        if (close || (iGui::BackPressed() && !ImGui::IsPopupOpen("Import over the autosave slot?")))
         {
             sImport = ImportState();
             ImGui::CloseCurrentPopup();
@@ -867,8 +903,7 @@ namespace
 
         ImGui::Spacing();
         if (ImGui::Button("Close") ||
-            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-             !ImGui::IsPopupOpen("Restore over the autosave slot?")))
+            (iGui::BackPressed() && !ImGui::IsPopupOpen("Restore over the autosave slot?")))
         {
             close = true;
         }
@@ -920,7 +955,7 @@ namespace
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        if (ImGui::Button("Cancel") || iGui::BackPressed())
         {
             ImGui::CloseCurrentPopup();
         }
@@ -1058,7 +1093,7 @@ namespace
             if (s.exists)
             {
                 ImGui::BeginDisabled(!s.valid || iGui::PickingFolder());
-                if (ImGui::SmallButton("Export..."))
+                if (ImGui::SmallButton(iGui::UseBuiltinPicker() ? "Export" : "Export..."))
                 {
                     StartExportGCI(s);
                 }
@@ -1102,15 +1137,19 @@ void iGui::DrawSaves()
     }
 
     const char* root = iSaveStoreRoot();
+    const bool builtin = UseBuiltinPicker();
 
     ImGui::SeparatorText("Save folder");
     ImGui::TextWrapped("%s", root);
+#ifndef __SWITCH__
+    // The Switch has nothing to show a folder with.
     if (ImGui::Button("Open the save folder"))
     {
         iHostMakeDir(root);
         OpenFolder(root);
     }
     ImGui::SameLine();
+#endif
     ImGui::BeginDisabled(PickingFolder());
     if (ImGui::Button("Import..."))
     {
@@ -1120,9 +1159,23 @@ void iGui::DrawSaves()
     Note("Import takes a Dolphin .gci, a GameShark .gcs, a memory card image (.raw, .gcp), a "
          ".zip from Export, or a save file from another install. Every save replaced is kept "
          "as a backup.");
+    if (builtin)
+    {
+        char importDir[1024];
+        char exportDir[1024];
+        TransferDir("import", importDir, sizeof(importDir));
+        TransferDir("export", exportDir, sizeof(exportDir));
+        Note("Put the files to import in %s/ first. Exports are written to %s/.", importDir,
+             exportDir);
+    }
 
     ImGui::SeparatorText("Saves");
-    if (ImGui::Checkbox("Folders C to J too (the PC save screen's)", &sAllFolders))
+#ifdef __SWITCH__
+    const char* const allFolders = "Folders C to J too (the port's save screen's)";
+#else
+    const char* const allFolders = "Folders C to J too (the PC save screen's)";
+#endif
+    if (ImGui::Checkbox(allFolders, &sAllFolders))
     {
         sStale = true;
         Refresh();
@@ -1166,20 +1219,35 @@ void iGui::DrawSaves()
                    "for its own region's disc. Europe also writes the date the PAL way.");
     }
     ImGui::BeginDisabled(PickingFolder());
-    if (ImGui::Button("Every save as a .zip..."))
+    if (ImGui::Button(builtin ? "Every save as a .zip" : "Every save as a .zip..."))
     {
-        PickSaveFile("save-export-zip", "SpongeBobMovie-saves.zip", kZipFilter, 1);
+        // Without a dialog to name it, the name says when it was made.
+        char name[64] = "SpongeBobMovie-saves.zip";
+        if (builtin)
+        {
+            char stamp[32];
+            Stamp(stamp, sizeof(stamp));
+            snprintf(name, sizeof(name), "tssm-saves-%s.zip", stamp);
+        }
+        PickSaveFile("save-export-zip", name, kZipFilter, 1);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Every save into a GCI folder..."))
+    if (ImGui::Button(builtin ? "Every save into a GCI folder" : "Every save into a GCI folder..."))
     {
-        PickFolder("save-export-folder", NULL);
+        if (builtin)
+        {
+            ExportFolderBuiltin();
+        }
+        else
+        {
+            PickFolder("save-export-folder", NULL);
+        }
     }
     ImGui::EndDisabled();
     Note("A .zip carries every save to another install of the port; Import takes it back slot "
          "for slot. A GCI folder is the folder Dolphin keeps a memory card in when it uses GCI "
-         "folders (Card A): folder A's saves go in the folder chosen, folder B's in B/ inside "
-         "it.");
+         "folders (Card A): folder A's saves go in %s, folder B's in B/ inside it.",
+         builtin ? "a new gci-<date> folder in the export folder" : "the folder chosen");
 
     if (sOpenImport)
     {

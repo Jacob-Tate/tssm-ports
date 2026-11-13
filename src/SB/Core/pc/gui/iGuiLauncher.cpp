@@ -19,6 +19,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
@@ -67,8 +68,13 @@ namespace
         ImGui::PushFont(NULL, ImGui::GetStyle().FontSizeBase * 1.6f);
         ImGui::TextColored(ImVec4(0.96f, 0.82f, 0.25f, 1.0f), "The SpongeBob SquarePants Movie");
         ImGui::PopFont();
+#ifdef __SWITCH__
+        ImGui::TextDisabled("Choose the folder with the game's files on the SD card (normally "
+                            "/switch/tssm/assets), check the settings, then Play.");
+#else
         ImGui::TextDisabled("PC port. Choose where the game's files are, check the settings, "
                             "then Play.");
+#endif
         ImGui::Spacing();
 
         const float footer = ImGui::GetFrameHeightWithSpacing() * 1.4f;
@@ -121,9 +127,15 @@ namespace
         }
         else
         {
-            ImGui::TextDisabled("In the game, F1 or Back+Start opens these settings again.");
+#ifdef __SWITCH__
+            ImGui::TextDisabled("In the game, - and + open these settings again.");
+#else
+            ImGui::TextDisabled("In the game, F1 or %s opens these settings again.",
+                                iGui::PadComboName());
+#endif
         }
 
+        iGui::DrawFilePicker();
         ImGui::End();
         return result;
     }
@@ -163,6 +175,14 @@ void iGuiLauncherRun()
     const char* forced = getenv("TSSM_GUI_LAUNCHER");
     const char* when = (forced != NULL && forced[0] != '\0') ? forced :
                                                                iConfigGetString("gui.launcher", "auto");
+#ifdef __SWITCH__
+    // Every start would put one more screen before the game, with nothing the
+    // overlay does not have.
+    if ((forced == NULL || forced[0] == '\0') && SDL_strcasecmp(when, "always") == 0)
+    {
+        when = "auto";
+    }
+#endif
 
     char why[512];
     const bool ready = iGui::CheckAssetFolder(EffectiveRoot(), why, sizeof(why));
@@ -189,8 +209,19 @@ void iGuiLauncherRun()
         content = 1.0f;
     }
 
+    int windowW = (int)(820 * content);
+    int windowH = (int)(680 * content);
+#ifdef __SWITCH__
+    // The console stretches any other size to the screen.
+    const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (desktop != NULL && desktop->w > 0 && desktop->h > 0)
+    {
+        windowW = desktop->w;
+        windowH = desktop->h;
+    }
+#endif
     SDL_Window* window =
-        SDL_CreateWindow("The SpongeBob SquarePants Movie", (int)(820 * content), (int)(680 * content),
+        SDL_CreateWindow("The SpongeBob SquarePants Movie", windowW, windowH,
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
     SDL_Renderer* renderer = window != NULL ? SDL_CreateRenderer(window, NULL) : NULL;
     if (renderer == NULL)

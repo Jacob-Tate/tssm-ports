@@ -22,6 +22,7 @@
 #include "iConfig.h"
 #include "iHDRGlow.h"
 #include "iHost.h"
+#include "iPadTokens.h"
 #include "iScreen.h"
 #include "iScreenWarp.h"
 #include "iWindow.h"
@@ -139,8 +140,7 @@ namespace
     {
         int value = iConfigGetInt(key, def);
         ControlWidth();
-        const bool changed =
-            ImGui::SliderInt(id, &value, lo, hi, format, ImGuiSliderFlags_AlwaysClamp);
+        const bool changed = ImGui::SliderInt(id, &value, lo, hi, format, iGui::kSliderFlags);
         if (changed)
         {
             iGui::CommitInt(key, value, false);
@@ -157,8 +157,7 @@ namespace
     {
         float value = iConfigGetFloat(key, def);
         ControlWidth();
-        const bool changed =
-            ImGui::SliderFloat(id, &value, lo, hi, format, ImGuiSliderFlags_AlwaysClamp);
+        const bool changed = ImGui::SliderFloat(id, &value, lo, hi, format, iGui::kSliderFlags);
         if (changed)
         {
             iGui::CommitFloat(key, value, false);
@@ -381,14 +380,23 @@ void iGui::SettingsGameFiles()
 {
     ImGui::SeparatorText("Game files");
 
-    FolderRow("assets", "assets.path", "(not set: the folder the game starts in)", NULL);
-    RestartTag("assets.path");
-
     // The folder the game will actually read: TSSM_ASSETS while it is set, the
     // setting otherwise, the working folder when the setting is empty.
-    char why[512];
     const char* env = getenv("TSSM_ASSETS");
     const bool overridden = env != NULL && env[0] != '\0';
+
+#ifdef __SWITCH__
+    // iSwitch.cpp sets TSSM_ASSETS whenever the SD card's assets folder
+    // exists, and no player can change it; browsing would do nothing.
+    ImGui::BeginDisabled(overridden);
+#endif
+    FolderRow("assets", "assets.path", "(not set: the folder the game starts in)", NULL);
+#ifdef __SWITCH__
+    ImGui::EndDisabled();
+#endif
+    RestartTag("assets.path");
+
+    char why[512];
     const char* path = iConfigGetString("assets.path", "");
     const char* effective = overridden ? env : (path[0] != '\0' ? path : ".");
     const bool ok = CheckAssetFolder(effective, why, sizeof(why));
@@ -398,9 +406,15 @@ void iGui::SettingsGameFiles()
     ImGui::TextWrapped("%s", why);
     if (overridden)
     {
+#ifdef __SWITCH__
+        Note("The game reads %s on the SD card; the folder above is used only when that one is "
+             "missing.",
+             env);
+#else
         Note("TSSM_ASSETS is set (%s) and is used instead of the folder above for as long as it "
              "is.",
              env);
+#endif
     }
     Note("The folder extracted from your own Xbox disc that directly holds boot.HIP, font.HIP "
          "and FMV. No game files come with the port.");
@@ -417,6 +431,10 @@ void iGui::SettingsDisplay()
     const bool live = !InLauncher();
 
     // The renderer: only what this build carries.
+#ifdef __SWITCH__
+    Row("Renderer");
+    ImGui::TextUnformatted("OpenGL 3");
+#else
     {
         Choice choices[6];
         S32 n = 0;
@@ -442,7 +460,9 @@ void iGui::SettingsDisplay()
             ImGui::TextDisabled("running: %s", RendererName());
         }
     }
+#endif
 
+#ifndef __SWITCH__
     // Window mode. Windowed and borderless are frames around the same surface
     // and switch live; exclusive fullscreen belongs to the device.
     {
@@ -464,6 +484,7 @@ void iGui::SettingsDisplay()
         }
         RestartTag("video.mode");
     }
+#endif
 
     // The picture's shape (iScreen.h, iScreenSizeForAspect). Like the size, it
     // applies at the next start: every screen camera is made at the render size.
@@ -484,7 +505,11 @@ void iGui::SettingsDisplay()
     // Render size for the two shapes: a height, and the width follows from it.
     if (aspect != iSCREENASPECT_CUSTOM)
     {
+#ifdef __SWITCH__
+        static const int kHeights[] = { 480, 720, 1080 };
+#else
         static const int kHeights[] = { 480, 720, 960, 1080, 1440, 2160 };
+#endif
         const S32 count = (S32)(sizeof(kHeights) / sizeof(kHeights[0]));
 
         const int w = iConfigGetInt("video.width", 640);
@@ -590,6 +615,12 @@ void iGui::SettingsDisplay()
         {
             for (S32 i = 0; i < count; i++)
             {
+#ifdef __SWITCH__
+                if (kSizes[i].w > 1920 || kSizes[i].h > 1080)
+                {
+                    continue;
+                }
+#endif
                 const bool selected = kSizes[i].w == w && kSizes[i].h == h;
                 if (ImGui::Selectable(kSizes[i].label, selected) && !selected)
                 {
@@ -610,12 +641,15 @@ void iGui::SettingsDisplay()
                     sCustom = false;
                 }
             }
+#ifndef __SWITCH__
+            // Typed sizes would open the system keyboard on the Switch.
             if (ImGui::Selectable("Other size...", sCustom))
             {
                 sCustom = true;
                 sCustomSize[0] = w;
                 sCustomSize[1] = h;
             }
+#endif
             ImGui::EndCombo();
         }
         if (ChangedSinceStartup("video.width") || ChangedSinceStartup("video.height"))
@@ -839,7 +873,11 @@ void iGui::SettingsGame()
     }
 
     Row("Save folder");
+#ifdef __SWITCH__
+    FolderRow("saves", "game.save_folder", "(default: /switch/tssm/saves)", "Default");
+#else
     FolderRow("saves", "game.save_folder", "(default: the per-user data folder)", "Default");
+#endif
     RestartTag("game.save_folder");
 
     ImGui::EndTable();
@@ -873,8 +911,7 @@ void iGui::SettingsInterface()
             float value = (float)atof(scale);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
-            if (ImGui::SliderFloat("##scale", &value, 0.5f, 4.0f, "%.2fx",
-                                   ImGuiSliderFlags_AlwaysClamp))
+            if (ImGui::SliderFloat("##scale", &value, 0.5f, 4.0f, "%.2fx", iGui::kSliderFlags))
             {
                 CommitFloat("gui.scale", value, false);
             }
@@ -885,6 +922,7 @@ void iGui::SettingsInterface()
         }
     }
 
+#ifndef __SWITCH__
     {
         static const char* const kKeys[] = { "F1", "F2", "F3", "F4", "F5", "F6",
                                              "F7", "F8", "F9", "F10", "F12", "Insert" };
@@ -906,12 +944,31 @@ void iGui::SettingsInterface()
         HelpMarker("F11 and Alt+Enter switch between a window and borderless fullscreen, and F8 is "
                    "taken, so neither is offered.");
     }
+#endif
 
     Row("Controller");
-    BoolSetting("Back+Start opens this window##combo", "gui.pad_combo", true);
-    HelpMarker("Hold Back, then press Start. The buttons stay hidden from the game until they are "
-               "let go, so closing this window does not pause the game.");
+#ifdef __SWITCH__
+    // Not a setting there: it is the only way to open this window.
+    ImGui::TextUnformatted("- and + open and close this window");
+    HelpMarker("Hold -, then press +. The buttons stay hidden from the game until they are let go, "
+               "so closing this window does not pause the game.");
+#else
+    if (iPadSwitchLabels())
+    {
+        BoolSetting("- and + open this window###combo", "gui.pad_combo", true);
+        HelpMarker("Hold -, then press +. The buttons stay hidden from the game until they are "
+                   "let go, so closing this window does not pause the game.");
+    }
+    else
+    {
+        BoolSetting("Back+Start opens this window###combo", "gui.pad_combo", true);
+        HelpMarker("Hold Back, then press Start. The buttons stay hidden from the game until they "
+                   "are let go, so closing this window does not pause the game.");
+    }
+#endif
 
+#ifndef __SWITCH__
+    // On the Switch the launcher shows only when the game's files are missing.
     {
         static const Choice kLauncher[] = { { "auto", "Only when the game's files are missing" },
                                             { "always", "Every time" },
@@ -919,6 +976,7 @@ void iGui::SettingsInterface()
         Row("Launcher at startup");
         ChoiceCombo("##launcher", "gui.launcher", kLauncher, 3, "auto");
     }
+#endif
 
     ImGui::EndTable();
 
@@ -926,6 +984,7 @@ void iGui::SettingsInterface()
     ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Settings file: %s", path != NULL ? path : "none (defaults only)");
+#ifndef __SWITCH__
     if (path != NULL)
     {
         ImGui::SameLine();
@@ -946,6 +1005,7 @@ void iGui::SettingsInterface()
             }
         }
     }
+#endif
 }
 
 void iGui::DrawSettings()

@@ -84,6 +84,14 @@ set(SB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/SB)
 # Mandatory, not style: the source is full of *(U32*)&someFloat.
 add_compile_options(-fno-strict-aliasing)
 
+# Mandatory under GCC, also not style. GCC treats whatever an object's storage held
+# before its constructor ran as dead and deletes the stores (-flifetime-dse), and the
+# game zeroes memory and placement-news into it, relying on the zeros for the members
+# the constructor leaves alone. Clang does not do this. docs/SWITCH.md, Notes.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-lifetime-dse>)
+endif()
+
 if(TSSM_BUILD_32BIT AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compile_options(-msse2 -mfpmath=sse)
 endif()
@@ -100,7 +108,16 @@ if(TSSM_MSVC_ABI)
   add_compile_definitions(_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH _CRT_SECURE_NO_WARNINGS)
 endif()
 
-if(ANDROID)
+# Nintendo Switch homebrew (devkitPro's Switch.cmake; docs/SWITCH.md): a third
+# target next to Windows and Android. Everything it changes is behind
+# TSSM_SWITCH here and __SWITCH__ in the source.
+if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
+  set(TSSM_SWITCH ON)
+else()
+  set(TSSM_SWITCH OFF)
+endif()
+
+if(ANDROID OR TSSM_SWITCH)
   set(TSSM_HOST_TOOLS OFF)
 else()
   set(TSSM_HOST_TOOLS ON)
@@ -210,6 +227,11 @@ endif()
 # --- host seam ---------------------------------------------------------------------
 if(WIN32)
   set(HOST_SOURCES ${PC_DIR}/iHostWin32.cpp)
+elseif(TSSM_SWITCH)
+  # libnx under newlib: no mmap, fork, flock or signals (iHostSwitch.cpp says
+  # what each becomes), plus the start-up, applet and crash code (switch/).
+  set(HOST_SOURCES ${PC_DIR}/iHostSwitch.cpp ${PC_DIR}/switch/iSwitch.cpp
+                   ${PC_DIR}/switch/iSwitchLowMem.cpp)
 else()
   set(HOST_SOURCES ${PC_DIR}/iHostPosix.cpp)
 endif()
@@ -228,6 +250,10 @@ endif()
 # auto: an installed SDL3 if one links, third_party/SDL otherwise.
 if(ANDROID)
   set(TSSM_SDL_DEFAULT "vendored")
+elseif(TSSM_SWITCH)
+  # devkitPro's switch-sdl-3.4 fork, built by tools/switch/build_sdl.sh into a
+  # prefix that CMAKE_PREFIX_PATH names; upstream SDL has no homebrew Switch port.
+  set(TSSM_SDL_DEFAULT "system")
 else()
   set(TSSM_SDL_DEFAULT "auto")
 endif()
@@ -496,6 +522,10 @@ if(TSSM_GUI)
   )
   target_include_directories(tssm_imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
   target_compile_definitions(tssm_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+  if(TSSM_SWITCH)
+    # ImGui's "open in shell" default forks and execs, which libnx has not.
+    target_compile_definitions(tssm_imgui PUBLIC IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS)
+  endif()
   target_compile_options(tssm_imgui PRIVATE ${TSSM_NO_WARNINGS})
   target_link_libraries(tssm_imgui PUBLIC tssm_sdl)
 
@@ -513,12 +543,22 @@ if(TSSM_GUI)
       # librw's GL3 device asks SDL for an OpenGL ES 3 context there.
       target_compile_definitions(tssm_imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
       target_link_libraries(tssm_imgui PUBLIC GLESv3)
+    elseif(TSSM_SWITCH)
+      # No dlopen for ImGui's own GL loader. librw's glad already holds every
+      # entry point, loaded from SDL_GL_GetProcAddress when the device opened,
+      # so the backend is compiled against glad's header and shares them. ImGui
+      # tells a desktop GL context from an ES one by its version string at run
+      # time, so either context librw ends up with works.
+      set_source_files_properties(${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp PROPERTIES
+        COMPILE_DEFINITIONS "IMGUI_IMPL_OPENGL_LOADER_CUSTOM"
+        COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/src/gl/glad/glad.h")
     endif()
   endif()
 
   set(GUI_SOURCES
     ${PC_DIR}/gui/iGui.cpp
     ${PC_DIR}/gui/iGuiControls.cpp
+    ${PC_DIR}/gui/iGuiFilePicker.cpp
     ${PC_DIR}/gui/iGuiLauncher.cpp
     ${PC_DIR}/gui/iGuiMods.cpp
     ${PC_DIR}/gui/iGuiRender.cpp
@@ -570,9 +610,26 @@ if(TSSM_GUI)
                   "https://libsdl.org" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt")
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
-  if(FMV_INCLUDES)
+  if(FMV_INCLUDES AND TSSM_SWITCH)
+    # A .nro is one static image. TODO(switch): the LGPL's relinking terms for a
+    # static link (offer the object files) before any release.
+    tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
+                    "Movie decoding. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  elseif(FMV_INCLUDES)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  endif()
+  if(TSSM_SWITCH)
+    # The Switch's system libraries, linked statically into the .nro. devkitPro
+    # installs no license files for them, so dist/switch/licenses carries the
+    # notes (TODO(switch) there: the exact copyright lines before any release).
+    tssm_gui_notice("Mesa" "MIT" "OpenGL on the Switch (EGL and the nouveau driver). Linked statically."
+                    "https://mesa3d.org" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/mesa.txt")
+    tssm_gui_notice("libdrm_nouveau" "MIT" "The GPU interface Mesa uses on the Switch. Linked statically."
+                    "" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/libdrm_nouveau.txt")
+    tssm_gui_notice("libnx" "ISC" "The Switch homebrew system library. Linked statically."
+                    "https://github.com/switchbrew/libnx" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/libnx.txt")
   endif()
   if(TSSM_BACKEND_VULKAN)
     tssm_gui_notice("Vulkan-Headers" "Apache 2.0" "The Vulkan renderer's API headers."
@@ -770,7 +827,7 @@ target_compile_options(tssm_game PRIVATE ${TSSM_NO_WARNINGS} ${TSSM_GAME_OPTIONS
 # code the game uses (iSndXbox.cpp) and renders them through the audio backend's
 # offline mix to WAV files (src/SB/Core/pc/tests/sndtest.cpp). Nothing from the
 # game's data is part of the build; the test reads the user's own copy.
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT TSSM_SWITCH)
   add_executable(tssm_sndtest ${PC_DIR}/tests/sndtest.cpp ${PC_DIR}/iSndXbox.cpp
     ${AUDIO_SOURCES} ${HOST_SOURCES})
   target_include_directories(tssm_sndtest PRIVATE ${TSSM_INCLUDES})
@@ -799,11 +856,17 @@ else()
   set(TSSM_GAME_TARGET tssm)
 endif()
 target_link_libraries(${TSSM_GAME_TARGET} PRIVATE tssm_game tssm_platform tssm_rw)
+if(TSSM_SWITCH)
+  # The platform layer calls back into the game library (iCapture ->
+  # iTestEvents), and GNU ld reads each archive once, in order. Declaring the
+  # cycle makes CMake list the pair twice.
+  target_link_libraries(tssm_platform INTERFACE tssm_game)
+endif()
 target_compile_options(${TSSM_GAME_TARGET} PRIVATE ${TSSM_NO_WARNINGS})
 target_compile_definitions(${TSSM_GAME_TARGET} PRIVATE ${FMV_DEFINES})
 
 if(NOT WIN32)
-  if(NOT ANDROID)
+  if(NOT ANDROID AND NOT TSSM_SWITCH)
     set_target_properties(${TSSM_GAME_TARGET} PROPERTIES ENABLE_EXPORTS ON)
   endif()
   find_package(Threads REQUIRED)
@@ -864,8 +927,70 @@ if(TSSM_ICON_DIR AND WIN32 AND NOT ANDROID)
   message(STATUS "App icon: ${TSSM_ICON_DIR}/tssm.ico")
 endif()
 
+# --- the Switch package -------------------------------------------------------------
+# tssm.elf -> tssm.nro: the executable, the NACP (the name and version hbmenu
+# shows), a 256x256 JPEG icon and a RomFS. docs/SWITCH.md has the SD card
+# layout. The game's files are never in it: players copy their own.
+if(TSSM_SWITCH)
+  # libnx's default pthread stack is small, and the game's worker threads
+  # (SDL's audio thread, std::thread users) were written against desktop
+  # defaults. iHostSwitch.cpp's __wrap_pthread_create gives every thread
+  # created without an explicit, larger size 2 MB.
+  target_link_options(tssm PRIVATE -Wl,--wrap=pthread_create)
+  # Every exit() goes through switch/iSwitch.cpp's iSwitchQuit, which stops
+  # the threads, the GPU and SDL before hbloader gets the memory back.
+  target_link_options(tssm PRIVATE -Wl,--wrap=exit)
+
+  # The RomFS: only the port's own files, assembled in the build directory
+  # (dist/switch/romfs plus the license texts the About tab also shows).
+  set(TSSM_SWITCH_ROMFS ${CMAKE_CURRENT_BINARY_DIR}/romfs)
+  file(MAKE_DIRECTORY ${TSSM_SWITCH_ROMFS}/licenses)
+  file(GLOB _romfs_files CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/romfs/*)
+  foreach(_f IN LISTS _romfs_files)
+    get_filename_component(_n ${_f} NAME)
+    configure_file(${_f} ${TSSM_SWITCH_ROMFS}/${_n} COPYONLY)
+  endforeach()
+  foreach(_lic
+      "LICENSE|tssm-port.txt"
+      "third_party/SDL/LICENSE.txt|SDL.txt"
+      "third_party/librw/LICENSE|librw.txt"
+      "third_party/imgui/LICENSE.txt|imgui.txt"
+      "dist/switch/licenses/mesa.txt|mesa.txt"
+      "dist/switch/licenses/libdrm_nouveau.txt|libdrm_nouveau.txt"
+      "dist/switch/licenses/libnx.txt|libnx.txt")
+    string(REPLACE "|" ";" _pair "${_lic}")
+    list(GET _pair 0 _from)
+    list(GET _pair 1 _to)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_from})
+      configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${_from} ${TSSM_SWITCH_ROMFS}/licenses/${_to} COPYONLY)
+    endif()
+  endforeach()
+  if(FMV_INCLUDES AND EXISTS "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+    configure_file("${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright"
+                   ${TSSM_SWITCH_ROMFS}/licenses/FFmpeg-LGPL-2.1.txt COPYONLY)
+  endif()
+
+  # A picture from TSSM_ICON_DIR when one was made (docs/ICON.md), else the
+  # port's own default: a plain sponge block, drawn for the port.
+  if(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
+    set(_nro_icon "${TSSM_ICON_DIR}/icon.jpg")
+  else()
+    set(_nro_icon "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/default_icon.jpg")
+  endif()
+  message(STATUS "Switch: icon ${_nro_icon}")
+
+  set(TSSM_SWITCH_VERSION "0.9" CACHE STRING "The version the Switch's NACP shows")
+  nx_generate_nacp(tssm.nacp NAME "TSSM (port)" AUTHOR "TSSM port" VERSION "${TSSM_SWITCH_VERSION}")
+  nx_create_nro(tssm NACP tssm.nacp ICON "${_nro_icon}" ROMFS "${TSSM_SWITCH_ROMFS}")
+endif()
+
 # --- tests ----------------------------------------------------------------------
-option(TSSM_BUILD_TESTS "Build the platform layer's unit tests" ON)
+if(TSSM_SWITCH)
+  set(_tssm_tests_default OFF)
+else()
+  set(_tssm_tests_default ON)
+endif()
+option(TSSM_BUILD_TESTS "Build the platform layer's unit tests" ${_tssm_tests_default})
 
 # --- the headless input test -------------------------------------------------------
 # tssm_input_test drives SDL's virtual controllers and a stand-in keyboard
@@ -961,7 +1086,7 @@ endif()
 # package views checked against real packages, the mod manager. No game code,
 # renderer or window. Run it as `tssm_modtest <asset folder> <scratch folder>`
 # (src/SB/Core/pc/tests/modtest.cpp, docs/MODDING.md).
-if(TSSM_BUILD_TESTS AND NOT ANDROID)
+if(TSSM_BUILD_TESTS AND NOT ANDROID AND NOT TSSM_SWITCH)
   add_executable(tssm_modtest ${PC_DIR}/tests/modtest.cpp
     ${PC_DIR}/iMod.cpp ${PC_DIR}/iModAudio.cpp ${PC_DIR}/iModIni.cpp ${PC_DIR}/iModPackage.cpp
     ${HOST_SOURCES})
