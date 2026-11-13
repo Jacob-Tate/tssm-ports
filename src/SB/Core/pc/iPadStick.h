@@ -37,4 +37,9 @@ void iPadStickSetDeadzone(F32 percent);
 // wants.
 S32 iPadStickDeadzone(S32 fallback);
 
+// A stick whose full tilt falls short of its reported range: `rim` of that
+// range (0..1) becomes full, direction kept and the length clamped to 1. For
+// unit-square stick values, before the curve.
+void iPadStickScaleToRim(F32* x, F32* y, F32 rim);
+
 #endif

@@ -56,9 +56,22 @@ tssm-logo*
 ic_launcher_foreground.png
 tssm_icon.xml
 icon-64.png
+icon-48.png
+icon-24.png
+icon-full.png
 play-512.png
 preview.png
 /icon.jpg
+
+# 3DS programs and banners (tools/3ds/build_port.sh). A banner made by
+# tools/3ds/banner_from_game_files.py, and a .cia or .3dsx that holds one, carries the game's
+# model, textures and voice: these catch one made inside the repository anyway.
+*.cia
+*.3dsx
+*.bnr
+*.cgfx
+*.icn
+*.smdh
 
 # Local assistant and editor-tool folders and notes: never part of the project
 .claude/

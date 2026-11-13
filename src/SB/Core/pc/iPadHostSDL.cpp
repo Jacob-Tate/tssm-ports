@@ -24,6 +24,7 @@
 #include "iPadKeyboard.h"
 #include "iPadLayout.h"
 #include "iPadSettings.h"
+#include "iPadStick.h"
 #include "iPadTokens.h"
 #include "iPadTouch.h"
 #include "iTime.h"
@@ -33,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // What each slot is reporting, before any of it is assigned to a game port.
 // "Slot" is the way the machine counts controllers, as opposed to the way the
@@ -184,6 +186,14 @@ static F32 AxisRow(U32 axes, S32 negative, S32 positive)
     return v;
 }
 
+#ifdef __3DS__
+// SDL's 3DS driver scales the Circle Pad and the C-Stick by a reach of 160,
+// which they do not get to (libctru's nominal reach is 156, less on a
+// diagonal and on a worn pad). This much of SDL's range counts as the rim, so
+// full tilt is a full stick on every heading.
+static const F32 kStickRim = 0.85f;
+#endif
+
 static void ReadPad(SDL_Gamepad* pad, iPadHostState* s)
 {
     sPadHeld = ReadInputs(pad, &s->trigger_l, &s->trigger_r);
@@ -197,6 +207,10 @@ static void ReadPad(SDL_Gamepad* pad, iPadHostState* s)
     s->stick_y = -(F32)SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
     s->substick_x = (F32)SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
     s->substick_y = -(F32)SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+#ifdef __3DS__
+    iPadStickScaleToRim(&s->stick_x, &s->stick_y, kStickRim);
+    iPadStickScaleToRim(&s->substick_x, &s->substick_y, kStickRim);
+#endif
 
     // Axis rows bound on the pad (move_up = dpup, say) push the sticks to the
     // rim, the way the keyboard's do.
@@ -515,6 +529,205 @@ void iPadHostExit()
     }
 }
 
+// ---------------------------------------------------------------------------
+// The controls in words: what SDL makes of the pad on port 0, then one line
+// per physical control and what the game does with it.
+
+static char sControlLines[24][224];
+static S32 sControlLineCount;
+
+static const char* FaceLetter(SDL_GamepadButtonLabel label)
+{
+    switch (label)
+    {
+    case SDL_GAMEPAD_BUTTON_LABEL_A:
+        return "A";
+    case SDL_GAMEPAD_BUTTON_LABEL_B:
+        return "B";
+    case SDL_GAMEPAD_BUTTON_LABEL_X:
+        return "X";
+    case SDL_GAMEPAD_BUTTON_LABEL_Y:
+        return "Y";
+    case SDL_GAMEPAD_BUTTON_LABEL_CROSS:
+        return "Cross";
+    case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE:
+        return "Circle";
+    case SDL_GAMEPAD_BUTTON_LABEL_SQUARE:
+        return "Square";
+    case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE:
+        return "Triangle";
+    default:
+        return "?";
+    }
+}
+
+// What the game does with one pad input: every row bound to it, by the Xbox
+// button the row is named after.
+static void DescribeInput(S32 input, char* out, S32 size)
+{
+    S32 count;
+    const iPadBindToken* tokens = iPadPadTokens(&count);
+    S32 used = 0;
+    out[0] = '\0';
+
+    for (S32 i = 0; i < kPadBindButtonCount && i < IPAD_BIND_MAX_BUTTONS; i++)
+    {
+        const iPadBind& b = sPadBind[i];
+        for (S32 alt = 0; alt < b.alts; alt++)
+        {
+            bool member = false;
+            for (S32 k = 0; k < b.length[alt]; k++)
+            {
+                member = member || (b.id[alt][k] == input && !b.negate[alt][k]);
+            }
+            if (!member)
+            {
+                continue;
+            }
+
+            const char* does = iPadBindDescribe(&kPadBindButtons[i]);
+            char chord[64] = "";
+            if (b.length[alt] > 1)
+            {
+                iPadBind one = b;
+                one.alts = 1;
+                for (S32 k = 0; k < b.length[alt]; k++)
+                {
+                    one.id[0][k] = b.id[alt][k];
+                    one.negate[0][k] = b.negate[alt][k];
+                }
+                one.length[0] = b.length[alt];
+                char text[48];
+                iPadBindFormat(one, tokens, count, text, sizeof(text));
+                snprintf(chord, sizeof(chord), " (as %s)", text);
+            }
+            S32 w =
+                snprintf(out + used, (size_t)(size - used), "%sXbox %s%s: %s", used ? "; and " : "",
+                         kPadBindButtons[i].name, chord, does != NULL ? does : "-");
+            if (w < 0 || used + w >= size)
+            {
+                return;
+            }
+            used += w;
+            break;
+        }
+    }
+
+    if (used == 0)
+    {
+        snprintf(out, (size_t)size, "nothing");
+    }
+}
+
+static void AddControlLine(const char* name, const char* does)
+{
+    if (sControlLineCount < (S32)(sizeof(sControlLines) / sizeof(sControlLines[0])))
+    {
+        snprintf(sControlLines[sControlLineCount++], sizeof(sControlLines[0]), "%s -> %s", name,
+                 does);
+    }
+}
+
+static void BuildControlLines(SDL_Gamepad* pad)
+{
+    sControlLineCount = 0;
+
+    // Named as the screen names them: the console's letters, else the
+    // preset's (which is the pad's kind under auto).
+    const char* names = iPadPrintedSet() != NULL ? iPadPrintedSet() : iPadBindActivePreset();
+    const bool n3ds = names != NULL && strcmp(names, "3ds") == 0;
+
+    {
+        char mapping[160];
+        char* m = SDL_GetGamepadMapping(pad);
+        snprintf(mapping, sizeof(mapping), "%s", m != NULL ? m : "none");
+        SDL_free(m);
+        char head[224];
+        snprintf(head, sizeof(head),
+                 "SDL: '%s', preset %s, face labels %s/%s/%s/%s (bottom/right/left/top); "
+                 "mapping %s",
+                 SDL_GetGamepadName(pad) != NULL ? SDL_GetGamepadName(pad) : "unnamed",
+                 iPadBindActivePreset(),
+                 FaceLetter(SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH)),
+                 FaceLetter(SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST)),
+                 FaceLetter(SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_WEST)),
+                 FaceLetter(SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_NORTH)), mapping);
+        snprintf(sControlLines[sControlLineCount++], sizeof(sControlLines[0]), "%s", head);
+    }
+
+    struct Control
+    {
+        SDL_GamepadButton button;
+        S32 input;
+        const char* where;
+    };
+    static const Control kControls[] = {
+        { SDL_GAMEPAD_BUTTON_SOUTH, PADIN_A, " (bottom)" },
+        { SDL_GAMEPAD_BUTTON_EAST, PADIN_B, " (right)" },
+        { SDL_GAMEPAD_BUTTON_WEST, PADIN_X, " (left)" },
+        { SDL_GAMEPAD_BUTTON_NORTH, PADIN_Y, " (top)" },
+        { SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, PADIN_LB, "" },
+        { SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PADIN_RB, "" },
+        { SDL_GAMEPAD_BUTTON_INVALID, PADIN_LT, "" },
+        { SDL_GAMEPAD_BUTTON_INVALID, PADIN_RT, "" },
+        { SDL_GAMEPAD_BUTTON_BACK, PADIN_BACK, "" },
+        { SDL_GAMEPAD_BUTTON_START, PADIN_START, "" },
+        { SDL_GAMEPAD_BUTTON_LEFT_STICK, PADIN_LS, " (left stick click)" },
+        { SDL_GAMEPAD_BUTTON_RIGHT_STICK, PADIN_RS, " (right stick click)" },
+    };
+
+    char does[192];
+    char name[48];
+    for (U32 i = 0; i < sizeof(kControls) / sizeof(kControls[0]); i++)
+    {
+        const Control& c = kControls[i];
+        bool has =
+            c.button != SDL_GAMEPAD_BUTTON_INVALID ?
+                SDL_GamepadHasButton(pad, c.button) :
+                SDL_GamepadHasAxis(pad, c.input == PADIN_LT ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER :
+                                                              SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+        if (!has)
+        {
+            continue;
+        }
+        snprintf(name, sizeof(name), "%s%s", iPadInputLabel(c.input, names), c.where);
+        DescribeInput(c.input, does, sizeof(does));
+        AddControlLine(name, does);
+    }
+
+    if (SDL_GamepadHasButton(pad, SDL_GAMEPAD_BUTTON_DPAD_UP))
+    {
+        DescribeInput(PADIN_DPUP, does, sizeof(does));
+        AddControlLine("D-pad", does);
+    }
+
+    // The sticks are read as they are (iPad.cpp's curve), not through [pad].
+#ifdef __3DS__
+    const char* rim = "; full at 85% of SDL's range";
+#else
+    const char* rim = "";
+#endif
+    if (SDL_GamepadHasAxis(pad, SDL_GAMEPAD_AXIS_LEFTX))
+    {
+        snprintf(does, sizeof(does), "move (the Xbox's left stick%s)", rim);
+        AddControlLine(n3ds ? "Circle Pad" : "left stick", does);
+    }
+    if (SDL_GamepadHasAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX))
+    {
+        snprintf(does, sizeof(does), "camera (the Xbox's right stick%s)", rim);
+        AddControlLine(n3ds ? "C-Stick" : "right stick", does);
+    }
+    if (n3ds)
+    {
+        AddControlLine("touch screen", "nothing");
+    }
+}
+
+const char* iPadHostControlLine(S32 i)
+{
+    return (i >= 0 && i < sControlLineCount) ? sControlLines[i] : NULL;
+}
+
 // Which slot each game port reads.
 static void MapPortsToSlots()
 {
@@ -565,6 +778,25 @@ static void MapPortsToSlots()
         // what just changed. Anything [pad] spells out still wins.
         LoadPadBindings();
         iPadLayoutRefresh();
+
+        // In the log on the 3DS, whose console log is the only view of it, and
+        // under the input test elsewhere.
+        sControlLineCount = 0;
+        SDL_Gamepad* pad = sPortSlot[0] >= 0 ? sGamepad[sPortSlot[0]] : NULL;
+        if (pad != NULL)
+        {
+            BuildControlLines(pad);
+#ifndef __3DS__
+            if (iPadSettingsGet().test != IPAD_TEST_OFF)
+#endif
+            {
+                for (S32 i = 0; i < sControlLineCount; i++)
+                {
+                    printf("tssm: controls: %s\n", sControlLines[i]);
+                }
+                fflush(stdout);
+            }
+        }
     }
 }
 
@@ -829,6 +1061,16 @@ const char* iPadHostPadKind()
         return NULL;
     }
 
+#ifdef __SWITCH__
+    // SDL's Switch driver names every pad "Switch Controller" with no vendor
+    // or product, so SDL cannot type it; on a Switch every pad is one.
+    return "switch";
+#endif
+#ifdef __3DS__
+    // SDL's 3DS driver has one pad, the console's own, and gives it no type.
+    return "3ds";
+#endif
+
     switch (SDL_GetGamepadType(sGamepad[slot]))
     {
     case SDL_GAMEPAD_TYPE_PS3:
@@ -857,6 +1099,53 @@ const char* iPadHostInputForLabel(char letter)
     {
         return NULL;
     }
+
+#ifdef __SWITCH__
+    // SDL's Switch driver reports buttons by POSITION (its south button is the
+    // one printed B) and types the pad as a standard one, so it labels them the
+    // Xbox way. Which convention the face rows follow is a choice:
+    //
+    //   false  positional, the Xbox layout the port plays with everywhere: the
+    //          bottom button (printed B) jumps and accepts, the right one
+    //          (printed A) is the Xbox's B. Every label names the printed
+    //          letter (iPadSwitchLabels, iPadTokens.h), so prompts say B for
+    //          jump, A for back, Y for the Xbox's X and X for its Y.
+    //   true   by printed letter, Nintendo's convention: A (right) jumps and
+    //          accepts, B (bottom) cancels.
+    //
+    // The Xbox layout, by position, labelled with the
+    // printed letters (docs/SWITCH.md, Controls).
+    const bool kSwitchPrintedLetters = false;
+    if (kSwitchPrintedLetters)
+    {
+        switch (letter)
+        {
+        case 'A':
+            return "b"; // east
+        case 'B':
+            return "a"; // south
+        case 'X':
+            return "y"; // north
+        case 'Y':
+            return "x"; // west
+        default:
+            return NULL;
+        }
+    }
+    switch (letter)
+    {
+    case 'A':
+        return "a";
+    case 'B':
+        return "b";
+    case 'X':
+        return "x";
+    case 'Y':
+        return "y";
+    default:
+        return NULL;
+    }
+#endif
 
     // The four face positions and the token each one is called by. Walking
     // positions and asking SDL what is PRINTED on each is the only way round:

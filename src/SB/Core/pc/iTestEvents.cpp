@@ -3,12 +3,14 @@
 
 #include "iTestEvents.h"
 
+#include "iWindow.h"
 #include "xEnt.h"
 #include "xMath3.h"
 #include "xScreenWarp.h"
 #include "zCamera.h"
 #include "zGlobals.h"
 #include "zPlayer.h"
+#include "zRewards.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +50,9 @@ namespace
     // TSSM_TEST_CRASH as a frame number (above 1).
     S32 sCrashFrame;
 
+    // TSSM_TEST_CLOSE: the frame the window is asked to close at.
+    S32 sCloseFrame;
+
     // TSSM_TEST_HOLD=first-last: from first to last, put the player back at the latest
     // TSSM_TEST_PLACE spot every frame (camera included), so the view stays still while the
     // world goes on: a conveyor cannot carry the player off, and two frames a few apart differ
@@ -59,6 +64,18 @@ namespace
     // to level (1 normal, 2 upgraded), e.g. for Patrick's upgraded cartwheel and its shield.
     S32 sPowerFrame;
     S32 sPowerLevel;
+
+    // TSSM_TEST_MP=frame:points,...: manliness points given at those frames.
+    struct PointsEvent
+    {
+        S32 frame;
+        S32 points;
+    };
+
+    const S32 kMaxPoints = 16;
+
+    PointsEvent sPoints[kMaxPoints];
+    S32 sPointsCount;
 
     // TSSM_TEST_CAMLOG=n: every n frames, log where the game's camera is and whether a level
     // fly-through (zCameraFly) is playing, for tools/regress.py's fly-through check.
@@ -213,10 +230,34 @@ void iTestEventsFrame(S32 frame)
         {
             sCrashFrame = atoi(crash);
         }
+        const char* close = getenv("TSSM_TEST_CLOSE");
+        if (close != NULL && atoi(close) > 0)
+        {
+            sCloseFrame = atoi(close);
+        }
         const char* power = getenv("TSSM_TEST_POWERUP");
         if (power != NULL && sscanf(power, "%d:%d", &sPowerFrame, &sPowerLevel) != 2)
         {
             sPowerFrame = 0;
+        }
+        const char* mp = getenv("TSSM_TEST_MP");
+        if (mp != NULL && mp[0] != '\0')
+        {
+            char buf[512];
+            snprintf(buf, sizeof(buf), "%s", mp);
+            for (char* e = strtok(buf, ","); e != NULL && sPointsCount < kMaxPoints;
+                 e = strtok(NULL, ","))
+            {
+                PointsEvent p;
+                if (sscanf(e, "%d:%d", &p.frame, &p.points) == 2 && p.frame > 0 && p.points > 0)
+                {
+                    sPoints[sPointsCount++] = p;
+                }
+                else
+                {
+                    printf("tssm: test: TSSM_TEST_MP: '%s' is not frame:points; ignored\n", e);
+                }
+            }
         }
         const char* camLog = getenv("TSSM_TEST_CAMLOG");
         if (camLog != NULL && atoi(camLog) > 0)
@@ -238,6 +279,13 @@ void iTestEventsFrame(S32 frame)
         *(volatile int*)0 = 1;
     }
 
+    if (sCloseFrame != 0 && frame == sCloseFrame)
+    {
+        printf("tssm: test: frame %d: TSSM_TEST_CLOSE, the window is asked to close\n", (int)frame);
+        fflush(stdout);
+        iWindowRequestClose();
+    }
+
     if (sPowerFrame != 0 && frame == sPowerFrame)
     {
         for (S32 i = 0; i < 8; i++)
@@ -247,6 +295,19 @@ void iTestEventsFrame(S32 frame)
         printf("tssm: test: frame %d: every move's power-up set to %d\n", (int)frame,
                (int)sPowerLevel);
         fflush(stdout);
+    }
+
+    for (S32 i = 0; i < sPointsCount; i++)
+    {
+        if (sPoints[i].frame == frame && globals.player.rewardsMgr != NULL)
+        {
+            globals.player.rewardsMgr->IncManlinessPoints((U32)sPoints[i].points, false);
+            printf("tssm: test: frame %d: %d manliness points given; now %d, %d upgrade points "
+                   "unused\n",
+                   (int)frame, (int)sPoints[i].points, (int)globals.player.InvManlinessPoints,
+                   (int)globals.player.CurrentUnusedSkillPoints);
+            fflush(stdout);
+        }
     }
 
     S32 latest = -1;

@@ -1,6 +1,7 @@
 #include "iModel.h"
 #include "iCamera.h"
 #include "zMain.h"
+#include "iD0Stats.h"
 
 #include <rpskin.h>
 #include <rtskinsp.h>
@@ -231,6 +232,12 @@ static RpAtomic* iModelStreamRead(RwStream* stream)
         }
     }
 #endif
+    // TSSM_D0: what that split would have to work with (iD0Stats.h).
+    for (S32 i = 0; i < gLastAtomicCount; i++)
+    {
+        iD0SkinGeometry(gLastAtomicList[i]);
+    }
+
     // PORT: the GameCube skins through a 10-matrix palette, so retail splits
     // every skinned geometry into pieces of at most 10 bones. librw's skinning
     // takes the whole hierarchy in one draw, and has no RtSkinSplit to call.

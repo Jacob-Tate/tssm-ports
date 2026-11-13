@@ -38,6 +38,7 @@
 #include "rw.h"
 
 #include "convert.h"
+#include "iD0Stats.h"
 
 #include <stdio.h>
 
@@ -68,7 +69,7 @@ namespace
     }
 }
 
-void rwConvertAtomicToCurrentPlatform(rw::Atomic* atomic)
+static void ConvertAtomic(rw::Atomic* atomic)
 {
     if (atomic == NULL || atomic->geometry == NULL)
     {
@@ -124,7 +125,31 @@ void rwConvertAtomicToCurrentPlatform(rw::Atomic* atomic)
         }
     }
 
+    const S64 d0Start = iD0Now();
     pipe->uninstance(atomic);
+    iD0Add(iD0_GEOM_CONVERT, d0Start, (U32)geo->numVertices);
+}
+
+void rwConvertAtomicToCurrentPlatform(rw::Atomic* atomic)
+{
+    ConvertAtomic(atomic);
+
+#ifdef RW_C3D
+    // The 3DS instances every geometry here, while the level loads, rather
+    // than at its first draw: instancing on the console's CPU would hitch the
+    // frame a new model first appears in. Through the pipeline
+    // and not Atomic::instance, which would also mark the geometry NATIVE.
+    if (rw::platform == rw::PLATFORM_C3D && atomic != NULL && atomic->geometry != NULL &&
+        (atomic->geometry->flags & rw::Geometry::NATIVE) == 0)
+    {
+        atomic->getPipeline()->instance(atomic);
+        return;
+    }
+#endif
+
+    // TSSM_D0 (iD0Stats.h): converted or portable from the start, every
+    // geometry is instanced here when the load is being timed.
+    iD0AfterConvert(atomic);
 }
 
 void rwConvertClumpToCurrentPlatform(rw::Clump* clump)

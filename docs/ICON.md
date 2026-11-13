@@ -26,6 +26,7 @@ picture is what gets centred. It writes:
 | `icon-64.png` | an SDL window icon (platforms without an executable icon) |
 | `android/res/` | Android: `mipmap-*dpi/ic_launcher.png` (48 dp, legacy launchers), `mipmap-*dpi/ic_launcher_foreground.png` (108 dp, the picture inside the adaptive icon's 66 dp safe circle), `mipmap-anydpi-v26/ic_launcher.xml`, `values/tssm_icon.xml` (the background colour layer) |
 | `icon.jpg` | Switch: 256x256 JPEG on the background colour, for `nx_create_nro` |
+| `icon-48.png` | 3DS: 48x48 on the background colour, for the SMDH (`ctr_generate_smdh`; smdhtool takes exactly 48x48) |
 | `play-512.png` | a Play Store style 512 px icon, for reference |
 | `preview.png` | the adaptive icon under a circle, rounded-square and squircle mask, the legacy and Switch icons, and every `.ico` size, on light and dark |
 
@@ -52,17 +53,28 @@ it; `cmake -DTSSM_ICON_DIR=` (or a new build directory) does.
 long-press shortcut use). Without the property the APK has the default icon.
 docs/ANDROID.md.
 
-**Switch.** The Switch build passes the icon to `nx_create_nro` when
-`TSSM_ICON_DIR` has `icon.jpg`, and leaves it out otherwise (the NRO then has
-devkitPro's default):
+**Switch.** The Switch build passes `TSSM_ICON_DIR`'s `icon.jpg` to
+`nx_create_nro` when there is one, and otherwise the port's own default,
+`dist/switch/default_icon.jpg` (a plain sponge block drawn from shapes by
+`tools/switch/draw_default_icon.ps1`, registered in `tools/check_icon_art.py`):
 
 ```cmake
 if(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
-  nx_create_nro(tssm ... ICON "${TSSM_ICON_DIR}/icon.jpg")
+  set(_nro_icon "${TSSM_ICON_DIR}/icon.jpg")
 else()
-  nx_create_nro(tssm ...)
+  set(_nro_icon "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/default_icon.jpg")
 endif()
+nx_create_nro(tssm ... ICON "${_nro_icon}" ...)
 ```
+
+The configure step prints which one it took (`Switch: icon ...`).
+
+**3DS.** The 3DS build passes `TSSM_ICON_DIR`'s `icon-48.png` to
+`ctr_generate_smdh` (copied into the build directory first), and otherwise
+leaves the SMDH with libctru's default icon. A folder made before
+`make_icons.ps1` wrote `icon-48.png` stops the configure with a message: make
+it again. devkitPro's MSYS2 CMake reads the folder as an MSYS path
+(`/e/art/icons`, not `E:/art/icons`). docs/3DS.md.
 
 ## The guard
 

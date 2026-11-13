@@ -15,7 +15,15 @@
 #else
 #include <errno.h>
 #include <pthread.h>
+#if defined(__SWITCH__)
+#include <sys/iosupport.h>
+#include "switch/iSwitch.h"
+#elif defined(__3DS__)
+#include <sys/iosupport.h>
+#include "3ds/i3DS.h"
+#else
 #include <sys/ioctl.h>
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -465,6 +473,62 @@ namespace
         pthread_mutex_unlock(&sLock);
     }
 
+#if defined(__SWITCH__) || defined(__3DS__)
+    // The Switch and the 3DS have no pipe(). newlib sends descriptors 1 and 2
+    // through devoptab_list[STD_OUT] / [STD_ERR], so the tee is a device in
+    // those two slots: each write goes to the device that was there before
+    // (nothing, unless something installed a console), to the PC when the
+    // game was sent with `nxlink -s` or `3dslink -s` (switch/iSwitch.cpp,
+    // 3ds/i3DS.cpp), and to the log. No thread, so nothing is ever in flight
+    // and iLogDrain only syncs the file.
+    const devoptab_t* sPrevDev[2];
+    devoptab_t sTeeDev[2];
+
+    ssize_t TeeWrite(S32 which, struct _reent* r, void* fd, const char* ptr, size_t len)
+    {
+        const devoptab_t* prev = sPrevDev[which];
+        if (prev != NULL && prev->write_r != NULL)
+        {
+            prev->write_r(r, fd, ptr, len);
+        }
+#ifdef __3DS__
+        // Never waits on the network for long: libctru's socket calls queue
+        // behind one another (3ds/i3DS.cpp).
+        i3DSLinkWrite(ptr, len);
+#else
+        const int net = iSwitchNxlinkSocket();
+        if (net >= 0)
+        {
+            ssize_t wrote = write(net, ptr, len);
+            (void)wrote;
+        }
+#endif
+        Keep(ptr, len);
+        return (ssize_t)len;
+    }
+
+    ssize_t TeeOut(struct _reent* r, void* fd, const char* ptr, size_t len)
+    {
+        return TeeWrite(0, r, fd, ptr, len);
+    }
+
+    ssize_t TeeErr(struct _reent* r, void* fd, const char* ptr, size_t len)
+    {
+        return TeeWrite(1, r, fd, ptr, len);
+    }
+
+    bool StartTee(Tee*, int fd)
+    {
+        const S32 which = fd == 2 ? 1 : 0;
+        const int slot = which == 0 ? STD_OUT : STD_ERR;
+        sPrevDev[which] = devoptab_list[slot];
+        memset(&sTeeDev[which], 0, sizeof(sTeeDev[which]));
+        sTeeDev[which].name = which == 0 ? "tssmout" : "tssmerr";
+        sTeeDev[which].write_r = which == 0 ? TeeOut : TeeErr;
+        devoptab_list[slot] = &sTeeDev[which];
+        return true;
+    }
+#else
     void* TeeThread(void* param)
     {
         Tee* t = (Tee*)param;
@@ -520,6 +584,7 @@ namespace
         pthread_detach(th);
         return true;
     }
+#endif
 } // namespace
 
 void iLogBegin()
@@ -556,7 +621,8 @@ void iLogStart()
         iHostMakeDir(sDir);
         if (iHostPathExists(sLogPath))
         {
-            rename(sLogPath, prev);
+            // Through the host: the Switch's rename does not replace.
+            iHostRenameReplace(sLogPath, prev);
         }
         fd = open(sLogPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     }
@@ -604,6 +670,7 @@ void iLogDrain(U32 ms)
         return;
     }
 
+#if !defined(__SWITCH__) && !defined(__3DS__)
     S32 quiet = 0;
     for (U32 waited = 0; waited < ms && quiet < 2; waited += 2)
     {
@@ -620,12 +687,39 @@ void iLogDrain(U32 ms)
         quiet = idle ? quiet + 1 : 0;
         usleep(2000);
     }
+#else
+    (void)ms;
+#endif
 
     if (sLogFd >= 0)
     {
         fsync(sLogFd);
     }
 }
+
+#ifdef __3DS__
+void i3DSLogWrite(const char* text, size_t n)
+{
+    Keep(text, n);
+    if (sLogFd >= 0)
+    {
+        fsync(sLogFd);
+    }
+}
+
+void i3DSLogClose()
+{
+    pthread_mutex_lock(&sLock);
+    if (sLogFd >= 0)
+    {
+        fsync(sLogFd);
+        close(sLogFd);
+        sLogFd = -1;
+    }
+    sHolding = false;
+    pthread_mutex_unlock(&sLock);
+}
+#endif
 
 #endif
 

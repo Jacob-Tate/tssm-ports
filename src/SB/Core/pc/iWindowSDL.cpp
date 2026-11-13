@@ -164,6 +164,20 @@ S32 iWindowOpen(const iWindowParams* params)
     // monitor. What it ends up as is read back below.
     sWidth = params->width;
     sHeight = params->height;
+#ifdef __SWITCH__
+    // The console scales whatever buffer it gets to the screen, so a window at
+    // the render size would draw the overlay at that size too, then blur it.
+    // The screen's own size instead, windowed: SDL's Switch driver follows a
+    // dock change only for a resizable window. The game's picture is still
+    // drawn at the render size and scaled to the window.
+    const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (desktop != NULL && desktop->w > 0 && desktop->h > 0)
+    {
+        sWidth = desktop->w;
+        sHeight = desktop->h;
+    }
+    sMode = iWINDOW_WINDOWED;
+#endif
 
     strncpy(sTitle, params->title != NULL ? params->title : "TSSM", sizeof(sTitle) - 1);
     sTitle[sizeof(sTitle) - 1] = '\0';
@@ -762,7 +776,7 @@ void iWindowSetExclusive(S32 on)
 
 S32 iWindowSetMode(iWindowMode mode)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__SWITCH__)
     (void)mode;
     return FALSE;
 #else

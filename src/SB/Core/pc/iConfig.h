@@ -68,6 +68,14 @@ S32 iConfigGetInt(const char* key, S32 def);
 F32 iConfigGetFloat(const char* key, F32 def);
 const char* iConfigGetString(const char* key, const char* def);
 
+// A setting whose default changed. A file that still has the old default
+// under the comment an older build wrote with it (`oldComment` is that
+// comment's start, "; ..." included) never had it chosen: the comment and the
+// value are rewritten to this build's, in place (so this happens once), and
+// the getters answer with the new default. TRUE when it did.
+bool iConfigRetireDefault(const char* section, const char* name, const char* oldComment,
+                          const char* oldValue);
+
 // Change a setting while the game runs, from the in-game settings screen. The
 // getters answer with the new value from here on; applying it is the caller's
 // job, since what applying means differs per setting. iConfigSave writes every

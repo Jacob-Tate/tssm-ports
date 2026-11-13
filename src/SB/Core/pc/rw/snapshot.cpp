@@ -42,6 +42,10 @@
 #include "src/d3d/rwd3dimpl.h"
 #endif
 
+#ifdef RW_C3D
+#include "3ds/c3d/rwc3d.h"
+#endif
+
 #include "backend.h"
 #include "iSnapshot.h"
 
@@ -75,7 +79,7 @@ static S32 sFailed;
 // texture asset -- which is the GameCube and PS2 loading screen exactly.
 static S32 sEnabled = TRUE;
 
-#if defined(RW_D3D_ANY) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3) || defined(RW_C3D)
 
 // The size to capture at, and the raster to capture into. Shared by both
 // backends because neither the sizing rule nor the lifetime differs: the
@@ -287,6 +291,55 @@ namespace gl3snap
 } // namespace gl3snap
 #endif
 
+#ifdef RW_C3D
+namespace c3dsnap
+{
+    static void snapshotFail(const char* what)
+    {
+        sFailed = 1;
+        printf("tssm: the loading-screen snapshot is off -- %s\n", what);
+        fflush(stdout);
+    }
+
+    // As GL3's, with the top screen for the virtual screen: a GX copy queued
+    // in the frame, before the present, into a block of the raster's own (it
+    // must outlast the frame, unlike the passes' shared copy).
+    void iSnapshotCapture()
+    {
+        const S32 obscured = sObscured;
+        sObscured = 0;
+
+        if (!sEnabled || sFailed || sLatched || obscured || !rw::c3d::deviceOpen())
+        {
+            return;
+        }
+
+        if (!snapshotEnsureRaster(400, 240))
+        {
+            return;
+        }
+
+        if (!rw::c3d::copyScreen(reinterpret_cast<rw::Raster*>(sRaster), 1))
+        {
+            snapshotFail("the frame could not be copied into a texture");
+            return;
+        }
+
+        sHaveFrame = 1;
+    }
+
+    RwTexture* iSnapshotBackgroundTexture()
+    {
+        if (!sEnabled || sFailed || !sLatched || !sHaveFrame || sTexture == NULL)
+        {
+            return NULL;
+        }
+
+        return sTexture;
+    }
+} // namespace c3dsnap
+#endif
+
 static iSnapshotFrameHook sFrameHook;
 
 RwRaster* iSnapshotCopyFrame(RwRaster* dst)
@@ -294,6 +347,27 @@ RwRaster* iSnapshotCopyFrame(RwRaster* dst)
     RwInt32 w = 0;
     RwInt32 h = 0;
     bool d3d = false;
+
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        // No copy and no texture: a raster that stands for the top screen,
+        // whose toImage reads the colour buffer back. Only after the present
+        // (citro3d runs a frame's work at C3D_FrameEnd), which is when
+        // camera.cpp calls the frame hook on this backend.
+        if (dst != NULL && (RwRasterGetType(dst) != rwRASTERTYPECAMERA ||
+                            RwRasterGetWidth(dst) != 400 || RwRasterGetHeight(dst) != 240))
+        {
+            RwRasterDestroy(dst);
+            dst = NULL;
+        }
+        if (dst == NULL)
+        {
+            dst = RwRasterCreate(400, 240, 0, rwRASTERTYPECAMERA);
+        }
+        return dst;
+    }
+#endif
 
 #ifdef RW_D3D_ANY
     if ((iBackendIsD3D() || iBackendIsVulkan()) && rw::d3d::deviceOpen())
@@ -366,13 +440,30 @@ static void snapshotCaptureFrame()
         gl3snap::iSnapshotCapture();
     }
 #endif
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        c3dsnap::iSnapshotCapture();
+    }
+#endif
 }
 
 void iSnapshotCapture()
 {
     snapshotCaptureFrame();
 
-    if (sFrameHook != NULL)
+    // On citro3d the hook runs after the present instead (iSnapshotPresented):
+    // nothing of a frame has been drawn before C3D_FrameEnd, so a capture
+    // taken here would read the frame before.
+    if (sFrameHook != NULL && !iBackendIsC3D())
+    {
+        sFrameHook();
+    }
+}
+
+void iSnapshotPresented()
+{
+    if (sFrameHook != NULL && iBackendIsC3D())
     {
         sFrameHook();
     }
@@ -392,10 +483,16 @@ RwTexture* iSnapshotBackgroundTexture()
         return gl3snap::iSnapshotBackgroundTexture();
     }
 #endif
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        return c3dsnap::iSnapshotBackgroundTexture();
+    }
+#endif
     return NULL;
 }
 
-#if defined(RW_D3D_ANY) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3) || defined(RW_C3D)
 
 // The capture target, made on the first capture rather than at startup: until
 // the engine is open there is no device to create a render target on and

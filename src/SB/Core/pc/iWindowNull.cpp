@@ -1,4 +1,7 @@
 #include "iWindow.h"
+#include "iHost.h"
+
+#include <stdlib.h>
 
 // The window for a build that does not draw.
 //
@@ -57,8 +60,40 @@ void iWindowPump()
 // No display to pace to. iSystem.cpp's iVSync does the same deadline
 // arithmetic for the loops that have no renderer, and a headless build is
 // meant to run as fast as the machine allows -- the self-tests are the caller.
+//
+// TSSM_NULL_PACE=1 paces it to video.framerate anyway, with iVSync's deadline
+// arithmetic: a frame-time measurement of the game without drawing (the 3DS
+// study, iD0Stats.h) wants the game's own time step, not whatever step a
+// machine running flat out produces.
 void iWindowPaceFrame()
 {
+    static S32 sPace = -1;
+    if (sPace < 0)
+    {
+        const char* env = getenv("TSSM_NULL_PACE");
+        sPace = (env != NULL && atoi(env) > 0) ? 1 : 0;
+    }
+    if (!sPace || sFrameRate <= 0)
+    {
+        return;
+    }
+
+    static U64 sNext;
+    static bool sStarted;
+    const U64 now = iHostMonotonicNs();
+    if (!sStarted)
+    {
+        sNext = now;
+        sStarted = true;
+    }
+
+    sNext += 1000000000ULL / (U64)sFrameRate;
+    if (sNext < now)
+    {
+        sNext = now;
+        return;
+    }
+    iHostSleepUntilNs(sNext);
 }
 
 void iWindowSetFrameRate(S32 fps)

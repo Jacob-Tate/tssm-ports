@@ -66,6 +66,15 @@ bool iScreenPassReady();
 // camera draws into.
 void iScreenPassExtent(RwInt32* w, RwInt32* h);
 
+// Whether the backend lets a pass run (the 3DS's measuring switches;
+// always on elsewhere).
+enum
+{
+    ISCREENPASS_GLOW,
+    ISCREENPASS_WARP
+};
+bool iScreenPassOn(S32 pass);
+
 // Copy the picture so far into *screen, which is made (or remade, when the
 // render size has changed) as a camera texture of the picture's size. The
 // frame's camera must not be in an update: the copy reads the finished

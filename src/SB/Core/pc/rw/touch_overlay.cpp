@@ -33,6 +33,9 @@ namespace
         { 'Z', { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F } },
         { '>', { 0x10, 0x18, 0x1C, 0x1E, 0x1C, 0x18, 0x10 } },
         { '=', { 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x1F, 0x00 } },
+        // The Switch's - and + (iPadTest.cpp, iPadTouch.cpp).
+        { '-', { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00 } },
+        { '+', { 0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00 } },
     };
 
     const Glyph* FindGlyph(char c)
@@ -101,8 +104,8 @@ namespace
         F32 r, g, b, a;
     };
 
-    // Shapes plus up to 35 cells per label.
-    const S32 kMaxQuads = ITOUCHOVERLAY_MAX_SHAPES * (1 + 35);
+    // Shapes plus up to 35 cells per character, two characters a label.
+    const S32 kMaxQuads = ITOUCHOVERLAY_MAX_SHAPES * (1 + 2 * 35);
 
     Vertex sVertices[kMaxQuads * 6];
 
@@ -221,27 +224,33 @@ namespace
             Quad(v, s.x, s.y, s.halfWidth, s.halfHeight, s.corner, s.stroke, s.r / 255.0f,
                  s.g / 255.0f, s.b / 255.0f, s.a / 255.0f);
 
-            const Glyph* glyph = FindGlyph(s.label);
-            if (glyph == NULL)
+            const Glyph* glyphs[2] = { FindGlyph(s.label),
+                                       s.label2 != 0 ? FindGlyph(s.label2) : NULL };
+            if (glyphs[0] == NULL)
             {
                 continue;
             }
+            const S32 count = glyphs[1] != NULL ? 2 : 1;
 
-            // Seven cells tall in half the shape's shorter side.
+            // Seven cells tall in half the shape's shorter side; a second
+            // character one cell after the first, the pair centred.
             F32 half = s.halfWidth < s.halfHeight ? s.halfWidth : s.halfHeight;
             F32 cell = half / 7.0f;
-            F32 left = s.x - cell * 2.5f;
+            F32 left = s.x - cell * (count == 2 ? 5.5f : 2.5f);
             F32 top = s.y - cell * 3.5f;
             F32 alpha = s.a < 128 ? 0.6f : 0.95f;
 
-            for (S32 row = 0; row < 7; row++)
+            for (S32 k = 0; k < count; k++, left += 6.0f * cell)
             {
-                for (S32 col = 0; col < 5; col++)
+                for (S32 row = 0; row < 7; row++)
                 {
-                    if (glyph->rows[row] & (0x10 >> col))
+                    for (S32 col = 0; col < 5; col++)
                     {
-                        Quad(v, left + (col + 0.5f) * cell, top + (row + 0.5f) * cell,
-                             cell * 0.5f, cell * 0.5f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, alpha);
+                        if (glyphs[k]->rows[row] & (0x10 >> col))
+                        {
+                            Quad(v, left + (col + 0.5f) * cell, top + (row + 0.5f) * cell,
+                                 cell * 0.5f, cell * 0.5f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, alpha);
+                        }
                     }
                 }
             }

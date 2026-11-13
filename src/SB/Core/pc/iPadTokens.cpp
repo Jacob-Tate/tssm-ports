@@ -6,6 +6,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 static const iPadBindToken kPadTokens[] = {
     { "a", PADIN_A },           { "b", PADIN_B },
     { "x", PADIN_X },           { "y", PADIN_Y },
@@ -218,6 +221,12 @@ const char* iPadInputLabel(S32 input, const char* kind)
         "Up", "Down", "Left", "Right", "Capture", "SR", "SL", "SL", "SR", "Touchpad",
         "ZL click", "ZR click",
     };
+    // The New 3DS by position, as SDL's 3DS mapping reports it: B south, A
+    // east; no stick clicks.
+    static const char* const kN3DS[PADIN_COUNT] = {
+        "B",  "A",    "Y",    "X",     "L", "R", "ZL", "ZR", "-", "-", "SELECT", "START",
+        "Up", "Down", "Left", "Right", "-", "-", "-",  "-",  "-", "-", "-",      "-",
+    };
     // An adapter's usual mapping: A south, B west, X east, Y north, Z on the
     // right bumper, L and R the analog triggers.
     static const char* const kGameCube[PADIN_COUNT] = {
@@ -244,6 +253,82 @@ const char* iPadInputLabel(S32 input, const char* kind)
         {
             return kGameCube[input];
         }
+        if (iHostStrCaseCmp(kind, "3ds") == 0)
+        {
+            return kN3DS[input];
+        }
     }
     return kXbox[input];
+}
+
+const char* iPadPrintedSet()
+{
+#if defined(__SWITCH__)
+    return "switch";
+#elif defined(__3DS__)
+    return "3ds";
+#else
+    static const char* sSet;
+    static bool sRead;
+    if (!sRead)
+    {
+        sRead = true;
+        const char* env = getenv("TSSM_PAD_LABELS");
+        if (env != NULL && iHostStrCaseCmp(env, "switch") == 0)
+        {
+            sSet = "switch";
+        }
+        else if (env != NULL && iHostStrCaseCmp(env, "3ds") == 0)
+        {
+            sSet = "3ds";
+        }
+    }
+    return sSet;
+#endif
+}
+
+bool iPadSwitchLabels()
+{
+    const char* set = iPadPrintedSet();
+    return set != NULL && strcmp(set, "switch") == 0;
+}
+
+static const char* RowLabelIn(const char* row, const char* kind)
+{
+    // The row's Xbox button, whose position the console's label is read at.
+    struct Row
+    {
+        const char* name;
+        S32 input;
+    };
+    static const Row kRows[] = {
+        { "a", PADIN_A },         { "b", PADIN_B },      { "x", PADIN_X },
+        { "y", PADIN_Y },         { "lt", PADIN_LT },    { "rt", PADIN_RT },
+        { "white", PADIN_LB },    { "black", PADIN_RB }, { "back", PADIN_BACK },
+        { "start", PADIN_START },
+    };
+
+    if (row == NULL)
+    {
+        return NULL;
+    }
+    for (U32 i = 0; i < sizeof(kRows) / sizeof(kRows[0]); i++)
+    {
+        if (iHostStrCaseCmp(kRows[i].name, row) == 0)
+        {
+            return iPadInputLabel(kRows[i].input, kind);
+        }
+    }
+    return NULL;
+}
+
+const char* iPadSwitchRowLabel(const char* row)
+{
+    return RowLabelIn(row, "switch");
+}
+
+const char* iPadPrintedRowLabel(const char* row)
+{
+    const char* set = iPadPrintedSet();
+    return set != NULL ? RowLabelIn(row, set) : NULL;
 }

@@ -50,6 +50,17 @@ F32 iTimeDiffSec(iTime t0, iTime t1);
 F32 iTimeDiffSec(iTime time);
 void iTimeSuspend();
 void iTimeResume();
+// The 3DS spike (iSpike.h) runs its frames back to back but wants the game's
+// time step of a 30 fps display: called once per presented game-loop frame, it
+// moves the clock forward so that frame counts as at least `periodNs`, as a
+// frame limiter's wait would have. A frame that took longer keeps its own
+// length. The clock only ever moves forward, and only here, between frames, so
+// an interval measured inside one frame is still real time.
+void iTimeFrameAtLeast(U64 periodNs);
+// Tests (TSSM_FIXED_STEP=<fps>, iCapture.h): called once per presented
+// frame, it moves the clock on by exactly 1/fps, so frame N is the same moment
+// of the game on any machine at any speed. Off without the variable.
+void iTimeFixedStepFrame();
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 F32 iTimeGetGame();

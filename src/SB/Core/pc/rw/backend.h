@@ -84,6 +84,16 @@ inline bool iBackendIsGL3()
 #endif
 }
 
+// The 3DS's citro3d device (rw::c3d).
+inline bool iBackendIsC3D()
+{
+#ifdef RW_C3D
+    return iScreenGetBackend() == iSCREENBACKEND_C3D;
+#else
+    return false;
+#endif
+}
+
 // No device at all: nothing to draw into and nothing to ask about a card.
 inline bool iBackendIsNull()
 {

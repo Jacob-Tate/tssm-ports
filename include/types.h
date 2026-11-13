@@ -24,11 +24,21 @@ typedef double F64;
 #include <stdint.h>
 typedef int8_t S8;
 typedef int16_t S16;
+#ifdef __3DS__
+// devkitARM's newlib makes int32_t long, unlike every other target: spelled out
+// as the console's int, so S32 stays RwInt32's type (and the game's own).
+typedef signed int S32;
+#else
 typedef int32_t S32;
+#endif
 typedef int64_t S64;
 typedef uint8_t U8;
 typedef uint16_t U16;
+#ifdef __3DS__
+typedef unsigned int U32;
+#else
 typedef uint32_t U32;
+#endif
 typedef uint64_t U64;
 typedef float F32;
 typedef double F64;

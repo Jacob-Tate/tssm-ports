@@ -431,6 +431,8 @@ The prompts show what to press on the device in hand (`src/SB/Core/pc/iPadPrompt
   never touched.
 - **The six move prompts follow the layout.** Their TEXT assets are rewritten in place in memory.
 - **"Pull" becomes "Press"** for a key or a GameCube R.
+- **The Switch build** plays the Xbox layout by position and labels every button by the letter
+  printed on the Switch (the bottom button, printed B, is the Xbox's A): docs/SWITCH.md, Controls.
 
 Checked in the game: the main menu's "Choose" prompt draws "SPC" with the keyboard and a cross with
 `button_icons = playstation`. The dialog's "Return" draws "RMB".

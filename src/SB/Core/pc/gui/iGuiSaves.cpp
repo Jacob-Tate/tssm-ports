@@ -9,6 +9,11 @@
 // a Dolphin GCI folder, restores a backup and deletes (which is itself
 // undoable: the save becomes backup 1).
 //
+// Where there is no system dialog (the Switch; TSSM_FILE_PICKER=builtin on a
+// PC) the GUI's own browser picks the file to import, starting in the import
+// folder, and exports go into the export folder under a name made here
+// (iGuiFilePicker.h); the status line says where each one went.
+//
 // The game in progress keeps writing to the slot it last saved to or loaded
 // from -- its autosave. Importing or restoring over that slot is allowed, but
 // only after saying that the next autosave will write over it again.
@@ -17,6 +22,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
 #include "iHost.h"
@@ -57,7 +63,13 @@ namespace
     void Refresh()
     {
         const U64 now = SDL_GetTicks();
-        if (sStale || now - sListedAt > 2000)
+#ifdef __3DS__
+        // Reading every save off the SD card takes the 3DS half a second.
+        const U64 every = 30000;
+#else
+        const U64 every = 2000;
+#endif
+        if (sStale || now - sListedAt > every)
         {
             iSaveStoreList(sSlots, sAllFolders);
             sListedAt = now;
@@ -152,6 +164,15 @@ namespace
         return base;
     }
 
+    // "20261029-142501": the moment, for the names of exports.
+    void Stamp(char* out, size_t size)
+    {
+        iHostCalendar c;
+        iHostLocalTime(&c);
+        snprintf(out, size, "%04d%02d%02d-%02d%02d%02d", (int)c.year + 1900, (int)c.mon + 1,
+                 (int)c.mday, (int)c.hour, (int)c.min, (int)c.sec);
+    }
+
     // A file name from a save dialog, with `ext` added when it has none.
     //
     // An answer that is a URI (Android's content://) is kept as it is. Its last
@@ -238,7 +259,8 @@ namespace
         }
         else
         {
-            Say(false, "%s exported to %s (%u bytes).", slot, path.c_str(), (unsigned)gci.size());
+            Say(false, "%s exported to %s (%u bytes).", slot, iGui::ShownPath(path.c_str()),
+                (unsigned)gci.size());
         }
         sExportTarget = -1;
     }
@@ -261,7 +283,8 @@ namespace
         }
         else
         {
-            Say(false, "%d save%s exported to %s.", (int)n, n == 1 ? "" : "s", path.c_str());
+            Say(false, "%d save%s exported to %s.", (int)n, n == 1 ? "" : "s",
+                iGui::ShownPath(path.c_str()));
         }
     }
 
@@ -288,14 +311,36 @@ namespace
         }
         else if (skipped.empty())
         {
-            Say(false, "%d save%s exported to %s as Dolphin names them.", (int)n,
-                n == 1 ? "" : "s", dir);
+            Say(false, "%d save%s exported to %s as Dolphin names them.", (int)n, n == 1 ? "" : "s",
+                iGui::ShownPath(dir));
         }
         else
         {
             Say(n <= 0, "%d save%s exported to %s; not exported: %s", (int)n, n == 1 ? "" : "s",
-                dir, skipped.c_str());
+                iGui::ShownPath(dir), skipped.c_str());
         }
+    }
+
+    // Every save into a GCI folder, without a dialog: a new folder in the
+    // export folder.
+    void ExportFolderBuiltin()
+    {
+        char exportDir[1024];
+        char name[64];
+        char dir[1200];
+        iGui::TransferDir("export", exportDir, sizeof(exportDir));
+        char stamp[32];
+        Stamp(stamp, sizeof(stamp));
+        snprintf(name, sizeof(name), "gci-%s", stamp);
+        iGui::UniquePath(exportDir, name, dir, sizeof(dir));
+        if (!iHostMakeDir(dir))
+        {
+            Say(true, "Could not make the folder %s.", iGui::ShownPath(dir));
+            return;
+        }
+        FinishExportFolder(dir);
+        // Nothing went in it (no saves): no empty folder left behind.
+        iHostRemoveDir(dir);
     }
 
     // --- import ----------------------------------------------------------------------
@@ -334,6 +379,13 @@ namespace
     {
         const size_t i = (size_t)target * ISS_GAMES + (size_t)game;
         return (target >= 0 && game >= 0 && i < sImport.slots.size()) ? &sImport.slots[i] : NULL;
+    }
+
+    // The file is held only while there is something to import from it: a
+    // card image is a good part of what the 3DS has free in a level.
+    void ReleaseImportData()
+    {
+        std::vector<unsigned char>().swap(sImport.data);
     }
 
     void StartImport(const char* path)
@@ -426,6 +478,10 @@ namespace
                 sImport.rows.push_back(row);
             }
         }
+        if (!sImport.error.empty())
+        {
+            ReleaseImportData();
+        }
         sOpenImport = true;
     }
 
@@ -473,6 +529,7 @@ namespace
         iSaveStoreList(sImport.slots, true);
         Say(imported == 0, "%d save%s imported from %s.", (int)imported, imported == 1 ? "" : "s",
             sImport.name.c_str());
+        ReleaseImportData();
     }
 
     // What the rows ask for, checked: duplicates, occupied slots, the
@@ -585,7 +642,7 @@ namespace
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        if (ImGui::Button("Cancel") || iGui::BackPressed())
         {
             ImGui::CloseCurrentPopup();
         }
@@ -594,6 +651,11 @@ namespace
 
     void DrawImportPopup()
     {
+#ifdef __3DS__
+        // The whole of the small screen.
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
+#else
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
                                 ImVec2(0.5f, 0.5f));
         // A fixed width (the display's, up to 56 lines of text across) and a
@@ -601,6 +663,7 @@ namespace
         const float display = ImGui::GetIO().DisplaySize.x * 0.92f;
         const float wanted = ImGui::GetFontSize() * 56.0f;
         ImGui::SetNextWindowSize(ImVec2(wanted < display ? wanted : display, 0.0f), ImGuiCond_Always);
+#endif
         if (!ImGui::BeginPopupModal("Import saves", NULL, ImGuiWindowFlags_NoResize))
         {
             return;
@@ -633,16 +696,25 @@ namespace
         {
             const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                           ImGuiTableFlags_SizingStretchProp;
-            if (ImGui::BeginTable("import", 4, flags))
+#ifdef __3DS__
+            // Two columns on the small screen: the slot and what is there go
+            // under the save.
+            const int kColumns = 2;
+#else
+            const int kColumns = 4;
+#endif
+            if (ImGui::BeginTable("import", kColumns, flags))
             {
                 const ImGuiStyle& style = ImGui::GetStyle();
                 ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
                                         ImGui::GetFrameHeight() + style.CellPadding.x * 2.0f);
                 ImGui::TableSetupColumn("Save", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+#ifndef __3DS__
                 ImGui::TableSetupColumn("Goes to", ImGuiTableColumnFlags_WidthFixed,
                                         ImGui::GetFontSize() * 7.0f + style.ItemSpacing.x +
                                             style.CellPadding.x * 2.0f);
                 ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+#endif
                 ImGui::TableHeadersRow();
 
                 for (size_t i = 0; i < sImport.rows.size(); i++)
@@ -669,14 +741,22 @@ namespace
                     ImGui::TextDisabled("%s", r.source.c_str());
                     ImGui::PopTextWrapPos();
 
+#ifdef __3DS__
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextDisabled("Goes to");
+                    ImGui::SameLine();
+#else
                     ImGui::TableSetColumnIndex(2);
+#endif
                     ImGui::BeginDisabled(!r.usable || !r.use);
                     FolderCombo("##folder", &r.target);
                     ImGui::SameLine();
                     GameCombo("##game", &r.game);
                     ImGui::EndDisabled();
 
+#ifndef __3DS__
                     ImGui::TableSetColumnIndex(3);
+#endif
                     if (!r.usable)
                     {
                         ImGui::PushTextWrapPos(0.0f);
@@ -710,9 +790,17 @@ namespace
             const ImportCheck c = CheckImport();
             if (c.occupied)
             {
+#ifdef __3DS__
+                // A check box's label does not wrap: the rest goes under it.
+                ImGui::Checkbox("Replace the saves already there", &sImport.replace);
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextDisabled("Each one replaced is kept as backup 1.");
+                ImGui::PopTextWrapPos();
+#else
                 ImGui::Checkbox("Replace the saves already there (each one replaced is kept as "
                                 "backup 1)",
                                 &sImport.replace);
+#endif
             }
             if (c.duplicate)
             {
@@ -730,6 +818,13 @@ namespace
 
             ImGui::Spacing();
             const bool can = c.used > 0 && !c.duplicate && (!c.occupied || sImport.replace);
+#ifdef __3DS__
+            // Above the buttons: beside them it runs off the screen.
+            if (!can && c.occupied && !sImport.replace)
+            {
+                ImGui::TextDisabled("Choose empty slots, or tick Replace.");
+            }
+#endif
             ImGui::BeginDisabled(!can);
             if (ImGui::Button(c.used > 1 ? "Import them" : "Import"))
             {
@@ -743,11 +838,13 @@ namespace
                 }
             }
             ImGui::EndDisabled();
+#ifndef __3DS__
             if (!can && c.occupied && !sImport.replace)
             {
                 ImGui::SameLine();
                 ImGui::TextDisabled("Choose empty slots, or tick Replace.");
             }
+#endif
             ImGui::SameLine();
             close = ImGui::Button("Cancel");
 
@@ -759,8 +856,7 @@ namespace
             }
         }
 
-        if (close || (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-                      !ImGui::IsPopupOpen("Import over the autosave slot?")))
+        if (close || (iGui::BackPressed() && !ImGui::IsPopupOpen("Import over the autosave slot?")))
         {
             sImport = ImportState();
             ImGui::CloseCurrentPopup();
@@ -867,13 +963,13 @@ namespace
 
         ImGui::Spacing();
         if (ImGui::Button("Close") ||
-            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
-             !ImGui::IsPopupOpen("Restore over the autosave slot?")))
+            (iGui::BackPressed() && !ImGui::IsPopupOpen("Restore over the autosave slot?")))
         {
             close = true;
         }
         if (close)
         {
+            ReleaseImportData();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -920,7 +1016,7 @@ namespace
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        if (ImGui::Button("Cancel") || iGui::BackPressed())
         {
             ImGui::CloseCurrentPopup();
         }
@@ -956,7 +1052,14 @@ namespace
     {
         const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                       ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX;
-        if (!ImGui::BeginTable("slots", 5, flags))
+#ifdef __3DS__
+        // Three columns on the small screen: the date and the backups go under
+        // the save's name.
+        const int kButtons = 2;
+#else
+        const int kButtons = 4;
+#endif
+        if (!ImGui::BeginTable("slots", kButtons + 1, flags))
         {
             return;
         }
@@ -968,10 +1071,12 @@ namespace
         ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed,
                                 ImGui::CalcTextSize("Slot").x + pad);
         ImGui::TableSetupColumn("Save", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+#ifndef __3DS__
         ImGui::TableSetupColumn("Saved", ImGuiTableColumnFlags_WidthFixed,
                                 ImGui::CalcTextSize("0000-00-00 00:00").x + pad);
         ImGui::TableSetupColumn("Backups", ImGuiTableColumnFlags_WidthFixed,
                                 ImGui::CalcTextSize("Backups").x + pad);
+#endif
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
                                 ImGui::CalcTextSize("Export...").x + ImGui::CalcTextSize("Delete").x +
                                     button * 2.0f + style.ItemSpacing.x + pad);
@@ -1012,29 +1117,46 @@ namespace
                     ImGui::EndTooltip();
                 }
             }
+            // On the 3DS the tags have lines of their own: the name wraps.
             if (IsAutoSaveSlot(s.target, s.game))
             {
+#ifndef __3DS__
                 ImGui::SameLine();
+#endif
                 ImGui::TextColored(kYellow, "autosave");
             }
             if (s.exists && s.fromCard)
             {
+#ifndef __3DS__
                 ImGui::SameLine();
+#endif
                 ImGui::TextDisabled("(card)");
             }
 
-            ImGui::TableSetColumnIndex(2);
-            ImGui::AlignTextToFramePadding();
             char when[32];
             When(s.exists ? s.mtime : 0, when, sizeof(when));
+#ifdef __3DS__
+            if (s.exists)
+            {
+                ImGui::TextDisabled("%s", when);
+            }
+#else
+            ImGui::TableSetColumnIndex(2);
+            ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(when);
 
             ImGui::TableSetColumnIndex(3);
             ImGui::AlignTextToFramePadding();
+#endif
             if (s.backups > 0)
             {
                 char label[24];
+#ifdef __3DS__
+                ImGui::SameLine();
+                snprintf(label, sizeof(label), "%d backups...", (int)s.backups);
+#else
                 snprintf(label, sizeof(label), "%d...", (int)s.backups);
+#endif
                 if (ImGui::SmallButton(label))
                 {
                     sBackupTarget = s.target;
@@ -1049,16 +1171,18 @@ namespace
                     ImGui::EndTooltip();
                 }
             }
+#ifndef __3DS__
             else
             {
                 ImGui::TextDisabled("0");
             }
+#endif
 
-            ImGui::TableSetColumnIndex(4);
+            ImGui::TableSetColumnIndex(kButtons);
             if (s.exists)
             {
                 ImGui::BeginDisabled(!s.valid || iGui::PickingFolder());
-                if (ImGui::SmallButton("Export..."))
+                if (ImGui::SmallButton(iGui::UseBuiltinPicker() ? "Export" : "Export..."))
                 {
                     StartExportGCI(s);
                 }
@@ -1102,15 +1226,19 @@ void iGui::DrawSaves()
     }
 
     const char* root = iSaveStoreRoot();
+    const bool builtin = UseBuiltinPicker();
 
     ImGui::SeparatorText("Save folder");
-    ImGui::TextWrapped("%s", root);
+    ImGui::TextWrapped("%s", ShownPath(root));
+#if !TSSM_GUI_CONSOLE
+    // A console has nothing to show a folder with.
     if (ImGui::Button("Open the save folder"))
     {
         iHostMakeDir(root);
         OpenFolder(root);
     }
     ImGui::SameLine();
+#endif
     ImGui::BeginDisabled(PickingFolder());
     if (ImGui::Button("Import..."))
     {
@@ -1120,9 +1248,23 @@ void iGui::DrawSaves()
     Note("Import takes a Dolphin .gci, a GameShark .gcs, a memory card image (.raw, .gcp), a "
          ".zip from Export, or a save file from another install. Every save replaced is kept "
          "as a backup.");
+    if (builtin)
+    {
+        char importDir[1024];
+        char exportDir[1024];
+        TransferDir("import", importDir, sizeof(importDir));
+        TransferDir("export", exportDir, sizeof(exportDir));
+        Note("Put the files to import in %s/ first. Exports are written to %s/.",
+             ShownPath(importDir), ShownPath(exportDir));
+    }
 
     ImGui::SeparatorText("Saves");
-    if (ImGui::Checkbox("Folders C to J too (the PC save screen's)", &sAllFolders))
+#if TSSM_GUI_CONSOLE
+    const char* const allFolders = "Folders C to J too (the port's save screen's)";
+#else
+    const char* const allFolders = "Folders C to J too (the PC save screen's)";
+#endif
+    if (ImGui::Checkbox(allFolders, &sAllFolders))
     {
         sStale = true;
         Refresh();
@@ -1158,28 +1300,51 @@ void iGui::DrawSaves()
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Region");
         ImGui::SameLine();
+#ifdef __3DS__
+        // The rest of the line, less the "(?)": the longest choice is wider.
+        ImGui::SetNextItemWidth(-ImGui::CalcTextSize("(?)").x - ImGui::GetStyle().ItemSpacing.x);
+#else
         ImGui::SetNextItemWidth(ImGui::CalcTextSize(kRegions[0]).x + ImGui::GetFrameHeight() +
                                 ImGui::GetStyle().FramePadding.x * 2.0f);
+#endif
         ImGui::Combo("##region", &sRegion, kRegions, 3);
         ImGui::SameLine();
         HelpMarker("The game code a .gci is written with. A console or Dolphin only lists a save "
                    "for its own region's disc. Europe also writes the date the PAL way.");
     }
     ImGui::BeginDisabled(PickingFolder());
-    if (ImGui::Button("Every save as a .zip..."))
+    if (ImGui::Button(builtin ? "Every save as a .zip" : "Every save as a .zip..."))
     {
-        PickSaveFile("save-export-zip", "SpongeBobMovie-saves.zip", kZipFilter, 1);
+        // Without a dialog to name it, the name says when it was made.
+        char name[64] = "SpongeBobMovie-saves.zip";
+        if (builtin)
+        {
+            char stamp[32];
+            Stamp(stamp, sizeof(stamp));
+            snprintf(name, sizeof(name), "tssm-saves-%s.zip", stamp);
+        }
+        PickSaveFile("save-export-zip", name, kZipFilter, 1);
     }
+    // On the 3DS the second button has a line of its own.
+#ifndef __3DS__
     ImGui::SameLine();
-    if (ImGui::Button("Every save into a GCI folder..."))
+#endif
+    if (ImGui::Button(builtin ? "Every save into a GCI folder" : "Every save into a GCI folder..."))
     {
-        PickFolder("save-export-folder", NULL);
+        if (builtin)
+        {
+            ExportFolderBuiltin();
+        }
+        else
+        {
+            PickFolder("save-export-folder", NULL);
+        }
     }
     ImGui::EndDisabled();
     Note("A .zip carries every save to another install of the port; Import takes it back slot "
          "for slot. A GCI folder is the folder Dolphin keeps a memory card in when it uses GCI "
-         "folders (Card A): folder A's saves go in the folder chosen, folder B's in B/ inside "
-         "it.");
+         "folders (Card A): folder A's saves go in %s, folder B's in B/ inside it.",
+         builtin ? "a new gci-<date> folder in the export folder" : "the folder chosen");
 
     if (sOpenImport)
     {

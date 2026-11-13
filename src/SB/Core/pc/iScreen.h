@@ -283,9 +283,13 @@ void iScreenSetPipeline(iScreenPipeline pipeline);
 //   VULKAN Vulkan 1.3. Runs off Windows too. librw's third rw::d3d device, so
 //          it draws with the D3D pipelines and shaders.
 //   NULL   No device at all, which is what a build with no render backend
-//          resolves to. Headless, for compiling and for the self-tests -- NOT
-//          something video.backend offers, because librw's null driver asserts
-//          the first time anything asks it for a raster.
+//          resolves to. Headless, for compiling and for the self-tests. On
+//          the 3DS video.backend offers it (null), for timing the game
+//          without drawing; elsewhere it does not, because librw's null
+//          driver asserts the first time anything asks it for a raster.
+//   C3D    The Nintendo 3DS's PICA200, through citro3d (rw::c3d,
+//          3ds/c3d/rwc3d.h). The 3DS only. After NULL so that no other
+//          value moves.
 //
 // AUTO takes the first one the build has, in the order listed here. It is
 // resolved in RenderWareInit -- which is the only place that knows what was
@@ -298,7 +302,8 @@ enum iScreenBackend
     iSCREENBACKEND_D3D11,
     iSCREENBACKEND_GL3,
     iSCREENBACKEND_VULKAN,
-    iSCREENBACKEND_NULL
+    iSCREENBACKEND_NULL,
+    iSCREENBACKEND_C3D
 };
 
 iScreenBackend iScreenGetBackend();

@@ -11,9 +11,11 @@
 #include <rpworld.h>
 
 #include "rw.h"
+#include "backend.h"
 #include "iPerf.h"
 #include "iWindow.h"
 #include "iSnapshot.h"
+#include "iD0Stats.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +24,10 @@
 
 // Set from the environment once, so the check costs a load per frame.
 static const bool sReportFps = getenv("TSSM_FPS") != NULL;
+
+// RwCameraShowRaster's halves, before and after the flip.
+static void PumpAndMaybeExit();
+static void FinishPresent();
 
 static inline rw::Camera* asCamera(RwCamera* camera)
 {
@@ -181,6 +187,7 @@ RwCamera* RwCameraBeginUpdate(RwCamera* camera)
         return NULL;
     }
 
+    iD0CameraBegin(camera);
     // The frame metrics' render phase starts at the frame's first camera
     // (iPerf.h); nothing unless TSSM_PERF is set.
     iPerfRenderBegin();
@@ -248,40 +255,21 @@ RwCamera* RwCameraShowRaster(RwCamera* camera, void* pDev, RwUInt32 flags)
     // that can act on it rather than a cast.
     (void)pDev;
 
+    // TSSM_D0: the frame's work ends here, before the pump, the copy and the flip.
+    iD0FrameEnd();
+
     // The frame metrics (iPerf.h): each call below marks a phase of the frame,
     // and does nothing unless TSSM_PERF is set.
     iPerfPresentBegin();
 
-    // The frame boundary, and so where the port pumps its window.
-    //
-    // A Win32 window whose message queue is never drained stops repainting and
-    // the OS marks the process as not responding, which ghosts the window and
-    // looks exactly like the game hanging -- and only once it has focus, which
-    // is when Windows starts checking. iWindow.h says as much; nothing was
-    // calling iWindowPump.
-    //
-    // It has to happen here because the loop that would normally own the pump
-    // is retail's, in zMenuLoop and zGameLoop, and that code is not the port's
-    // to change. Presenting is the one thing every frame does exactly once on
-    // every platform, so it is the honest place to hang a per-frame host
-    // obligation. D3D wants the window pumped around Present in any case.
-    iWindowPump();
-
-    // And where the close button is answered, for the same reason: the loop
-    // that would normally notice belongs to retail.
-    //
-    // This is NOT the shutdown iWindow.h describes. That one runs the game's
-    // own exit path so that save-on-exit and the RenderWare teardown happen,
-    // and reaching it needs a seam in zMainLoop that does not exist yet -- the
-    // console never exits, so retail has no such path to hook. Until then the
-    // choice is between a window whose close button does nothing at all and a
-    // process that stops when asked, and the second is the better of the two.
-    if (iWindowShouldClose())
+    // On the 3DS's citro3d device the pump and the frame hook come after the
+    // flip instead (below): the pump runs the HOME menu and sleep, which must
+    // not come between a frame's recorded commands and C3D_FrameEnd, and the
+    // hook's captures can only read a frame back once it has been drawn.
+    const bool afterFlip = iBackendIsC3D();
+    if (!afterFlip)
     {
-        printf("tssm: window closed -- exiting. Note that the game's own "
-               "save-on-exit does not run yet.\n");
-        fflush(stdout);
-        exit(0);
+        PumpAndMaybeExit();
     }
 
     // Keep a copy of the frame, for the loading screen to stand on.
@@ -324,6 +312,54 @@ RwCamera* RwCameraShowRaster(RwCamera* camera, void* pDev, RwUInt32 flags)
     asCamera(camera)->showRaster(flipFlags);
     iPerfSwapEnd();
 
+    if (afterFlip)
+    {
+        PumpAndMaybeExit();
+        iSnapshotPresented();
+    }
+
+    FinishPresent();
+    return camera;
+}
+
+// The frame boundary, and so where the port pumps its window.
+static void PumpAndMaybeExit()
+{
+    //
+    // A Win32 window whose message queue is never drained stops repainting and
+    // the OS marks the process as not responding, which ghosts the window and
+    // looks exactly like the game hanging -- and only once it has focus, which
+    // is when Windows starts checking. iWindow.h says as much; nothing was
+    // calling iWindowPump.
+    //
+    // It has to happen here because the loop that would normally own the pump
+    // is retail's, in zMenuLoop and zGameLoop, and that code is not the port's
+    // to change. Presenting is the one thing every frame does exactly once on
+    // every platform, so it is the honest place to hang a per-frame host
+    // obligation. D3D wants the window pumped around Present in any case.
+    iWindowPump();
+
+    // And where the close button is answered, for the same reason: the loop
+    // that would normally notice belongs to retail.
+    //
+    // This is NOT the shutdown iWindow.h describes. That one runs the game's
+    // own exit path so that save-on-exit and the RenderWare teardown happen,
+    // and reaching it needs a seam in zMainLoop that does not exist yet -- the
+    // console never exits, so retail has no such path to hook. Until then the
+    // choice is between a window whose close button does nothing at all and a
+    // process that stops when asked, and the second is the better of the two.
+    if (iWindowShouldClose())
+    {
+        printf("tssm: window closed -- exiting. Note that the game's own "
+               "save-on-exit does not run yet.\n");
+        fflush(stdout);
+        exit(0);
+    }
+}
+
+// After the flip: the frame rate.
+static void FinishPresent()
+{
     // **And pace the rate, because waiting on the display is not the same as
     // running at a chosen speed.**
     //
@@ -379,8 +415,6 @@ RwCamera* RwCameraShowRaster(RwCamera* camera, void* pDev, RwUInt32 flags)
             frames = 0;
         }
     }
-
-    return camera;
 }
 
 RpWorld* RwCameraGetWorld(const RwCamera* camera)

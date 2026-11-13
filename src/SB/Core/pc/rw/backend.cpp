@@ -26,6 +26,9 @@ void iBackendResolve(void)
     // In preference order, and the same order iScreen.h lists them: the D3D
     // backend if this build has one, then GL3, then no device at all.
     static const iScreenBackend kOrder[] = {
+#ifdef RW_C3D
+        iSCREENBACKEND_C3D,
+#endif
 #if defined(RW_D3D9) || defined(RW_D3D8)
         iSCREENBACKEND_D3D9,
 #endif
@@ -95,6 +98,9 @@ void iBackendResolve(void)
         break;
     case iSCREENBACKEND_GL3:
         rw::platform = rw::PLATFORM_GL3;
+        break;
+    case iSCREENBACKEND_C3D:
+        rw::platform = rw::PLATFORM_C3D;
         break;
     default:
         rw::platform = rw::PLATFORM_NULL;

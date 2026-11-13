@@ -42,6 +42,13 @@ DEFAULTS = {
     "android/app/src/main/res/mipmap-xhdpi/ic_launcher.png": "1fd12d2a74307e6e9a20ecc6fe7616003366d96b",
     "android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png": "5bc215089d6afeef73bfb195a9a210db47132cac",
     "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": "8a555867776a1fe38a7a30127ff99cc5a7793bb9",
+    # The Switch .nro's default icon: the same plain sponge block,
+    # drawn by tools/switch/draw_default_icon.ps1.
+    "dist/switch/default_icon.jpg": "88c7a1acb6728499fb0d06ed997ca640b2644af6",
+    # The 3DS .cia's banner and icon: the same block and the name,
+    # drawn by tools/3ds/draw_cia_art.ps1.
+    "dist/3ds/cia_banner.png": "e8ef84983c15b982f852c9ffb02a20ebcb7b9fc4",
+    "dist/3ds/cia_icon.png": "d226450ed38a80e6e56d83a973bb3c425b008ed2",
 }
 
 IMAGE_EXTENSIONS = {
@@ -52,7 +59,7 @@ IMAGE_EXTENSIONS = {
 
 # What make_icons.ps1 writes, by name.
 GENERATED_NAMES = {
-    "tssm.ico", "icon-64.png", "icon.jpg", "play-512.png", "preview.png",
+    "tssm.ico", "icon-64.png", "icon-48.png", "icon.jpg", "play-512.png", "preview.png",
     "ic_launcher_foreground.png", "tssm_icon.xml",
 }
 

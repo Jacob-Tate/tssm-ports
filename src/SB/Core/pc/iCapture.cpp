@@ -1,9 +1,12 @@
 // The debug capture; see iCapture.h. Port-only.
 
 #include "iCapture.h"
+#include "iD0Stats.h"
 
 #include "iAudioSDLTest.h"
 #include "iFrameGrab.h"
+#include "iHost.h"
+#include "iSpike.h"
 #include "iLowHeap.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -11,6 +14,10 @@
 #include "iTestEvents.h"
 #include "iTestSend.h"
 #include "iTime.h"
+
+#ifdef RW_C3D
+#include "3ds/c3d/rwc3d.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +57,10 @@ namespace
     bool sScripted;
     S32 sExitAfter;
     S32 sFrame;
+    // TSSM_INPUT's frame 1 is the frame after this one (iCaptureScriptRestart).
+    S32 sScriptOrigin;
+    // iCaptureScriptOverride: buttons held instead of the script's, or -1.
+    S64 sOverride = -1;
     S32 sCaptured;
     iTime sFirstFrameAt;
     char sDir[512];
@@ -147,17 +158,24 @@ namespace
     // What port 0 holds on this frame: every press whose span covers it.
     void ApplyInput()
     {
+        if (sOverride >= 0)
+        {
+            iPadHostScript(TRUE, (U32)sOverride);
+            return;
+        }
+
+        const S32 frame = sFrame - sScriptOrigin;
         U32 held = 0;
         for (S32 i = 0; i < sPressCount; i++)
         {
             const Press& pr = sPresses[i];
-            if (sFrame >= pr.at && sFrame < pr.at + pr.frames)
+            if (frame >= pr.at && frame < pr.at + pr.frames)
             {
                 held |= pr.buttons;
             }
-            if (sFrame == pr.at)
+            if (frame == pr.at)
             {
-                printf("tssm: capture: frame %d (%.2f s): press %s\n", (int)sFrame,
+                printf("tssm: capture: frame %d (%.2f s): press %s\n", (int)frame,
                        iTimeDiffSec(sFirstFrameAt, iTimeGet()), pr.text);
                 fflush(stdout);
             }
@@ -247,6 +265,7 @@ namespace
     // Called by iSnapshotCapture once per presented frame, before the flip.
     void OnFrame()
     {
+        iTimeFixedStepFrame();
         sFrame++;
         if (sFrame == 1)
         {
@@ -259,10 +278,18 @@ namespace
             snprintf(path, sizeof(path), "%sframe_%05d.png", sDir, (int)sFrame);
 
             const F32 at = iTimeDiffSec(sFirstFrameAt, iTimeGet());
+            const U64 writeFrom = iHostMonotonicNs();
             if (iFrameGrabWrite(path, 0))
             {
                 sCaptured++;
-                printf("tssm: capture: frame %d (%.2f s) -> %s\n", (int)sFrame, at, path);
+                // By the wall clock (TSSM_FIXED_STEP holds iTime), with its
+                // parts, so a console run says which one costs.
+                F32 readMs, encodeMs, fileMs;
+                iFrameGrabLastTimes(&readMs, &encodeMs, &fileMs);
+                printf("tssm: capture: frame %d (%.2f s) -> %s (%.2f s to write: read back %.1f "
+                       "ms, PNG built %.1f ms, file written %.1f ms)\n",
+                       (int)sFrame, at, path, (double)(iHostMonotonicNs() - writeFrom) / 1e9,
+                       (double)readMs, (double)encodeMs, (double)fileMs);
             }
             else
             {
@@ -274,8 +301,15 @@ namespace
         }
 
         iTestEventsFrame(sFrame);
+        iD0RwLightLogFrame(sFrame);
         iTestSendFrame(sFrame);
         iAudioSDLTestFrame(sFrame);
+#ifdef RW_C3D
+        rw::c3d::testFrame((int)sFrame);
+#endif
+
+        // The 3DS spike's run of levels (iSpike.h); it may restart the script.
+        iSpikeFrame();
 
         if (sScripted)
         {
@@ -339,7 +373,7 @@ void iCaptureInit()
                        (testCamLog != NULL && atoi(testCamLog) > 0) ||
                        (testSend != NULL && testSend[0] != '\0') || iAudioSDLTestOn();
 
-    if (sRangeCount == 0 && sExitAfter == 0 && !sScripted && !tests)
+    if (sRangeCount == 0 && sExitAfter == 0 && !sScripted && !tests && !iSpikeOn())
     {
         return;
     }
@@ -364,4 +398,15 @@ void iCaptureInit()
 S32 iCaptureFrameCount()
 {
     return sFrame;
+}
+
+void iCaptureScriptRestart()
+{
+    sScriptOrigin = sFrame;
+    sOverride = -1;
+}
+
+void iCaptureScriptOverride(S32 on, U32 buttons)
+{
+    sOverride = on ? (S64)buttons : -1;
 }

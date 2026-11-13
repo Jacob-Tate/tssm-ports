@@ -28,6 +28,13 @@
 //          blit does) and the overlay over it, then Present with the same
 //          vsync flag librw would have used.
 //
+//   C3D    (the 3DS) draws the overlay on the bottom screen, which has nothing
+//          of the game's: rw::c3d's overlay batch at the present, inside the
+//          game's frame, so librw's present shows both screens. The ImGui
+//          vertices are turned into the device's own 2D ones on the CPU, and
+//          a frame whose picture is the same as the last one drawn (a hash of
+//          the draw data) draws nothing: the screen keeps its picture.
+//
 // With the overlay closed the hook calls librw's present and returns: the
 // game's frames are presented by the code that always presented them.
 //
@@ -70,6 +77,12 @@
 #ifdef RW_GL3
 #include "imgui_impl_opengl3.h"
 #endif
+#ifdef RW_C3D
+#include "imgui_internal.h" // ImHashData
+#include "3ds/c3d/rwc3d.h"
+#include "3ds/i3DS.h"
+#include <SDL3/SDL.h>
+#endif
 
 #include "rw.h"
 
@@ -97,7 +110,8 @@ namespace
         KIND_NONE,
         KIND_D3D9,
         KIND_D3D11,
-        KIND_GL3
+        KIND_GL3,
+        KIND_C3D
     };
 
     Kind sKind = KIND_NONE;
@@ -557,6 +571,285 @@ namespace
     }
 #endif
 
+#ifdef RW_C3D
+    // ------------------------------------------------------------------ C3D
+
+    // A texture the device could not make: drawn as nothing.
+    const ImTextureID kNoTexture = (ImTextureID)0x7FFF;
+
+    ImGuiID sLastHash;
+    bool sDrawDue = true;
+    int sResumes = -1;
+    bool sAlways; // TSSM_3DS_GUI_ALWAYS=1: every frame drawn, for measuring
+    int sBright = 256; // iGuiRenderSetBrightness
+    bool sStats; // TSSM_C3D_STATS=1
+    rw::c3d::OverlayCmd* sCmds;
+    int sCmdCap;
+    // The stats line's sums.
+    U32 sDrawn;
+    U32 sSkipped;
+    U32 sFrames;
+    U64 sFrameNs;
+    U64 sFrameNsMax;
+    U64 sConvertNs;
+    U64 sLastStats;
+    bool sFirstLogged;
+
+    void TextureC3D(ImTextureData* tex)
+    {
+        const int handle = (int)(intptr_t)tex->TexID;
+        if (tex->Status == ImTextureStatus_WantCreate)
+        {
+            const int made = rw::c3d::overlayTexCreate(tex->Width, tex->Height);
+            tex->SetTexID(made != 0 ? (ImTextureID)(intptr_t)made : kNoTexture);
+            tex->UpdateRect.x = 0;
+            tex->UpdateRect.y = 0;
+            tex->UpdateRect.w = (unsigned short)tex->Width;
+            tex->UpdateRect.h = (unsigned short)tex->Height;
+        }
+        if (tex->Status == ImTextureStatus_WantCreate || tex->Status == ImTextureStatus_WantUpdates)
+        {
+            const int id = (int)(intptr_t)tex->TexID;
+            // The whole texture when made, else each rectangle ImGui changed.
+            const int n = tex->Status == ImTextureStatus_WantCreate ? 1 : tex->Updates.Size;
+            for (int i = 0; i < n; i++)
+            {
+                const ImTextureRect r =
+                    tex->Status == ImTextureStatus_WantCreate ? tex->UpdateRect : tex->Updates[i];
+                if (tex->Format == ImTextureFormat_Alpha8)
+                {
+                    rw::c3d::overlayTexWrite(id, r.x, r.y, r.w, r.h,
+                                             (const unsigned char*)tex->GetPixelsAt(r.x, r.y),
+                                             tex->GetPitch());
+                    continue;
+                }
+                // RGBA32 (not asked for): its alpha, a row at a time.
+                unsigned char row[1024];
+                for (int y = 0; y < r.h && r.w <= 1024; y++)
+                {
+                    const unsigned char* src = (const unsigned char*)tex->GetPixelsAt(r.x, r.y + y);
+                    for (int x = 0; x < r.w; x++)
+                    {
+                        row[x] = src[x * 4 + 3];
+                    }
+                    rw::c3d::overlayTexWrite(id, r.x, r.y + y, r.w, 1, row, r.w);
+                }
+            }
+            tex->SetStatus(ImTextureStatus_OK);
+            sDrawDue = true;
+        }
+        else if (tex->Status == ImTextureStatus_WantDestroy && tex->UnusedFrames > 0)
+        {
+            if (tex->TexID != kNoTexture)
+            {
+                rw::c3d::overlayTexDestroy(handle);
+            }
+            tex->SetTexID(ImTextureID_Invalid);
+            tex->SetStatus(ImTextureStatus_Destroyed);
+        }
+    }
+
+    // What the frame would put on the screen.
+    ImGuiID HashC3D(const ImDrawData* dd)
+    {
+        ImGuiID h = 0;
+        for (int l = 0; l < dd->CmdLists.Size; l++)
+        {
+            const ImDrawList* list = dd->CmdLists[l];
+            h = ImHashData(list->VtxBuffer.Data, (size_t)list->VtxBuffer.Size * sizeof(ImDrawVert),
+                           h);
+            h = ImHashData(list->IdxBuffer.Data, (size_t)list->IdxBuffer.Size * sizeof(ImDrawIdx),
+                           h);
+            for (int c = 0; c < list->CmdBuffer.Size; c++)
+            {
+                const ImDrawCmd& cmd = list->CmdBuffer[c];
+                const ImTextureID id = cmd.UserCallback == NULL ? cmd.GetTexID() : 0;
+                h = ImHashData(&cmd.ClipRect, sizeof(cmd.ClipRect), h);
+                h = ImHashData(&id, sizeof(id), h);
+                h = ImHashData(&cmd.ElemCount, sizeof(cmd.ElemCount), h);
+                h = ImHashData(&cmd.IdxOffset, sizeof(cmd.IdxOffset), h);
+            }
+        }
+        return h;
+    }
+
+    void StatsC3D()
+    {
+        const U64 now = SDL_GetTicksNS();
+        if (sLastStats == 0)
+        {
+            sLastStats = now;
+            return;
+        }
+        if (now - sLastStats < 1000000000ull || sFrames == 0)
+        {
+            return;
+        }
+        rw::c3d::OverlayStats o;
+        rw::c3d::overlayTakeStats(&o);
+        printf("tssm: gui: overlay: %u frames: ImGui %.2f ms a frame (max %.2f), conversion %.2f "
+               "ms a drawn frame; %u drawn, %u unchanged; %u draws, %u indices, ring %u KB; %u "
+               "textures, %u KB\n",
+               (unsigned)sFrames, (double)sFrameNs / sFrames / 1e6, (double)sFrameNsMax / 1e6,
+               sDrawn > 0 ? (double)sConvertNs / sDrawn / 1e6 : 0.0, (unsigned)sDrawn,
+               (unsigned)sSkipped, o.draws, o.indices, o.ringBytes >> 10, o.textures,
+               o.texBytes >> 10);
+        fflush(stdout);
+        sLastStats = now;
+        sFrames = sDrawn = sSkipped = 0;
+        sFrameNs = sFrameNsMax = sConvertNs = 0;
+    }
+
+    void PresentC3D(ImDrawData* dd)
+    {
+        if (dd == NULL || !rw::c3d::overlayIsOpen())
+        {
+            return;
+        }
+        if (dd->Textures != NULL)
+        {
+            for (int i = 0; i < dd->Textures->Size; i++)
+            {
+                TextureC3D((*dd->Textures)[i]);
+            }
+        }
+        // After HOME or sleep, whatever the system left on the screen.
+        if (i3DSResumeCount() != sResumes)
+        {
+            sResumes = i3DSResumeCount();
+            sDrawDue = true;
+        }
+        const ImGuiID hash = HashC3D(dd);
+        if (!sDrawDue && !sAlways && hash == sLastHash)
+        {
+            sSkipped++;
+            return;
+        }
+
+        const U64 t0 = SDL_GetTicksNS();
+        int cmds = 0;
+        for (int l = 0; l < dd->CmdLists.Size; l++)
+        {
+            cmds += dd->CmdLists[l]->CmdBuffer.Size;
+        }
+        if (cmds > sCmdCap)
+        {
+            const int cap = cmds + 32;
+            void* more = realloc(sCmds, (size_t)cap * sizeof(rw::c3d::OverlayCmd));
+            if (more == NULL)
+            {
+                return;
+            }
+            sCmds = (rw::c3d::OverlayCmd*)more;
+            sCmdCap = cap;
+        }
+
+        unsigned short* idx = NULL;
+        rw::c3d::Im2DVertex* v = rw::c3d::overlayBegin((unsigned)dd->TotalVtxCount,
+                                                       (unsigned)dd->TotalIdxCount, cmds, &idx);
+        if (v == NULL)
+        {
+            return;
+        }
+        const ImVec2 origin = dd->DisplayPos;
+        int n = 0;
+        unsigned firstVertex = 0;
+        unsigned firstIndex = 0;
+        for (int l = 0; l < dd->CmdLists.Size; l++)
+        {
+            const ImDrawList* list = dd->CmdLists[l];
+            for (int i = 0; i < list->VtxBuffer.Size; i++)
+            {
+                const ImDrawVert& src = list->VtxBuffer.Data[i];
+                rw::c3d::Im2DVertex& dst = v[firstVertex + i];
+                dst.x = src.pos.x - origin.x;
+                dst.y = src.pos.y - origin.y;
+                dst.z = 0.5f;
+                dst.w = 1.0f;
+                // IM_COL32 is R, G, B, A from the low byte up. Blending
+                // keeps the scale: a*k over b*k is (a over b)*k.
+                dst.r = (unsigned char)((((src.col >> IM_COL32_R_SHIFT) & 0xFF) * sBright) >> 8);
+                dst.g = (unsigned char)((((src.col >> IM_COL32_G_SHIFT) & 0xFF) * sBright) >> 8);
+                dst.b = (unsigned char)((((src.col >> IM_COL32_B_SHIFT) & 0xFF) * sBright) >> 8);
+                dst.a = (unsigned char)(src.col >> IM_COL32_A_SHIFT);
+                dst.u = src.uv.x;
+                dst.v = src.uv.y;
+            }
+            memcpy(idx + firstIndex, list->IdxBuffer.Data,
+                   (size_t)list->IdxBuffer.Size * sizeof(ImDrawIdx));
+            for (int c = 0; c < list->CmdBuffer.Size; c++)
+            {
+                const ImDrawCmd& cmd = list->CmdBuffer[c];
+                if (cmd.UserCallback != NULL || cmd.ElemCount == 0)
+                {
+                    continue;
+                }
+                rw::c3d::OverlayCmd& o = sCmds[n++];
+                o.clip[0] = cmd.ClipRect.x - origin.x;
+                o.clip[1] = cmd.ClipRect.y - origin.y;
+                o.clip[2] = cmd.ClipRect.z - origin.x;
+                o.clip[3] = cmd.ClipRect.w - origin.y;
+                const ImTextureID id = cmd.GetTexID();
+                o.tex = id == kNoTexture ? 0 : (int)(intptr_t)id;
+                o.firstVertex = firstVertex + cmd.VtxOffset;
+                o.firstIndex = firstIndex + cmd.IdxOffset;
+                o.count = cmd.ElemCount;
+            }
+            firstVertex += (unsigned)list->VtxBuffer.Size;
+            firstIndex += (unsigned)list->IdxBuffer.Size;
+        }
+        const U64 t1 = SDL_GetTicksNS();
+
+        // The window's own colour (iGuiUtil.cpp's WindowBg), under it all.
+        const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+        const float k = (float)sBright / 256.0f;
+        const unsigned clear = ((unsigned)(bg.x * k * 255.0f) << 24) |
+                               ((unsigned)(bg.y * k * 255.0f) << 16) |
+                               ((unsigned)(bg.z * k * 255.0f) << 8) | 0xFFu;
+        rw::c3d::overlayDraw(sCmds, n, clear);
+
+        sConvertNs += t1 - t0;
+        sDrawn++;
+        sLastHash = hash;
+        sDrawDue = false;
+        if (!sFirstLogged)
+        {
+            sFirstLogged = true;
+            printf("tssm: gui: overlay: the bottom screen's first picture: %d draws, %d vertices, "
+                   "%d indices\n",
+                   n, dd->TotalVtxCount, dd->TotalIdxCount);
+            fflush(stdout);
+        }
+    }
+
+    // After librw's present: both screens as the console shows them, the top
+    // above and the bottom centred below it (400 x 480).
+    void CaptureC3D()
+    {
+        const int w = 400;
+        const int h = 480;
+        unsigned char* rgba = (unsigned char*)calloc((size_t)w * h, 4);
+        unsigned char* bottom = (unsigned char*)malloc((size_t)320 * 240 * 4);
+        bool ok = rgba != NULL && bottom != NULL && rw::c3d::readScreen(rgba, 400, 240) &&
+                  rw::c3d::readBottom(bottom, 320, 240);
+        if (ok)
+        {
+            for (int y = 0; y < 240; y++)
+            {
+                memcpy(rgba + ((size_t)(240 + y) * w + 40) * 4, bottom + (size_t)y * 320 * 4,
+                       320 * 4);
+            }
+            for (int i = 0; i < w * h; i++)
+            {
+                rgba[i * 4 + 3] = 255;
+            }
+        }
+        WriteCapture(ok ? rgba : NULL, ok ? w : 0, ok ? h : 0, w * 4);
+        free(bottom);
+        free(rgba);
+    }
+#endif
+
     // ------------------------------------------------------------------ hook
 
     void HookShowRaster(rw::Raster* raster, rw::uint32 flags)
@@ -572,11 +865,23 @@ namespace
         }
 #endif
 
+#ifdef RW_C3D
+        const U64 frameAt = sKind == KIND_C3D ? SDL_GetTicksNS() : 0;
+#endif
         if (sFrame == NULL || !sFrame())
         {
             sLibrwShowRaster(raster, flags);
             return;
         }
+#ifdef RW_C3D
+        if (sKind == KIND_C3D)
+        {
+            const U64 spent = SDL_GetTicksNS() - frameAt;
+            sFrames++;
+            sFrameNs += spent;
+            sFrameNsMax = spent > sFrameNsMax ? spent : sFrameNsMax;
+        }
+#endif
 
         ImDrawData* drawData = ImGui::GetDrawData();
         bool presented = false;
@@ -598,6 +903,21 @@ namespace
             rw::gl3::setPresentOverlay(DrawGL);
             sLibrwShowRaster(raster, flags);
             iTouchOverlayInstall();
+            presented = true;
+            break;
+#endif
+#ifdef RW_C3D
+        case KIND_C3D:
+            PresentC3D(drawData);
+            sLibrwShowRaster(raster, flags);
+            if (sCaptureArmed)
+            {
+                CaptureC3D();
+            }
+            if (sStats)
+            {
+                StatsC3D();
+            }
             presented = true;
             break;
 #endif
@@ -665,6 +985,30 @@ bool iGuiRenderInit(iGuiRenderFrameFn frame, const char** name)
         sKind = KIND_GL3;
         break;
 #endif
+#ifdef RW_C3D
+    case iSCREENBACKEND_C3D:
+    {
+        *name = "citro3d, the bottom screen";
+        const char* depth = getenv("TSSM_3DS_GUI_DEPTH");
+        if (!rw::c3d::overlayOpen(depth != NULL && atoi(depth) != 0))
+        {
+            return false;
+        }
+        ImGuiIO& io = ImGui::GetIO();
+        io.BackendRendererName = "tssm_c3d";
+        // ImGui's texture requests; no vertex offset, so each list keeps under
+        // 64K vertices and is a draw base of its own.
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+        io.BackendFlags &= ~ImGuiBackendFlags_RendererHasVtxOffset;
+        const char* always = getenv("TSSM_3DS_GUI_ALWAYS");
+        sAlways = always != NULL && atoi(always) != 0;
+        const char* stats = getenv("TSSM_C3D_STATS");
+        sStats = stats != NULL && stats[0] != '\0' && stats[0] != '0';
+        sDrawDue = true;
+        sKind = KIND_C3D;
+        break;
+    }
+#endif
     case iSCREENBACKEND_VULKAN:
         *name = "Vulkan";
         return false;
@@ -715,6 +1059,30 @@ void iGuiRenderShutdown()
         ImGui_ImplOpenGL3_Shutdown();
         break;
 #endif
+#ifdef RW_C3D
+    case KIND_C3D:
+    {
+        // ImGui's textures, while the device can still take them (after
+        // citro3d's close they are gone with it).
+        ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
+        for (int i = 0; i < pio.Textures.Size; i++)
+        {
+            ImTextureData* tex = pio.Textures[i];
+            if (tex->TexID != ImTextureID_Invalid && tex->TexID != kNoTexture &&
+                rw::c3d::overlayIsOpen())
+            {
+                rw::c3d::overlayTexDestroy((int)(intptr_t)tex->TexID);
+            }
+            tex->SetTexID(ImTextureID_Invalid);
+            tex->SetStatus(ImTextureStatus_Destroyed);
+        }
+        free(sCmds);
+        sCmds = NULL;
+        sCmdCap = 0;
+        ImGui::GetIO().BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
+        break;
+    }
+#endif
     default:
         break;
     }
@@ -764,6 +1132,24 @@ void iGuiRenderReleaseVolatile()
     {
         ImGui_ImplDX9_InvalidateDeviceObjects();
     }
+#endif
+#ifdef RW_C3D
+    // The overlay closed: the next picture (the closed screen's) is drawn.
+    sDrawDue = true;
+#endif
+}
+
+void iGuiRenderSetBrightness(int bright)
+{
+#ifdef RW_C3D
+    bright = bright < 0 ? 0 : (bright > 256 ? 256 : bright);
+    if (bright != sBright)
+    {
+        sBright = bright;
+        sDrawDue = true;
+    }
+#else
+    (void)bright;
 #endif
 }
 

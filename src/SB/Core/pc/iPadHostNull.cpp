@@ -69,6 +69,11 @@ const char* iPadHostInputForLabel(char)
     return NULL;
 }
 
+const char* iPadHostControlLine(S32)
+{
+    return NULL;
+}
+
 void iPadHostReloadBindings()
 {
 }

@@ -19,9 +19,11 @@
 #include "iFile.h"
 #include "iFMVAudio.h"
 #include "iFMVDecoder.h"
+#include "iHost.h"
 #include "iMod.h"
 #include "iRasterFill.h"
 #include "iPadHost.h"
+#include "iSndMeter.h"
 #include "iTime.h"
 #include "iWindow.h"
 #include "xFMV.h"
@@ -384,7 +386,15 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
         return 0;
     }
 
-    printf("tssm: movie %s\n", path);
+    if (info.sample_rate != 0 && info.channels != 0)
+    {
+        printf("tssm: movie %s (%ux%u, sound %u Hz, %u ch)\n", path, info.width, info.height,
+               info.sample_rate, info.channels);
+    }
+    else
+    {
+        printf("tssm: movie %s (%ux%u, no sound track)\n", path, info.width, info.height);
+    }
     fflush(stdout);
 
     // The game's own sounds are paused for the movie, as the console's iFMVPlay
@@ -436,6 +446,11 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
         // own effects setting, which covers the movies as well.
         iFMVAudioSetGameVolume((F32)xFMVGetBinkCompliantVolume() / 32768.0f);
         audio = iFMVAudioOpen(info.sample_rate, info.channels);
+        if (!audio)
+        {
+            printf("tssm: movie: no audio device would take its sound; playing it silent\n");
+            fflush(stdout);
+        }
     }
 
     // TSSM_TEST_AUDIO_RESTART's "movie" moment (iAudioSDLTest.h).
@@ -465,7 +480,49 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
     iTime wall_at_handover = 0;
     iTime started = iTimeGet();
     F32 next_frame_at = 0.0f;
+    F32 shown_at = 0.0f;
     bool have_frame = false;
+
+    // TSSM_SND_METER: where a loop's time goes, per second.
+    U32 m_loops = 0;
+    U32 m_frames = 0;
+    U32 m_skipped = 0;
+    U64 m_audio = 0;
+    U64 m_decode = 0;
+    U64 m_upload = 0;
+    U64 m_present = 0;
+    U64 m_t = 0;
+
+    // Tops the device up. Called again after each decode in a pass, so a slow
+    // pass (frames skipped to catch up) does not leave the device dry. A short
+    // read: getting the sound decodes the video interleaved with it.
+    auto feedSound = [&]() {
+        if (!audio)
+        {
+            return;
+        }
+        if (apend == 0)
+        {
+            apend = iFMVDecoderReadAudio(dec, abuf, 2048);
+            aoff = 0;
+            if (apend == 0)
+            {
+                if (!audio_drained)
+                {
+                    // TSSM_TEST_AUDIO_RESTART's "drained" moment.
+                    iAudioSDLTestMovie(path, 1);
+                }
+                audio_drained = true;
+            }
+        }
+        if (apend > 0)
+        {
+            U32 wrote = iFMVAudioWrite(abuf + (size_t)aoff * info.channels, apend);
+            audio_written += wrote;
+            aoff += wrote;
+            apend -= wrote;
+        }
+    };
 
     // At most 60 passes a second while the movie plays. Every pass draws and
     // presents, and the movies are 30 frames a second or less, so above 60 (a
@@ -484,32 +541,15 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
                 break;
             }
 
+            const bool metering = iSndMeterOn();
+            if (metering)
+            {
+                m_t = iHostMonotonicNs();
+            }
+
             // Sound first: the device is what the picture is paced against, and
             // it must not be allowed to run dry while a frame is decoded.
-            if (audio)
-            {
-                if (apend == 0)
-                {
-                    apend = iFMVDecoderReadAudio(dec, abuf, 8192);
-                    aoff = 0;
-                    if (apend == 0)
-                    {
-                        if (!audio_drained)
-                        {
-                            // TSSM_TEST_AUDIO_RESTART's "drained" moment.
-                            iAudioSDLTestMovie(path, 1);
-                        }
-                        audio_drained = true;
-                    }
-                }
-                if (apend > 0)
-                {
-                    U32 wrote = iFMVAudioWrite(abuf + (size_t)aoff * info.channels, apend);
-                    audio_written += wrote;
-                    aoff += wrote;
-                    apend -= wrote;
-                }
-            }
+            feedSound();
 
             // The clock. The audio device's is used when there is one, because
             // that is the one the player hears; a movie with no sound falls
@@ -550,31 +590,96 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
                 now = iTimeDiffSec(started, iTimeGet());
             }
 
+            if (metering)
+            {
+                U64 t = iHostMonotonicNs();
+                m_audio += t - m_t;
+                m_t = t;
+            }
+
             if (!have_frame || now >= next_frame_at)
             {
                 const void* pixels = NULL;
                 U32 pitch = 0;
                 F32 pts = -1.0f;
+                bool ended = false;
 
-                if (!iFMVDecoderNextFrame(dec, &pixels, &pitch, &pts))
+                // A frame already a whole frame late is decoded but not shown,
+                // so a display that presents no faster than the movie's own
+                // rate (the 3DS at 30) can catch up with the sound. The sound
+                // is topped up after each; a bounded number a pass keeps the
+                // window serviced after a long stall.
+                for (S32 skips = 0;
+                     skips < 8 && have_frame && now >= next_frame_at + info.frame_time; skips++)
+                {
+                    if (!iFMVDecoderNextFrame(dec, NULL, NULL, &pts))
+                    {
+                        ended = true;
+                        break;
+                    }
+                    next_frame_at =
+                        (pts >= 0.0f) ? (pts + info.frame_time) : (next_frame_at + info.frame_time);
+                    m_skipped++;
+                    feedSound();
+                }
+
+                if (ended || !iFMVDecoderNextFrame(dec, &pixels, &pitch, &pts))
                 {
                     break;
                 }
 
+                if (metering)
+                {
+                    U64 t = iHostMonotonicNs();
+                    m_decode += t - m_t;
+                    m_t = t;
+                }
+
                 uploadFrame(raster, pixels, pitch, info.width, info.height);
                 have_frame = true;
+                m_frames++;
+                feedSound();
+
+                if (metering)
+                {
+                    U64 t = iHostMonotonicNs();
+                    m_upload += t - m_t;
+                    m_t = t;
+                }
 
                 // The decoder's own timestamp when it has one, because a
                 // container's frame durations are not always uniform; the
                 // nominal frame time when it does not.
                 next_frame_at = (pts >= 0.0f) ? (pts + info.frame_time)
                                               : (next_frame_at + info.frame_time);
+                shown_at = next_frame_at - info.frame_time;
             }
 
             RwCameraBeginUpdate(cam);
             drawFrame(raster, sw, sh, x0, y0, x1, y1);
             RwCameraEndUpdate(cam);
             RwCameraShowRaster(cam, NULL, rwRASTERFLIPWAITVSYNC);
+
+            if (metering)
+            {
+                m_present += iHostMonotonicNs() - m_t;
+                m_loops++;
+
+                char clock[256];
+                double per = m_loops != 0 ? 1e6 * (double)m_loops : 1.0;
+                snprintf(clock, sizeof(clock),
+                         "movie %s clock %.3f s, picture %.3f s; %u loops, %u frames shown, %u "
+                         "skipped; ms a loop: audio %.2f, decode %.2f, upload %.2f, draw and "
+                         "present %.2f",
+                         audio ? "audio" : "wall", now, shown_at, m_loops, m_frames, m_skipped,
+                         (double)m_audio / per, (double)m_decode / per, (double)m_upload / per,
+                         (double)m_present / per);
+                if (iSndMeterTick(clock))
+                {
+                    m_loops = m_frames = m_skipped = 0;
+                    m_audio = m_decode = m_upload = m_present = 0;
+                }
+            }
 
             // The skip button, and the one place `time` is honoured.
             //
@@ -626,6 +731,11 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
     return ended_with;
 }
 
+// iFMVDecoder.h: asked here so the decoder needs no game header.
+S32 iFMVRasterRed()
+{
+    return IRASTERFILL_RED;
+}
 
 // --- TSSM's other entry points ----------------------------------------------
 

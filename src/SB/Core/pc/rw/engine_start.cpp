@@ -43,6 +43,12 @@
 
 #include "rw.h"
 
+#ifdef RW_C3D
+#include "3ds/c3d/rwc3d.h"
+#include "3ds/c3d/c3dlayout.h"
+#include "iConfig.h"
+#endif
+
 #include "backend.h"
 #include "iDeviceReset.h"
 #include "iDistort.h"
@@ -676,6 +682,126 @@ static RwBool OpenDeviceGL3(void)
 }
 #endif
 
+#ifdef RW_C3D
+static RwBool OpenDeviceC3D(void)
+{
+    // The 3DS's top screen through citro3d (3ds/c3d/rwc3d.h). SDL's video
+    // started first (iWindowOpen: gfxInit), and the device takes the top
+    // screen over from it; the bottom one stays libctru's console.
+    //
+    // The device's files are compiled with libctru's short enums and these
+    // with int-sized ones: the librw structs both sides use are measured here
+    // and there, and must agree.
+    static const unsigned kLayout[] = { C3D_LAYOUT_LIST(C3D_LAYOUT_ITEM) };
+    if (!rw::c3d::layoutAgrees(kLayout, (int)(sizeof(kLayout) / sizeof(kLayout[0]))))
+    {
+        printf("tssm: the citro3d device and librw disagree about librw's structs; not "
+               "opening it\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    rw::c3d::OpenParams params;
+    params.cmdBufBytes = 0;
+    params.frameRate = iWindowGetFrameRate();
+    // Builds before the effects were shown on a console wrote none as the
+    // default, with this comment; such a file gets the new default once.
+    if (getenv("TSSM_CONFIG") == NULL)
+    {
+        iConfigRetireDefault("3ds", "effects",
+                             "; Drawing effects not yet shown to work on a console, for testing",
+                             "none");
+    }
+    params.effects = iConfigGetString("3ds.effects", "all");
+    // Engine::open hands the pointer to the device as it is; rw::c3d's open
+    // parameters are a plain struct, not derived from librw's (rwc3d.h has
+    // no librw types).
+    if (!rw::Engine::open(reinterpret_cast<rw::EngineOpenParams*>(&params)) ||
+        !rw::c3d::deviceOpen())
+    {
+        printf("tssm: citro3d did not start\n");
+        fflush(stdout);
+        return FALSE;
+    }
+    return TRUE;
+}
+#endif
+
+// librw's null driver refuses every raster (rasterCreate answers nil), which
+// is enough for the shim's self-tests but not for the game: xShadowInit's
+// camera, the loading screen's copy and every texture want one, and game code
+// dereferences what comes back. These rasters have no storage of their own --
+// nothing is ever drawn -- and a lock hands out one shared scratch buffer big
+// enough for the largest level asked for, whose contents mean nothing.
+namespace
+{
+    rw::uint8* sNullScratch;
+    size_t sNullScratchSize;
+
+    rw::uint8* NullScratch(size_t bytes)
+    {
+        if (bytes > sNullScratchSize)
+        {
+            free(sNullScratch);
+            sNullScratch = (rw::uint8*)calloc(bytes, 1);
+            sNullScratchSize = sNullScratch != NULL ? bytes : 0;
+        }
+        return sNullScratch;
+    }
+
+    rw::Raster* NullRasterCreate(rw::Raster* raster)
+    {
+        const rw::int32 bpp = raster->depth > 8 ? raster->depth / 8 : 1;
+        raster->stride = raster->width * bpp;
+        return raster;
+    }
+
+    rw::uint8* NullRasterLock(rw::Raster* raster, rw::int32, rw::int32)
+    {
+        const rw::int32 bpp = raster->depth > 8 ? raster->depth / 8 : 1;
+        raster->stride = raster->width * bpp;
+        return NullScratch((size_t)raster->stride * (raster->height > 0 ? raster->height : 1));
+    }
+
+    void NullRasterUnlock(rw::Raster*, rw::int32)
+    {
+    }
+
+    rw::uint8* NullRasterLockPalette(rw::Raster*, rw::int32)
+    {
+        return NullScratch(256 * 4);
+    }
+
+    void NullRasterUnlockPalette(rw::Raster*)
+    {
+    }
+
+    rw::int32 NullRasterNumLevels(rw::Raster*)
+    {
+        return 1;
+    }
+
+    rw::bool32 NullImageFindRasterFormat(rw::Image* img, rw::int32 type, rw::int32* width,
+                                         rw::int32* height, rw::int32* depth, rw::int32* format)
+    {
+        *width = img->width;
+        *height = img->height;
+        *depth = 32;
+        *format = type | rw::Raster::C8888;
+        return 1;
+    }
+
+    rw::bool32 NullRasterFromImage(rw::Raster*, rw::Image*)
+    {
+        return 1;
+    }
+
+    rw::Image* NullRasterToImage(rw::Raster*)
+    {
+        return NULL;
+    }
+} // namespace
+
 static RwBool OpenDeviceNull(void)
 {
     // LIBRW_PLATFORM=NULL. The null device ignores the argument entirely, and
@@ -685,6 +811,17 @@ static RwBool OpenDeviceNull(void)
     {
         return FALSE;
     }
+
+    rw::Driver* driver = rw::engine->driver[rw::PLATFORM_NULL];
+    driver->rasterCreate = NullRasterCreate;
+    driver->rasterLock = NullRasterLock;
+    driver->rasterUnlock = NullRasterUnlock;
+    driver->rasterLockPalette = NullRasterLockPalette;
+    driver->rasterUnlockPalette = NullRasterUnlockPalette;
+    driver->rasterNumLevels = NullRasterNumLevels;
+    driver->imageFindRasterFormat = NullImageFindRasterFormat;
+    driver->rasterFromImage = NullRasterFromImage;
+    driver->rasterToImage = NullRasterToImage;
 
     return TRUE;
 }
@@ -743,6 +880,11 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
 #ifdef RW_VULKAN
     case iSCREENBACKEND_VULKAN:
         opened = OpenDeviceVulkan();
+        break;
+#endif
+#ifdef RW_C3D
+    case iSCREENBACKEND_C3D:
+        opened = OpenDeviceC3D();
         break;
 #endif
     default:
@@ -1132,6 +1274,26 @@ RwBool RwEngineStart(void)
     }
 #endif
 
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        rw::c3d::Stats st;
+        rw::c3d::getStats(&st);
+        printf("tssm: c3d backend: the top screen at 400x240, VRAM free %u KB, linear memory free "
+               "%u KB\n",
+               st.vramFree >> 10, st.linearFree >> 10);
+        // The PC's own extras have no c3d path: what the
+        // settings ask for is said once and left out.
+        printf("tssm: c3d backend: not drawn on the 3DS, whatever the settings say: MSAA "
+               "(asked %d), per-pixel lighting (%s), world lighting (%s) and its shadow maps "
+               "(%s), toon shading (%s), outlines (%s), the Xbox glow and distortion\n",
+               (int)iScreenMultiSample(), iScreenPerPixelLighting() ? "on" : "off",
+               iScreenWorldLighting() ? "on" : "off", iScreenWorldLightShadows() ? "on" : "off",
+               iScreenToon() ? "on" : "off", iScreenWorldOutline() ? "on" : "off");
+        fflush(stdout);
+    }
+#endif
+
     sGlobals.engineStatus = rwENGINESTATUSSTARTED;
     return TRUE;
 }
@@ -1300,6 +1462,15 @@ RwVideoMode* RwEngineGetVideoModeInfo(RwVideoMode* modeinfo, RwInt32 modeIndex)
         if (iBackendIsD3D() || iBackendIsVulkan())
         {
             rw::d3d::getVirtualScreen(&screenWidth, &screenHeight);
+        }
+#endif
+#ifdef RW_C3D
+        // The top screen. The device reports it too; iScreen's size is what
+        // the camera rasters were made at.
+        if (iBackendIsC3D())
+        {
+            screenWidth = iScreenWidth();
+            screenHeight = iScreenHeight();
         }
 #endif
 #ifdef RW_GL3

@@ -5,15 +5,20 @@
 
 #include <SDL3/SDL.h>
 
+#include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
 #include "iHost.h"
+#include "iPadTokens.h"
+#include "iSaveStore.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <new>
 
 namespace
 {
@@ -33,14 +38,19 @@ namespace
 
     void SDLCALL OnFolderPicked(void*, const char* const* files, int)
     {
-        SDL_LockMutex(sPickLock);
         if (files == NULL)
         {
+            // No dialog at all (SDL has none on this system, or it could not
+            // be shown): the GUI's own browser takes the request over, and
+            // every one after it. The request stays open meanwhile.
             printf("tssm: gui: the system's file dialog failed: %s\n", SDL_GetError());
             fflush(stdout);
-            sPickResult[0] = '\0';
+            iGui::NoteSystemDialogFailed();
+            return;
         }
-        else if (files[0] == NULL)
+
+        SDL_LockMutex(sPickLock);
+        if (files[0] == NULL)
         {
             sPickResult[0] = '\0'; // cancelled
         }
@@ -244,6 +254,23 @@ float iGui::AutoScale(SDL_Window* window)
         return 1.0f;
     }
 
+#ifdef __3DS__
+    // 13-pixel text on the 320 x 240 bottom screen, about the size of the
+    // system's own menus there.
+    return 0.8125f;
+#endif
+
+#ifdef __SWITCH__
+    // A handheld screen at arm's length and a television across a room both
+    // want more than 1080 lines' worth; the tab scrolls rather than shrinks.
+    {
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSize(window, &w, &h);
+        return h >= 1080 ? 1.5f : 1.25f;
+    }
+#endif
+
     // The display's own scaling, in the window's coordinates: on a system that
     // hands out pixels (Windows) that is the whole 150% or 200%; on one that
     // hands out points (macOS) the points already carry it.
@@ -315,8 +342,14 @@ void iGui::SetupContext()
     io.IniFilename = NULL;
     io.LogFilename = NULL;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || TSSM_GUI_CONSOLE
     io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+#endif
+#ifdef __3DS__
+    // One byte a texel (rw::c3d's overlay textures), within the PICA's 1024.
+    io.Fonts->TexDesiredFormat = ImTextureFormat_Alpha8;
+    io.Fonts->TexMaxWidth = 1024;
+    io.Fonts->TexMaxHeight = 1024;
 #endif
 
     // The scalable default font, so text is drawn at its size rather than
@@ -336,8 +369,22 @@ void iGui::SetupContext()
     style.FramePadding = ImVec2(8.0f, 5.0f);
     style.ItemSpacing = ImVec2(10.0f, 7.0f);
     style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
-#ifdef __ANDROID__
+#ifdef __3DS__
+    // A stylus on a small screen: little padding, a thin scroll bar, no
+    // rounding and no margin to spare.
+    style.TouchExtraPadding = ImVec2(4.0f, 4.0f);
+    style.ScrollbarSize = 14.0f;
+    style.WindowPadding = ImVec2(5.0f, 5.0f);
+    style.FramePadding = ImVec2(6.0f, 3.0f);
+    style.ItemSpacing = ImVec2(8.0f, 5.0f);
+    style.WindowRounding = 0.0f;
+    style.WindowBorderSize = 0.0f;
+#elif defined(__ANDROID__) || defined(__SWITCH__)
     style.TouchExtraPadding = ImVec2(6.0f, 6.0f);
+#endif
+#ifdef __SWITCH__
+    // A finger can scroll a long tab only by its scroll bar.
+    style.ScrollbarSize = 22.0f;
 #endif
 
     // Deep water with a sponge-yellow accent.
@@ -387,7 +434,16 @@ void iGui::ApplyScale(float scale)
 void iGui::HelpMarker(const char* text)
 {
     ImGui::SameLine();
+#if TSSM_GUI_CONSOLE
+    // Something the controller can land on, so its tooltip shows docked,
+    // where there is no touch.
+    ImGui::PushID(text);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::Selectable("(?)", false, ImGuiSelectableFlags_None, ImGui::CalcTextSize("(?)"));
+    ImGui::PopStyleColor();
+#else
     ImGui::TextDisabled("(?)");
+#endif
     if (ImGui::BeginItemTooltip())
     {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
@@ -395,6 +451,53 @@ void iGui::HelpMarker(const char* text)
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+#if TSSM_GUI_CONSOLE
+    ImGui::PopID();
+#endif
+}
+
+bool iGui::BackPressed()
+{
+#if TSSM_GUI_CONSOLE
+    // ImGui's own back button (the right face button) closes no modal, and
+    // the console has no Esc.
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+    {
+        return true;
+    }
+#endif
+    return ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+}
+
+const char* iGui::PadComboName()
+{
+    const char* set = iPadPrintedSet();
+    if (set != NULL && strcmp(set, "3ds") == 0)
+    {
+        return "START + SELECT";
+    }
+    return iPadSwitchLabels() ? "- and +" : "Back+Start";
+}
+
+const char* iGui::ShownPath(const char* path)
+{
+#ifdef __3DS__
+    if (path != NULL && strncmp(path, "sdmc:/", 6) == 0)
+    {
+        return path + 5;
+    }
+    // Relative to the working folder, which is the port's own (i3DS.cpp).
+    if (path != NULL && path[0] != '\0' && path[0] != '/' && strchr(path, ':') == NULL)
+    {
+        static char sShown[4][512];
+        static int sNext;
+        char* out = sShown[sNext];
+        sNext = (sNext + 1) % 4;
+        snprintf(out, sizeof(sShown[0]), "/3ds/tssm/%s", path);
+        return out;
+    }
+#endif
+    return path;
 }
 
 void iGui::Note(const char* fmt, ...)
@@ -420,7 +523,16 @@ void iGui::RestartTag(const char* key)
     ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "restart");
     if (ImGui::BeginItemTooltip())
     {
+#ifdef __3DS__
+        ImGui::Text("Saved. Takes effect the next time the game is started from the %s.",
+                    i3DSMenuName());
+#elif TSSM_GUI_CONSOLE
+        ImGui::TextUnformatted(
+            "Saved. Takes effect the next time the game is started from the " TSSM_GUI_HOMEBREW
+            ".");
+#else
         ImGui::TextUnformatted("Saved. Takes effect the next time the game starts.");
+#endif
         ImGui::EndTooltip();
     }
 }
@@ -452,7 +564,13 @@ bool iGui::CheckAssetFolder(const char* dir, char* why, size_t whySize)
     const char* key = dir != NULL ? dir : "";
     for (S32 i = 0; i < 4; i++)
     {
-        if (sMemo[i].at != 0 && now - sMemo[i].at < 1000 && strcmp(sMemo[i].dir, key) == 0)
+#ifdef __3DS__
+        // A listing of the 3DS's files folder takes it a tenth of a second.
+        const U64 keep = 30000;
+#else
+        const U64 keep = 1000;
+#endif
+        if (sMemo[i].at != 0 && now - sMemo[i].at < keep && strcmp(sMemo[i].dir, key) == 0)
         {
             snprintf(why, whySize, "%s", sMemo[i].why);
             return sMemo[i].ok;
@@ -592,12 +710,27 @@ namespace
     }
 } // namespace
 
+void iGui::AnswerPick(const char* path)
+{
+    SDL_LockMutex(sPickLock);
+    snprintf(sPickResult, sizeof(sPickResult), "%s", path != NULL ? path : "");
+    sPicking = false;
+    sPickReady = true;
+    SDL_UnlockMutex(sPickLock);
+}
+
 void iGui::PickFolder(const char* tag, const char* start)
 {
     if (!BeginPick(tag))
     {
         return;
     }
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_FOLDER, start, NULL, 0);
+        return;
+    }
+    FilePickerRemember(PICK_FOLDER, start, NULL, 0);
 
     // The picker wants a native path; config.ini's are written with slashes,
     // which every system's dialog accepts.
@@ -612,6 +745,13 @@ void iGui::PickOpenFile(const char* tag, const char* start, const FileFilter* fi
         return;
     }
 
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_OPEN_FILE, start, filters, count);
+        return;
+    }
+    FilePickerRemember(PICK_OPEN_FILE, start, filters, count);
+
     const int n = Filters(filters, count);
     SDL_ShowOpenFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
                            (start != NULL && start[0] != '\0') ? start : NULL, false);
@@ -624,6 +764,13 @@ void iGui::PickSaveFile(const char* tag, const char* start, const FileFilter* fi
         return;
     }
 
+    if (UseBuiltinPicker())
+    {
+        FilePickerStart(PICK_SAVE_FILE, start, filters, count);
+        return;
+    }
+    FilePickerRemember(PICK_SAVE_FILE, start, filters, count);
+
     const int n = Filters(filters, count);
     SDL_ShowSaveFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
                            (start != NULL && start[0] != '\0') ? start : NULL);
@@ -635,16 +782,78 @@ bool iGui::ReadWholeFile(const char* path, std::vector<unsigned char>& out, char
     // Through SDL rather than stdio: on Android the system's picker answers
     // with a content:// URI, which only SDL's file streams open.
     out.clear();
-    size_t n = 0;
-    void* data = SDL_LoadFile(path, &n);
-    if (data == NULL)
+    SDL_IOStream* io = SDL_IOFromFile(path, "rb");
+    if (io == NULL)
     {
-        snprintf(why, whySize, "Could not read %s: %s", path, SDL_GetError());
+        snprintf(why, whySize, "Could not read %s: %s", ShownPath(path), SDL_GetError());
         return false;
     }
-    out.assign((const unsigned char*)data, (const unsigned char*)data + n);
-    SDL_free(data);
-    return true;
+
+    const char* name = strrchr(ShownPath(path), '/');
+    name = name != NULL ? name + 1 : ShownPath(path);
+    const Sint64 size = SDL_GetIOSize(io);
+    if (size > (Sint64)ISS_MAX_INPUT)
+    {
+        SDL_CloseIO(io);
+        snprintf(why, whySize, "%s is too large to be a save, a card or a zip of saves.", name);
+        return false;
+    }
+
+    if (size < 0)
+    {
+        // A stream that cannot say its size: read to its end.
+        size_t n = 0;
+        void* data = SDL_LoadFile_IO(io, &n, true);
+        if (data == NULL)
+        {
+            snprintf(why, whySize, "Could not read %s: %s", ShownPath(path), SDL_GetError());
+            return false;
+        }
+        out.assign((const unsigned char*)data, (const unsigned char*)data + n);
+        SDL_free(data);
+        return true;
+    }
+
+    // Straight into `out`: one copy of the file in memory, not two.
+#ifdef __3DS__
+    // A card image is a good part of what the 3DS has free in a level, and
+    // running out would abort the game.
+    try
+    {
+        out.resize((size_t)size);
+    }
+    catch (const std::bad_alloc&)
+    {
+        SDL_CloseIO(io);
+        std::vector<unsigned char>().swap(out);
+        snprintf(why, whySize,
+                 "%s (%.1f MB) does not fit in the memory free now. Try again from the title "
+                 "screen.",
+                 name, (double)size / (1024.0 * 1024.0));
+        printf("tssm: gui: %s: %lld bytes do not fit in the memory free\n", name, (long long)size);
+        return false;
+    }
+#else
+    out.resize((size_t)size);
+#endif
+    size_t got = 0;
+    while (got < out.size())
+    {
+        const size_t n = SDL_ReadIO(io, &out[got], out.size() - got);
+        if (n == 0)
+        {
+            break;
+        }
+        got += n;
+    }
+    const bool ok = got == out.size();
+    if (!ok)
+    {
+        snprintf(why, whySize, "Could not read %s: %s", ShownPath(path), SDL_GetError());
+        out.clear();
+    }
+    SDL_CloseIO(io);
+    return ok;
 }
 
 bool iGui::WriteWholeFile(const char* path, const unsigned char* data, size_t n, char* why,
@@ -652,7 +861,7 @@ bool iGui::WriteWholeFile(const char* path, const unsigned char* data, size_t n,
 {
     if (!SDL_SaveFile(path, data, n))
     {
-        snprintf(why, whySize, "Could not write %s: %s", path, SDL_GetError());
+        snprintf(why, whySize, "Could not write %s: %s", ShownPath(path), SDL_GetError());
         return false;
     }
     return true;

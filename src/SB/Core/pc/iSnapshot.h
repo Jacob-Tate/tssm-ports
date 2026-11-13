@@ -119,4 +119,10 @@ struct RwRaster* iSnapshotCopyFrame(struct RwRaster* dst);
 typedef void (*iSnapshotFrameHook)();
 void iSnapshotSetFrameHook(iSnapshotFrameHook fn);
 
+// After the present, from RwCameraShowRaster: where the frame hook runs on the
+// 3DS's citro3d device instead of in iSnapshotCapture, because there nothing
+// of a frame reaches the screen (or can be read back) before the present.
+// Nothing on the other backends.
+void iSnapshotPresented();
+
 #endif

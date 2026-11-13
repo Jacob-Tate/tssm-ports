@@ -505,7 +505,11 @@ bool iConfigWriteDefaults(const char* path)
     }
 
     // TSSM-ADAPTED: the game this file belongs to.
+#if defined(__SWITCH__) || defined(__3DS__)
+    fprintf(f, "; The SpongeBob SquarePants Movie (port) -- settings.\n");
+#else
     fprintf(f, "; The SpongeBob SquarePants Movie, PC port -- settings.\n");
+#endif
     fprintf(f, "; Every value here is the default, so deleting this file changes nothing.\n");
     fprintf(f, "; Booleans take on/off, true/false, yes/no or 1/0.\n");
 
@@ -828,4 +832,100 @@ const char* iConfigGetString(const char* key, const char* def)
 
     const char* v = valueOf(key);
     return v != NULL ? v : def;
+}
+
+bool iConfigRetireDefault(const char* section, const char* name, const char* oldComment,
+                          const char* oldValue)
+{
+    iConfigLoad();
+    char key[kMaxKey];
+    snprintf(key, sizeof(key), "%s.%s", section, name);
+    lowerInPlace(key);
+    const iConfigSetting* setting = iConfigTableFind(key);
+    if (!sHavePath || setting == NULL)
+    {
+        return false;
+    }
+
+    FILE* f = fopen(sPath, "rb");
+    if (f == NULL)
+    {
+        return false;
+    }
+    static char text[65536];
+    const size_t n = fread(text, 1, sizeof(text) - 1, f);
+    const bool whole = feof(f) != 0;
+    fclose(f);
+    if (!whole)
+    {
+        return false;
+    }
+    text[n] = '\0';
+
+    // The old comment's first line, then comment lines, then the setting at
+    // the old value: what the older build wrote, untouched since.
+    char* start = strstr(text, oldComment);
+    if (start == NULL || (start != text && start[-1] != '\n'))
+    {
+        return false;
+    }
+    char* line = start;
+    while (*line == ';')
+    {
+        char* nl = strchr(line, '\n');
+        if (nl == NULL)
+        {
+            return false;
+        }
+        line = nl + 1;
+    }
+    char* end = strchr(line, '\n');
+    end = end != NULL ? end + 1 : line + strlen(line);
+    char want[kMaxKey + kMaxValue];
+    char have[kMaxKey + kMaxValue];
+    snprintf(want, sizeof(want), "%s=%s", name, oldValue);
+    size_t h = 0;
+    for (const char* p = line; p < end && h < sizeof(have) - 1; p++)
+    {
+        if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
+        {
+            have[h++] = *p;
+        }
+    }
+    have[h] = '\0';
+    if (iHostStrCaseCmp(have, want) != 0)
+    {
+        return false;
+    }
+
+    char temp[sizeof(sPath) + 8];
+    snprintf(temp, sizeof(temp), "%s.new", sPath);
+    FILE* out = fopen(temp, "wb");
+    if (out == NULL)
+    {
+        return false;
+    }
+    fwrite(text, 1, (size_t)(start - text), out);
+    fprintf(out, "; %s\n%s = %s\n", setting->comment, setting->name, setting->value);
+    fwrite(end, 1, strlen(end), out);
+    const bool wrote = fflush(out) == 0;
+    fclose(out);
+    if (!wrote || !iHostRenameReplace(temp, sPath))
+    {
+        remove(temp);
+        return false;
+    }
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (strcmp(sEntries[i].key, key) == 0)
+        {
+            snprintf(sEntries[i].value, sizeof(sEntries[i].value), "%s", setting->value);
+        }
+    }
+    printf("tssm: config: %s's %s = %s was an older build's default; it is now %s, the default "
+           "(written to the file with the new comment; set it back by hand to keep %s)\n",
+           sPath, key, oldValue, setting->value, oldValue);
+    fflush(stdout);
+    return true;
 }

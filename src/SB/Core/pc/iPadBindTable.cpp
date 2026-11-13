@@ -119,6 +119,10 @@ const iPadBindPreset kPadBindPresets[] = {
     { "gamecube",
       "a GameCube controller on an adapter: Z is Back, Z+L white, Z+R black",
       { PAD_FACES, "lt+!rb", "rt+!rb", "rb+lt", "rb+rt", "rb" } },
+
+    // The Xbox layout by POSITION, as on the Switch: the bottom button
+    // (printed B) jumps. ZL/ZR are LT/RT, L/R white and black, SELECT Back.
+    { "3ds", "a New 3DS: the Xbox layout by position, ZL/ZR the triggers", { "a", "b", "x", "y" } },
 };
 
 const S32 kPadBindPresetCount = (S32)(sizeof(kPadBindPresets) / sizeof(kPadBindPresets[0]));

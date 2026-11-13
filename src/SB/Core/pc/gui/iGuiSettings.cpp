@@ -22,6 +22,7 @@
 #include "iConfig.h"
 #include "iHDRGlow.h"
 #include "iHost.h"
+#include "iPadTokens.h"
 #include "iScreen.h"
 #include "iScreenWarp.h"
 #include "iWindow.h"
@@ -65,8 +66,12 @@ namespace
         {
             return false;
         }
-        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed,
-                                ImGui::GetFontSize() * 11.0f);
+#ifdef __3DS__
+        const float labelWidth = ImGui::GetFontSize() * 7.5f;
+#else
+        const float labelWidth = ImGui::GetFontSize() * 11.0f;
+#endif
+        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, labelWidth);
         ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
         return true;
     }
@@ -83,7 +88,11 @@ namespace
     // A control that leaves room for the "restart" tag beside it.
     void ControlWidth()
     {
+#ifdef __3DS__
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+#else
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
+#endif
     }
 
     // --- controls bound to a setting ------------------------------------------
@@ -139,8 +148,7 @@ namespace
     {
         int value = iConfigGetInt(key, def);
         ControlWidth();
-        const bool changed =
-            ImGui::SliderInt(id, &value, lo, hi, format, ImGuiSliderFlags_AlwaysClamp);
+        const bool changed = ImGui::SliderInt(id, &value, lo, hi, format, iGui::kSliderFlags);
         if (changed)
         {
             iGui::CommitInt(key, value, false);
@@ -157,8 +165,7 @@ namespace
     {
         float value = iConfigGetFloat(key, def);
         ControlWidth();
-        const bool changed =
-            ImGui::SliderFloat(id, &value, lo, hi, format, ImGuiSliderFlags_AlwaysClamp);
+        const bool changed = ImGui::SliderFloat(id, &value, lo, hi, format, iGui::kSliderFlags);
         if (changed)
         {
             iGui::CommitFloat(key, value, false);
@@ -370,6 +377,8 @@ const char* iGui::RendererName()
         return "Vulkan";
     case iSCREENBACKEND_NULL:
         return "none";
+    case iSCREENBACKEND_C3D:
+        return "citro3d";
     default:
         return iScreenBackendName(iScreenGetBackend());
     }
@@ -381,14 +390,23 @@ void iGui::SettingsGameFiles()
 {
     ImGui::SeparatorText("Game files");
 
-    FolderRow("assets", "assets.path", "(not set: the folder the game starts in)", NULL);
-    RestartTag("assets.path");
-
     // The folder the game will actually read: TSSM_ASSETS while it is set, the
     // setting otherwise, the working folder when the setting is empty.
-    char why[512];
     const char* env = getenv("TSSM_ASSETS");
     const bool overridden = env != NULL && env[0] != '\0';
+
+#if TSSM_GUI_CONSOLE
+    // iSwitch.cpp and i3DS.cpp set TSSM_ASSETS whenever the SD card's files
+    // folder exists, and no player can change it; browsing would do nothing.
+    ImGui::BeginDisabled(overridden);
+#endif
+    FolderRow("assets", "assets.path", "(not set: the folder the game starts in)", NULL);
+#if TSSM_GUI_CONSOLE
+    ImGui::EndDisabled();
+#endif
+    RestartTag("assets.path");
+
+    char why[512];
     const char* path = iConfigGetString("assets.path", "");
     const char* effective = overridden ? env : (path[0] != '\0' ? path : ".");
     const bool ok = CheckAssetFolder(effective, why, sizeof(why));
@@ -398,9 +416,15 @@ void iGui::SettingsGameFiles()
     ImGui::TextWrapped("%s", why);
     if (overridden)
     {
+#if TSSM_GUI_CONSOLE
+        Note("The game reads %s on the SD card; the folder above is used only when that one is "
+             "missing.",
+             ShownPath(env));
+#else
         Note("TSSM_ASSETS is set (%s) and is used instead of the folder above for as long as it "
              "is.",
              env);
+#endif
     }
     Note("The folder extracted from your own Xbox disc that directly holds boot.HIP, font.HIP "
          "and FMV. No game files come with the port.");
@@ -416,7 +440,14 @@ void iGui::SettingsDisplay()
 
     const bool live = !InLauncher();
 
-    // The renderer: only what this build carries.
+    // The renderer: only what this build carries. The 3DS's one renderer
+    // and its fixed picture (400 x 240, no anti-aliasing, always in step with
+    // the screen) leave nothing to choose; About names the renderer.
+#if defined(__3DS__)
+#elif defined(__SWITCH__)
+    Row("Renderer");
+    ImGui::TextUnformatted("OpenGL 3");
+#else
     {
         Choice choices[6];
         S32 n = 0;
@@ -442,7 +473,9 @@ void iGui::SettingsDisplay()
             ImGui::TextDisabled("running: %s", RendererName());
         }
     }
+#endif
 
+#if !TSSM_GUI_CONSOLE
     // Window mode. Windowed and borderless are frames around the same surface
     // and switch live; exclusive fullscreen belongs to the device.
     {
@@ -464,7 +497,9 @@ void iGui::SettingsDisplay()
         }
         RestartTag("video.mode");
     }
+#endif
 
+#ifndef __3DS__
     // The picture's shape (iScreen.h, iScreenSizeForAspect). Like the size, it
     // applies at the next start: every screen camera is made at the render size.
     const iScreenAspect aspect = iScreenAspectFromName(iConfigGetString("video.aspect", "wide"));
@@ -484,7 +519,11 @@ void iGui::SettingsDisplay()
     // Render size for the two shapes: a height, and the width follows from it.
     if (aspect != iSCREENASPECT_CUSTOM)
     {
+#ifdef __SWITCH__
+        static const int kHeights[] = { 480, 720, 1080 };
+#else
         static const int kHeights[] = { 480, 720, 960, 1080, 1440, 2160 };
+#endif
         const S32 count = (S32)(sizeof(kHeights) / sizeof(kHeights[0]));
 
         const int w = iConfigGetInt("video.width", 640);
@@ -590,6 +629,12 @@ void iGui::SettingsDisplay()
         {
             for (S32 i = 0; i < count; i++)
             {
+#ifdef __SWITCH__
+                if (kSizes[i].w > 1920 || kSizes[i].h > 1080)
+                {
+                    continue;
+                }
+#endif
                 const bool selected = kSizes[i].w == w && kSizes[i].h == h;
                 if (ImGui::Selectable(kSizes[i].label, selected) && !selected)
                 {
@@ -610,12 +655,15 @@ void iGui::SettingsDisplay()
                     sCustom = false;
                 }
             }
+#ifndef __SWITCH__
+            // Typed sizes would open the system keyboard on the Switch.
             if (ImGui::Selectable("Other size...", sCustom))
             {
                 sCustom = true;
                 sCustomSize[0] = w;
                 sCustomSize[1] = h;
             }
+#endif
             ImGui::EndCombo();
         }
         if (ChangedSinceStartup("video.width") || ChangedSinceStartup("video.height"))
@@ -684,6 +732,7 @@ void iGui::SettingsDisplay()
             iWindowSetVSync(iConfigGetBool("video.vsync", TRUE));
         }
     }
+#endif
 
     // Frame rate cap: how fast the game runs, separate from vsync (iWindow.h).
     {
@@ -700,13 +749,21 @@ void iGui::SettingsDisplay()
             snprintf(displayLabel, sizeof(displayLabel), "Display rate");
         }
 
+#ifdef __3DS__
+        // The screen's vblank paces the frames: 30 or 60 is all there is.
+        const Choice choices[] = { { "30", "30" }, { "60", "60  (light scenes)" } };
+        const S32 kChoices = 2;
+        (void)displayLabel;
+#else
         const Choice choices[] = { { "30", "30" },
                                    { "60", "60  (original)" },
                                    { "display", displayLabel },
                                    { "off", "No cap" } };
+        const S32 kChoices = 4;
+#endif
         Row("Frame rate cap");
         S32 selected = -1;
-        for (S32 i = 0; i < 4; i++)
+        for (S32 i = 0; i < kChoices; i++)
         {
             if (SDL_strcasecmp(rate, choices[i].value) == 0)
             {
@@ -718,7 +775,7 @@ void iGui::SettingsDisplay()
         ControlWidth();
         if (ImGui::BeginCombo("##fps", selected >= 0 ? choices[selected].label : other))
         {
-            for (S32 i = 0; i < 4; i++)
+            for (S32 i = 0; i < kChoices; i++)
             {
                 if (ImGui::Selectable(choices[i].label, i == selected) && i != selected)
                 {
@@ -731,6 +788,10 @@ void iGui::SettingsDisplay()
             }
             ImGui::EndCombo();
         }
+#ifdef __3DS__
+        HelpMarker("How fast the game runs. The game was made for 60; the New 3DS holds 30 "
+                   "everywhere and 60 only in light scenes.");
+#else
         HelpMarker("How fast the game runs. The game was made for 60; vertical sync is a separate "
                    "question (whether a frame waits for the display).");
 
@@ -750,6 +811,7 @@ void iGui::SettingsDisplay()
             Note("No cap: as many frames as the display (or, with vertical sync off, the "
                  "hardware) allows, at the power that takes. Movies stay at 60.");
         }
+#endif
     }
 
     {
@@ -817,8 +879,13 @@ void iGui::SettingsGame()
         return;
     }
 
+#ifdef __3DS__
+    Row("Logo movies");
+    BoolSetting("At startup##intro", "game.intro_movies", true);
+#else
     Row("Intro movies");
     BoolSetting("Play the logo movies at startup##intro", "game.intro_movies", true);
+#endif
     RestartTag("game.intro_movies");
 
     // The camera, sticks, triggers, mouse and touch settings belong to the
@@ -827,7 +894,11 @@ void iGui::SettingsGame()
     if (!InLauncher())
     {
         Row("Controls");
+#ifdef __3DS__
+        ImGui::TextDisabled("On the Controls tab.");
+#else
         ImGui::TextDisabled("Camera speed, sticks, triggers, mouse and touch: the Controls tab.");
+#endif
     }
     else
     {
@@ -838,8 +909,22 @@ void iGui::SettingsGame()
         ChoiceCombo("##touch", "input.touch_controls", kTouch, 3, "auto");
     }
 
+#if defined(__3DS__)
+    // A line of its own: the path and its two buttons need the width.
+    ImGui::EndTable();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Save folder");
+    RestartTag("game.save_folder");
+    FolderRow("saves", "game.save_folder", "(default: /3ds/tssm/saves)", "Default");
+    return;
+#else
     Row("Save folder");
+#endif
+#if defined(__SWITCH__)
+    FolderRow("saves", "game.save_folder", "(default: /switch/tssm/saves)", "Default");
+#else
     FolderRow("saves", "game.save_folder", "(default: the per-user data folder)", "Default");
+#endif
     RestartTag("game.save_folder");
 
     ImGui::EndTable();
@@ -872,9 +957,17 @@ void iGui::SettingsInterface()
         {
             float value = (float)atof(scale);
             ImGui::SameLine();
+#ifdef __3DS__
+            // About 10 to 16 pixels of text; the screen holds no more.
+            const float lo = 0.625f;
+            const float hi = 1.0f;
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+#else
+            const float lo = 0.5f;
+            const float hi = 4.0f;
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
-            if (ImGui::SliderFloat("##scale", &value, 0.5f, 4.0f, "%.2fx",
-                                   ImGuiSliderFlags_AlwaysClamp))
+#endif
+            if (ImGui::SliderFloat("##scale", &value, lo, hi, "%.2fx", iGui::kSliderFlags))
             {
                 CommitFloat("gui.scale", value, false);
             }
@@ -885,6 +978,7 @@ void iGui::SettingsInterface()
         }
     }
 
+#if !TSSM_GUI_CONSOLE
     {
         static const char* const kKeys[] = { "F1", "F2", "F3", "F4", "F5", "F6",
                                              "F7", "F8", "F9", "F10", "F12", "Insert" };
@@ -906,12 +1000,37 @@ void iGui::SettingsInterface()
         HelpMarker("F11 and Alt+Enter switch between a window and borderless fullscreen, and F8 is "
                    "taken, so neither is offered.");
     }
+#endif
 
     Row("Controller");
-    BoolSetting("Back+Start opens this window##combo", "gui.pad_combo", true);
-    HelpMarker("Hold Back, then press Start. The buttons stay hidden from the game until they are "
-               "let go, so closing this window does not pause the game.");
+#if defined(__3DS__)
+    // Not a setting there: it is the only way to open this window.
+    ImGui::TextUnformatted("START + SELECT open and close this menu");
+    HelpMarker("Press them together; the game sees neither. START or SELECT alone reaches the "
+               "game a moment later, so the pause menu and the upgrade window still open.");
+#elif defined(__SWITCH__)
+    // Not a setting there: it is the only way to open this window.
+    ImGui::TextUnformatted("- and + open and close this window");
+    HelpMarker("Hold -, then press +. The buttons stay hidden from the game until they are let go, "
+               "so closing this window does not pause the game.");
+#else
+    if (iPadSwitchLabels())
+    {
+        BoolSetting("- and + open this window###combo", "gui.pad_combo", true);
+        HelpMarker("Hold -, then press +. The buttons stay hidden from the game until they are "
+                   "let go, so closing this window does not pause the game.");
+    }
+    else
+    {
+        BoolSetting("Back+Start opens this window###combo", "gui.pad_combo", true);
+        HelpMarker("Hold Back, then press Start. The buttons stay hidden from the game until they "
+                   "are let go, so closing this window does not pause the game.");
+    }
+#endif
 
+#if !TSSM_GUI_CONSOLE
+    // On the Switch the launcher shows only when the game's files are missing
+    // (the 3DS has none).
     {
         static const Choice kLauncher[] = { { "auto", "Only when the game's files are missing" },
                                             { "always", "Every time" },
@@ -919,13 +1038,16 @@ void iGui::SettingsInterface()
         Row("Launcher at startup");
         ChoiceCombo("##launcher", "gui.launcher", kLauncher, 3, "auto");
     }
+#endif
 
     ImGui::EndTable();
 
     const char* path = iConfigPath();
     ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("Settings file: %s", path != NULL ? path : "none (defaults only)");
+    ImGui::TextDisabled("Settings file: %s",
+                        path != NULL ? ShownPath(path) : "none (defaults only)");
+#if !TSSM_GUI_CONSOLE
     if (path != NULL)
     {
         ImGui::SameLine();
@@ -946,6 +1068,7 @@ void iGui::SettingsInterface()
             }
         }
     }
+#endif
 }
 
 void iGui::DrawSettings()

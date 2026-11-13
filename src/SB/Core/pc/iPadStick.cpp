@@ -56,3 +56,17 @@ void iPadStickConvert(S16 rawX, S16 rawY, S32 deadzone, F32* outX, F32* outY)
     *outX = dirX * scaled;
     *outY = dirY * scaled;
 }
+
+void iPadStickScaleToRim(F32* x, F32* y, F32 rim)
+{
+    F32 sx = *x / rim;
+    F32 sy = *y / rim;
+    F32 m = sqrtf(sx * sx + sy * sy);
+    if (m > 1.0f)
+    {
+        sx /= m;
+        sy /= m;
+    }
+    *x = sx;
+    *y = sy;
+}

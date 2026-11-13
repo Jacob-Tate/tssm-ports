@@ -1,6 +1,7 @@
 #include "iSnd.h"
 #include "iSndData.h"
 #include "iSndHost.h"
+#include "iSndMeter.h"
 #include "iSndXbox.h"
 
 #include "gui/iGui.h"
@@ -8,6 +9,7 @@
 #include "iFile.h"
 #include "iHost.h"
 
+#include "xCutscene.h"
 #include "xSnd.h"
 #include "xstransvc.h"
 
@@ -127,6 +129,7 @@ struct pcslot
     U32 feedFrameBytes;
     U8 carry[8]; // a frame split across two blocks
     U32 carryBytes;
+    U32 fedFrames; // TSSM_SND_METER's track clock
 
     // TSSM_SND_DUMP's copy of a fed track.
     S16* dump;
@@ -136,6 +139,30 @@ struct pcslot
 };
 
 static pcslot sSlots[ISND_REAL_VOICES];
+
+// Real voices holding a host voice, and how many of those are playing now
+// (iD0Stats, once per frame).
+S32 iSndD0Voices(S32* playing)
+{
+    S32 held = 0;
+    S32 on = 0;
+    for (S32 i = 0; i < ISND_REAL_VOICES; i++)
+    {
+        if (sSlots[i].host >= 0)
+        {
+            held++;
+            if (iSndHostIsPlaying(sSlots[i].host))
+            {
+                on++;
+            }
+        }
+    }
+    if (playing != NULL)
+    {
+        *playing = on;
+    }
+    return held;
+}
 
 #define ISND_FEED_CAPACITY (1U << 19) // frames: 10.9 s at 48 kHz
 #define ISND_FEED_MARGIN (1U << 17) // the most one pull may bring, with room
@@ -445,6 +472,8 @@ void iSndInit()
 
     iFreeTables();
     iSndDataReset();
+    // Reads TSSM_SND_METER here, before any audio thread can ask first.
+    iSndMeterOn();
     iSndHostInit();
     iGuiSetAudioListener(iSettingsVolumes);
 
@@ -1250,6 +1279,7 @@ static bool iPlayCutscene(S32 i, xSndVoiceInfo* vp)
     s->feedFrameBytes = 2 * channels;
     s->channels = channels;
     s->dumpRate = e->fmt.samples_per_sec;
+    s->fedFrames = 0;
 
     vp->ps.channel = i;
 
@@ -1360,6 +1390,7 @@ static void iPumpStream(S32 i)
         }
 
         iSndHostFeed(s->host, sStreamPcm, frames);
+        iSndMeterS16(iSNDMETER_STREAM, sStreamPcm, frames, ch);
         if (!s->dumpWrapped)
         {
             iDumpFeed(s, sStreamPcm, frames);
@@ -1453,6 +1484,8 @@ static void iPumpFeed(S32 i)
             {
                 iSndHostFeed(s->host, (const S16*)s->carry, 1);
                 iDumpFeed(s, (const S16*)s->carry, 1);
+                iSndMeterS16(iSNDMETER_CUTSCENE, (const S16*)s->carry, 1, s->channels);
+                s->fedFrames++;
                 s->carryBytes = 0;
             }
         }
@@ -1465,6 +1498,8 @@ static void iPumpFeed(S32 i)
             // carried byte that leaves it unaligned does no harm.
             iSndHostFeed(s->host, (const S16*)p, frames);
             iDumpFeed(s, (const S16*)p, frames);
+            iSndMeterS16(iSNDMETER_CUTSCENE, (const S16*)p, frames, s->channels);
+            s->fedFrames += frames;
         }
 
         U32 rest = size - frames * s->feedFrameBytes;
@@ -1556,6 +1591,7 @@ U8 iSndIsReady(iSndHandle id)
 }
 
 static void iReportMix();
+static void iMeterTick();
 
 void iSndUpdate()
 {
@@ -1566,6 +1602,8 @@ void iSndUpdate()
         iPumpFeed(i);
         iPumpStream(i);
     }
+
+    iMeterTick();
 
     U8 bDialogActive = FALSE;
     for (S32 i = 0; i < ISND_REAL_VOICES; i++)
@@ -1683,6 +1721,40 @@ void iSndResume()
         }
         xSndMgrSetUserVolume(i, sOldVolume[i]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// TSSM_SND_METER: the cutscene's time against how much of its track has played.
+
+static void iMeterTick()
+{
+    if (!iSndMeterOn())
+    {
+        return;
+    }
+
+    char clock[160];
+    clock[0] = '\0';
+
+    xCutscene* csn = xCutscene_CurrentCutscene();
+    for (S32 i = 0; i < ISND_REAL_VOICES; i++)
+    {
+        pcslot* s = &sSlots[i];
+        if (!s->feed || s->host < 0 || s->dumpRate == 0)
+        {
+            continue;
+        }
+
+        U32 queued = iSndHostFeedQueued(s->host);
+        U32 played = s->fedFrames > queued ? s->fedFrames - queued : 0;
+        snprintf(clock, sizeof(clock),
+                 "cutscene time %.2f s, its track played %.2f s (%u frames queued)%s",
+                 csn != NULL ? csn->Time : -1.0f, (double)played / (double)s->dumpRate, queued,
+                 s->held ? ", held" : "");
+        break;
+    }
+
+    iSndMeterTick(clock[0] != '\0' ? clock : NULL);
 }
 
 // ---------------------------------------------------------------------------

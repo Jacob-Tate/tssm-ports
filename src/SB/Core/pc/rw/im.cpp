@@ -37,6 +37,7 @@
 // After rw.h: iScreen.h brings in types.h, which breaks librw's rwengine.h when
 // it comes first.
 #include "iScreen.h"
+#include "iD0Stats.h"
 
 #include <vector>
 
@@ -198,6 +199,7 @@ RwBool RwIm2DRenderPrimitive(RwPrimitiveType primType, RwIm2DVertex* vertices,
         return FALSE;
     }
 
+    iD0CountIm(FALSE, primType, numVertices);
     vertices = ToUIBox(vertices, numVertices);
     BindStateRaster();
     rw::im2d::RenderPrimitive((rw::PrimitiveType)primType, vertices, numVertices);
@@ -215,6 +217,7 @@ RwBool RwIm2DRenderIndexedPrimitive(RwPrimitiveType primType, RwIm2DVertex* vert
 
     // RwImVertexIndex is an RwUInt16 and librw reads its indices as int16, so
     // the array goes through as it is.
+    iD0CountIm(FALSE, primType, numIndices);
     vertices = ToUIBox(vertices, numVertices);
     BindStateRaster();
     rw::im2d::RenderIndexedPrimitive((rw::PrimitiveType)primType, vertices, numVertices, indices,
@@ -231,6 +234,10 @@ RwBool RwIm2DRenderIndexedPrimitive(RwPrimitiveType primType, RwIm2DVertex* vert
 // call sites pass the bits as a literal -- 0x19 in zFX.cpp, 0x1b in zLasso.cpp
 // -- so a renumbering would not even change the source.
 
+// The vertex count of the last RwIm3DTransform, for iD0CountIm: the
+// non-indexed draw that follows it is told only the primitive type.
+static RwInt32 sD0Im3DVerts;
+
 void* RwIm3DTransform(RwIm3DVertex* pVerts, RwUInt32 numVerts, RwMatrix* ltm, RwUInt32 flags)
 {
     if (pVerts == NULL || numVerts == 0 || rw::engine == NULL)
@@ -238,6 +245,7 @@ void* RwIm3DTransform(RwIm3DVertex* pVerts, RwUInt32 numVerts, RwMatrix* ltm, Rw
         return NULL;
     }
 
+    sD0Im3DVerts = (RwInt32)numVerts;
     rw::im3d::Transform(pVerts, (rw::int32)numVerts,
                         const_cast<rw::Matrix*>(reinterpret_cast<const rw::Matrix*>(ltm)), flags);
 
@@ -259,6 +267,7 @@ void* RwIm3DTransform(RwIm3DVertex* pVerts, RwUInt32 numVerts, RwMatrix* ltm, Rw
 
 RwBool RwIm3DRenderPrimitive(RwPrimitiveType primType)
 {
+    iD0CountIm(TRUE, primType, sD0Im3DVerts);
     BindStateRaster();
     rw::im3d::RenderPrimitive((rw::PrimitiveType)primType);
     return TRUE;
@@ -287,6 +296,7 @@ RwBool RwIm3DRenderIndexedPrimitive(RwPrimitiveType primType, RwImVertexIndex* i
         return FALSE;
     }
 
+    iD0CountIm(TRUE, primType, numIndices);
     BindStateRaster();
     rw::im3d::RenderIndexedPrimitive((rw::PrimitiveType)primType, indices, numIndices);
     return TRUE;

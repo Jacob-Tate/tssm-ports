@@ -5,8 +5,10 @@
 #include "iAudioSDLTest.h"
 #include "iHangDump.h"
 #include "iConfig.h"
+#include "iD0Stats.h"
 #include "iHost.h"
 #include "iMod.h"
+#include "iSpike.h"
 #include "iModPackage.h"
 
 #include "xFile.h"
@@ -134,6 +136,23 @@ const char* iFileModName()
     return sName;
 }
 
+// The length of a newlib device prefix such as the 3DS's and the Switch's
+// "sdmc:" (or "romfs:"), with the slash after it; 0 when there is none. Two
+// letters or more, so a Windows drive letter is not one.
+static size_t iDevicePrefixLength(const char* path)
+{
+    size_t n = 0;
+    while ((path[n] >= 'a' && path[n] <= 'z') || (path[n] >= 'A' && path[n] <= 'Z'))
+    {
+        n++;
+    }
+    if (n < 2 || path[n] != ':')
+    {
+        return 0;
+    }
+    return path[n + 1] == '/' ? n + 2 : n + 1;
+}
+
 static bool iPathIsAbsolute(const char* path)
 {
     if (path == NULL || path[0] == 0)
@@ -142,9 +161,12 @@ static bool iPathIsAbsolute(const char* path)
     }
 
     // "/..." or "X:..." -- the second covers Windows drive letters, which the
-    // console never had to think about.
+    // console never had to think about -- or "sdmc:/..." on the 3DS, where
+    // TSSM_ASSETS names the SD card that way (3ds/i3DS.cpp).
     return path[0] == '/' || path[0] == '\\' ||
-           (path[1] == ':' && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')));
+           (path[1] == ':' &&
+            ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))) ||
+           iDevicePrefixLength(path) > 0;
 }
 
 void iFileInit()
@@ -338,6 +360,14 @@ static bool iResolveCaseInsensitive(char* path, size_t pathsize)
         {
             out[len++] = *p++;
         }
+    }
+    else if (iDevicePrefixLength(p) > 0)
+    {
+        // "sdmc:/" (3DS, Switch).
+        const size_t n = iDevicePrefixLength(p);
+        memcpy(out, p, n);
+        len = n;
+        p += n;
     }
     out[len] = '\0';
 
@@ -908,11 +938,25 @@ U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)
         return 1;
     }
 
+#ifdef __3DS__
+    // libctru's SD device has no read cache, and every small read is a round
+    // trip to the FS service. A 128 KB stdio buffer makes the game's small
+    // reads 128 KB ones; reads at least that big go straight through.
+    if (!(flags & IFILE_OPEN_WRITE))
+    {
+        setvbuf(fp, NULL, _IOFBF, 128 * 1024);
+    }
+#endif
+
     fseek(fp, 0, SEEK_END);
     long len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
     sOpenedAny = 1;
+    if (!(flags & IFILE_OPEN_WRITE))
+    {
+        iSpikeFileOpened(ps->path, len);
+    }
 
     // A package a mod replaces assets in is read through the modded view of
     // it, whoever opens it: the packer, xTextureManager, the sound and
@@ -984,10 +1028,13 @@ U32 iFileRead(tag_xFile* file, void* buf, U32 size)
         return 0;
     }
 
+    const S64 d0Start = iD0Now();
+
     if (ps->view != NULL)
     {
         iModPkgRead(ps->view, fp, (U32)ps->offset, buf, size);
         ps->offset += (S32)size;
+        iD0Add(iD0_FILE, d0Start, size);
         return size;
     }
 
@@ -1005,6 +1052,7 @@ U32 iFileRead(tag_xFile* file, void* buf, U32 size)
 
     ps->offset += (S32)size;
 
+    iD0Add(iD0_FILE, d0Start, size);
     return size;
 }
 

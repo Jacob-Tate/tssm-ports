@@ -1,6 +1,7 @@
 #include "iSndHost.h"
 #include "iAudioSDL.h"
 #include "iAudioSDLTest.h"
+#include "iSndMeter.h"
 #include "iHost.h"
 #include "iSndReverb.h"
 
@@ -179,6 +180,10 @@ static U64 sAliveNs;
 static U64 sLastUpdateNs;
 static const U64 kStallNs = 1000000000ULL;
 
+// TSSM: the 3DS spike's count of the callback's own time
+// (iSndHostMixStatsTake). Written by the callback under sLock.
+static iSndHostMixStats sMixStats;
+
 // ---------------------------------------------------------------------------
 // Mixing
 
@@ -331,7 +336,8 @@ static void iMixFeedLocked(hvoice* v, float* out, U32 frames, double step, float
     float dL = (v->volL * to - gL) / (float)frames;
     float dR = (v->volR * to - gR) / (float)frames;
 
-    for (U32 n = 0; n < frames; n++)
+    U32 n = 0;
+    for (; n < frames; n++)
     {
         if (v->pos + 1.0 > (double)v->written)
         {
@@ -355,6 +361,8 @@ static void iMixFeedLocked(hvoice* v, float* out, U32 frames, double step, float
 
     v->curL = v->volL;
     v->curR = v->volR;
+
+    iSndMeterFrames(iSNDMETER_MIX_FEEDS, n);
 }
 
 // Mix `frames` output frames into sMixBuffer as interleaved stereo. Caller
@@ -442,6 +450,8 @@ static void iMixLocked(U32 frames)
             gR += dR;
         }
 
+        iSndMeterFrames(iSNDMETER_MIX_SOUNDS, n);
+
         // Only claim to have reached the target gain if the whole block ran;
         // a voice that ended early keeps where its ramp got to, which matters
         // if the same slot is restarted before the next block.
@@ -526,6 +536,8 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
 
     SDL_AddAtomicInt(&sCallbacks, 1);
 
+    const U64 startNs = iHostMonotonicNs();
+    U64 produced = 0;
     const int frame_bytes = (int)(sizeof(float) * 2);
 
     while (additional >= frame_bytes)
@@ -541,6 +553,7 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
         SDL_UnlockMutex(sLock);
 
         iClamp(frames);
+        iSndMeterF32(iSNDMETER_OUT, sMixBuffer, frames, 2);
 
         // TSSM_TEST_AUDIO_RESTART's meter (iAudioSDLTest.h), off unless a test
         // turned it on.
@@ -569,11 +582,23 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
             // Nothing useful to do about it here. The next callback will try
             // again, and the voices have already been advanced, so the game
             // stays in step with what it thinks it is hearing.
-            return;
+            break;
         }
 
+        produced += frames;
         additional -= bytes;
     }
+
+    const U64 tookNs = iHostMonotonicNs() - startNs;
+    SDL_LockMutex(sLock);
+    sMixStats.calls++;
+    sMixStats.totalNs += tookNs;
+    sMixStats.frames += produced;
+    if (tookNs > sMixStats.maxNs)
+    {
+        sMixStats.maxNs = tookNs;
+    }
+    SDL_UnlockMutex(sLock);
 }
 
 // ---------------------------------------------------------------------------
@@ -1414,6 +1439,20 @@ void iSndHostTestMix(U32 rate, float* out, U32 frames)
     sOutRate = saved;
 
     memcpy(out, sMixBuffer, sizeof(float) * 2 * frames);
+}
+
+bool iSndHostMixStatsTake(iSndHostMixStats* out, bool reset)
+{
+    iEnsureLock();
+    SDL_LockMutex(sLock);
+    *out = sMixStats;
+    out->rate = sDeviceUp ? sOutRate : 0;
+    if (reset)
+    {
+        memset(&sMixStats, 0, sizeof(sMixStats));
+    }
+    SDL_UnlockMutex(sLock);
+    return sDeviceUp;
 }
 
 const char* iSndHostName()

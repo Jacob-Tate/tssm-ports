@@ -10,9 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Card images are the largest thing read: 2043 blocks of 8 KB, 16 MB.
-#define ISS_MAX_INPUT (64u * 1024u * 1024u)
-
 #define ISS_HEAD_MAGIC "TSSMGCH1"
 #define ISS_HEAD_FILE_SIZE (8 + 4 + 4 + ISF_DENTRY_SIZE + ISF_HEAD_SIZE)
 

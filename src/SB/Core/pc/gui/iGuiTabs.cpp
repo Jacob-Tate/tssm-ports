@@ -32,11 +32,24 @@ extern "C" {
 #ifndef TSSM_GUI_VERSION
 #define TSSM_GUI_VERSION "unknown"
 #endif
+#ifndef TSSM_3DS_VERSION_TEXT
+#define TSSM_3DS_VERSION_TEXT "unknown"
+#endif
 
 void iGui::DrawAbout()
 {
+#if TSSM_GUI_CONSOLE
+    ImGui::SeparatorText("The SpongeBob SquarePants Movie (port)");
+#else
     ImGui::SeparatorText("The SpongeBob SquarePants Movie: PC port");
+#endif
+#ifdef __3DS__
+    // The number the HOME Menu or the Homebrew Launcher shows, then the build's own.
+    ImGui::Text("Version %s for New 3DS", TSSM_3DS_VERSION_TEXT);
+    ImGui::TextWrapped("Build %s", TSSM_GUI_VERSION);
+#else
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
+#endif
 #ifdef NDEBUG
     const char* config = "release";
 #else
@@ -58,8 +71,10 @@ void iGui::DrawAbout()
             const char* value;
         } rows[] = {
             { "Renderer", RendererName() },
+#ifndef __3DS__
             { "Window", iWindowBackendName() },
             { "Input", iPadHostName() },
+#endif
             { "SDL", sdlVersion },
             { "Dear ImGui", IMGUI_VERSION },
 #ifdef TSSM_HAVE_FFMPEG
@@ -67,15 +82,29 @@ void iGui::DrawAbout()
 #else
             { "FFmpeg", "not in this build (movies are skipped)" },
 #endif
-            { "Game files", iFileAssetRoot()[0] != '\0' ? iFileAssetRoot() : "(working folder)" },
-            { "Settings file", iConfigPath() != NULL ? iConfigPath() : "(none)" },
+            { "Game files",
+              iFileAssetRoot()[0] != '\0' ? ShownPath(iFileAssetRoot()) : "(working folder)" },
+            { "Settings file", iConfigPath() != NULL ? ShownPath(iConfigPath()) : "(none)" },
         };
 
+#ifdef __3DS__
+        // The tab wraps every line; a fixed-fit column measured from wrapped
+        // text shrinks to a letter. The names keep their width, the values
+        // wrap in what is left.
+        ImGui::TableSetupColumn("what", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+#endif
         for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+#ifdef __3DS__
+            ImGui::PushTextWrapPos(-1.0f);
             ImGui::TextDisabled("%s", rows[i].what);
+            ImGui::PopTextWrapPos();
+#else
+            ImGui::TextDisabled("%s", rows[i].what);
+#endif
             ImGui::TableSetColumnIndex(1);
             ImGui::TextUnformatted(rows[i].value != NULL ? rows[i].value : "?");
         }
@@ -103,7 +132,12 @@ void iGui::DrawAbout()
             ImGui::TextDisabled("%s", n.what);
             if (n.url[0] != '\0')
             {
+#if TSSM_GUI_CONSOLE
+                // Nothing on the console opens a link.
+                ImGui::TextDisabled("%s", n.url);
+#else
                 ImGui::TextLinkOpenURL(n.url);
+#endif
             }
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextUnformatted(n.text);

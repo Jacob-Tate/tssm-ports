@@ -1,0 +1,94 @@
+Local fixes for devkitPro/SDL branch switch-sdl-3.4 (c329016c0e338ab4397ad930f83330c9fe058348)
+built with devkitA64 r30 (GCC 16.1).
+
+1. SDL_switchkeyboard.c, SDL_switchmouse.c and SDL_switchvideo.c test
+   SDL_VIDEO_DRIVER_SWITCH before including SDL_internal.h. They only work when
+   CMake force-includes SDL_internal.h through its precompiled header. With
+   precompiled headers off (needed here: MSYS2 CMake writes a /e/... path into
+   cmake_pch.h that the native compiler cannot open; the port also turns PCH off
+   for GCC) the whole Switch video driver compiles to nothing, with only a
+   -Wundef warning. Include SDL_internal.h first.
+2. SDL_switchvideo.c assigned the function SWITCH_IsScreenKeyboardShown to
+   device->screen_keyboard_shown, which is a bool in SDL 3.4 (GCC: -Waddress,
+   "will always evaluate as true"), so SDL reported the on-screen keyboard as
+   always shown. Drop the assignment and report state changes with
+   SDL_SendScreenKeyboardShown/Hidden.
+
+Apply with: git -C <SDL clone> apply <this file>
+
+diff --git a/src/video/switch/SDL_switchkeyboard.c b/src/video/switch/SDL_switchkeyboard.c
+index 1303232..c836993 100644
+--- a/src/video/switch/SDL_switchkeyboard.c
++++ b/src/video/switch/SDL_switchkeyboard.c
+@@ -18,6 +18,8 @@
+      misrepresented as being the original software.
+   3. This notice may not be removed or altered from any source distribution.
+ */
++#include "SDL_internal.h"
++
+ #if SDL_VIDEO_DRIVER_SWITCH
+ 
+ #include <switch.h>
+diff --git a/src/video/switch/SDL_switchmouse.c b/src/video/switch/SDL_switchmouse.c
+index 677dedd..754d1e7 100644
+--- a/src/video/switch/SDL_switchmouse.c
++++ b/src/video/switch/SDL_switchmouse.c
+@@ -18,6 +18,8 @@
+      misrepresented as being the original software.
+   3. This notice may not be removed or altered from any source distribution.
+ */
++#include "SDL_internal.h"
++
+ 
+ #if SDL_VIDEO_DRIVER_SWITCH
+ 
+diff --git a/src/video/switch/SDL_switchswkb.c b/src/video/switch/SDL_switchswkb.c
+index 09bb416..24b86f1 100644
+--- a/src/video/switch/SDL_switchswkb.c
++++ b/src/video/switch/SDL_switchswkb.c
+@@ -55,6 +55,7 @@ static void SWITCH_EnterCb(const char *str, SwkbdDecidedEnterArg *arg)
+     }
+ 
+     kbdShown = false;
++    SDL_SendScreenKeyboardHidden();
+ }
+ 
+ static void SWITCH_CancelCb(void)
+@@ -91,6 +92,7 @@ bool SWITCH_StartTextInput(SDL_VideoDevice *_this, SDL_Window *window, SDL_Prope
+         swkbdInlineUpdate(&kbd, NULL);
+         swkbdInlineAppear(&kbd, &kbdAppearArg);
+         kbdShown = true;
++        SDL_SendScreenKeyboardShown();
+     }
+ 
+     return true;
+@@ -104,6 +106,7 @@ bool SWITCH_StopTextInput(SDL_VideoDevice *_this, SDL_Window *window)
+ 
+     kbdShown = false;
+     current_window = NULL;
++    SDL_SendScreenKeyboardHidden();
+ 
+     return true;
+ }
+diff --git a/src/video/switch/SDL_switchvideo.c b/src/video/switch/SDL_switchvideo.c
+index 8742877..ba55fdb 100644
+--- a/src/video/switch/SDL_switchvideo.c
++++ b/src/video/switch/SDL_switchvideo.c
+@@ -18,6 +18,8 @@
+      misrepresented as being the original software.
+   3. This notice may not be removed or altered from any source distribution.
+ */
++#include "SDL_internal.h"
++
+ 
+ #if SDL_VIDEO_DRIVER_SWITCH
+ 
+@@ -113,7 +115,7 @@ static SDL_VideoDevice *SWITCH_CreateDevice()
+     device->StartTextInput = SWITCH_StartTextInput;
+     device->StopTextInput = SWITCH_StopTextInput;
+     device->HasScreenKeyboardSupport = SWITCH_HasScreenKeyboardSupport;
+-    device->screen_keyboard_shown = SWITCH_IsScreenKeyboardShown;
++    /* SDL 3.4: screen_keyboard_shown is a bool kept by SDL_SendScreenKeyboardShown/Hidden */
+ 
+     device->PumpEvents = SWITCH_PumpEvents;
+ 

@@ -1,0 +1,127 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -20,6 +20,12 @@
+     set(LIBRW_PLATFORM_GL3_REQUIRES_OPENGL OFF)
+     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/nx")
+     include(NXFunctions)
++elseif(NINTENDO_3DS)
++    # The citro3d backend (rw::c3d) lives in the application's tree and is
++    # added to this target by the application; NULL is listed with it so that
++    # the parts of librw that want a device namespace (charset.cpp) stay out.
++    set(LIBRW_PLATFORMS "NULL" "C3D")
++    set(LIBRW_PLATFORM_GL3_REQUIRES_OPENGL OFF)
+ elseif(PS2)
+     set(LIBRW_PLATFORMS "PS2")
+     set(LIBRW_PLATFORM_GL3_REQUIRES_OPENGL OFF)
+diff --git a/src/rwbase.h b/src/rwbase.h
+--- a/src/rwbase.h
++++ b/src/rwbase.h
+@@ -630,6 +630,10 @@
+ 
+ 	PLATFORM_WDGL = 11,	// WarDrum OpenGL
+ 	PLATFORM_GL3  = 12,	// my GL3 implementation
++	// The Nintendo 3DS's PICA200 through citro3d. In every build, so that
++	// every build has the same NUM_PLATFORMS; only an RW_C3D build has the
++	// device (its code is the application's).
++	PLATFORM_C3D  = 13,
+ 
+ 	NUM_PLATFORMS,
+ 
+@@ -703,6 +707,7 @@
+ 	ID_RASTERD3D9    = MAKEPLUGINID(VEND_RASTER, PLATFORM_D3D9),
+ 	ID_RASTERWDGL    = MAKEPLUGINID(VEND_RASTER, PLATFORM_WDGL),
+ 	ID_RASTERGL3     = MAKEPLUGINID(VEND_RASTER, PLATFORM_GL3),
++	ID_RASTERC3D     = MAKEPLUGINID(VEND_RASTER, PLATFORM_C3D),
+ 
+ 	// anything driver/device related (only as allocation tag)
+ 	ID_DRIVER        = MAKEPLUGINID(VEND_DRIVER, 0)
+diff --git a/src/engine.cpp b/src/engine.cpp
+--- a/src/engine.cpp
++++ b/src/engine.cpp
+@@ -30,6 +30,15 @@
+ 
+ namespace rw {
+ 
++#ifdef RW_C3D
++// The citro3d backend is the application's code (RW_C3D adds it to this
++// library); these are the two things the engine needs from it.
++namespace c3d {
++	void registerPlatformPlugins(void);
++	extern Device renderdevice;
++}
++#endif
++
+ Engine *engine;
+ PluginList Engine::s_plglist(sizeof(Engine));
+ Engine::State Engine::state = Dead;
+@@ -236,6 +245,9 @@
+ 	d3d9::registerPlatformPlugins();
+ 	wdgl::registerPlatformPlugins();
+ 	gl3::registerPlatformPlugins();
++#ifdef RW_C3D
++	c3d::registerPlatformPlugins();
++#endif
+ 
+ 	Engine::state = Initialized;
+ 	return 1;
+@@ -286,6 +298,11 @@
+ 		engine->device = gl3::renderdevice;
+ 		break;
+ #endif
++#ifdef RW_C3D
++	case PLATFORM_C3D:
++		engine->device = c3d::renderdevice;
++		break;
++#endif
+ 	default:
+ 		engine->device = null::renderdevice;
+ 		platform = PLATFORM_NULL;
+diff --git a/src/skin.cpp b/src/skin.cpp
+--- a/src/skin.cpp
++++ b/src/skin.cpp
+@@ -20,6 +20,10 @@
+ #include "gl/rwgl3.h"
+ #include "gl/rwgl3plg.h"
+ 
++#ifdef RW_C3D
++namespace rw { namespace c3d { void initSkin(void); } }
++#endif
++
+ #define PLUGIN_ID ID_SKIN
+ 
+ namespace rw {
+@@ -373,6 +377,9 @@
+ 	d3d9::initSkin();
+ 	wdgl::initSkin();
+ 	gl3::initSkin();
++#ifdef RW_C3D
++	c3d::initSkin();
++#endif
+ 
+ 	int32 o;
+ 	o = Geometry::registerPlugin(sizeof(Skin*), ID_SKIN,
+diff --git a/src/matfx.cpp b/src/matfx.cpp
+--- a/src/matfx.cpp
++++ b/src/matfx.cpp
+@@ -21,6 +21,10 @@
+ #include "gl/rwgl3.h"
+ #include "gl/rwgl3plg.h"
+ 
++#ifdef RW_C3D
++namespace rw { namespace c3d { void initMatFX(void); } }
++#endif
++
+ #define PLUGIN_ID ID_MATFX
+ 
+ namespace rw {
+@@ -732,6 +736,9 @@
+ 	d3d9::initMatFX();
+ 	wdgl::initMatFX();
+ 	gl3::initMatFX();
++#ifdef RW_C3D
++	c3d::initMatFX();
++#endif
+ 
+ 	matFXGlobals.atomicOffset =
+ 	Atomic::registerPlugin(sizeof(int32), ID_MATFX,

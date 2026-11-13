@@ -1,4 +1,5 @@
 #include "iMemMgr.h"
+#include "iD0Stats.h"
 #include "iException.h"
 #include "iHost.h"
 #include "xMemMgr.h"
@@ -46,8 +47,23 @@ extern xMemHeap gxHeap[3];
 // a 64-bit build makes every object with a pointer in it larger, and the heap
 // sizes are load-bearing, so the port is not the place to find out by running
 // out. The arena is reserved low either way.
+#ifdef __3DS__
+// The 3DS commits memory when it is allocated, and a New 3DS .3dsx has about
+// 83 MB of heap for everything (docs/3DS.md), so the arena is sized like the
+// console's rather than treedome's: 28 MB of "DRAM" (the GameCube gave the
+// game about 20 MB, and a 32-bit build's objects are the console's size).
+// gxHeap[1] and [2] are based at DRAM's end but grow down (xMemInitHeap, flag
+// 0x100), so the pad past it is a margin, not where they live. Estimates, until
+// a soak run measures the high-water marks; TSSM_ARENA_MB overrides the DRAM size (16 to 64).
+#define IMEM_DRAM_SIZE_DEFAULT 0x1C00000
+#define IMEM_ARENA_PAD 0x200000
+#define IMEM_DRAM_SIZE sDramSize
+#define IMEM_ARENA_SIZE (IMEM_DRAM_SIZE + IMEM_ARENA_PAD)
+static U32 sDramSize = IMEM_DRAM_SIZE_DEFAULT;
+#else
 #define IMEM_DRAM_SIZE 0x4000000
 #define IMEM_ARENA_SIZE (IMEM_DRAM_SIZE * 2)
+#endif
 
 // Element size of the smallest pool: 4 on the console, a pointer on a host.
 #define IMEM_FIXED4_SIZE (sizeof(void*) > 4 ? (U32)sizeof(void*) : 4u)
@@ -192,6 +208,7 @@ void* MemoryManagerMulti::DoAllocate(U32 size, U32 options)
         iExceptionMemCrash("MemoryManagerMulti", size, buffer);
     }
 
+    iD0MemSample();
     return raw;
 }
 
@@ -293,6 +310,24 @@ void iMemInit()
     new (&memoryManager) MemoryManagerMulti;
     tempCurrent = 0;
 
+#ifdef __3DS__
+    const char* arenaEnv = getenv("TSSM_ARENA_MB");
+    if (arenaEnv != NULL && arenaEnv[0] != '\0')
+    {
+        const long mb = strtol(arenaEnv, NULL, 10);
+        if (mb >= 16 && mb <= 64)
+        {
+            sDramSize = (U32)mb << 20;
+        }
+        else
+        {
+            printf("tssm: TSSM_ARENA_MB '%s' is not 16 to 64; using %u\n", arenaEnv,
+                   (unsigned)(IMEM_DRAM_SIZE_DEFAULT >> 20));
+        }
+    }
+    printf("tssm: game arena: %u MB of DRAM + %u KB pad\n", (unsigned)(IMEM_DRAM_SIZE >> 20),
+           (unsigned)(IMEM_ARENA_PAD >> 10));
+#endif
     sArenaSize = IMEM_ARENA_SIZE;
     sArena = iHostReserveLow(sArenaSize);
     if (sArena == NULL)
@@ -312,6 +347,10 @@ void iMemInit()
                 base64);
         exit(-5);
     }
+#ifdef __3DS__
+    // For reading a fault address in Luma3DS's dump.
+    printf("tssm: game arena at %#llx-%#llx\n", base64, base64 + sArenaSize);
+#endif
 
     hiheap_start = (U32)ALIGN_UP(base64, 32);
     hiheap_end = (U32)((base64 + IMEM_DRAM_SIZE) & ~31ULL);
@@ -387,8 +426,19 @@ void* iMemMgrCalloc(size_t numObj, size_t sizeObj, unsigned int hint)
     return memoryManager.Allocate((U32)(numObj * sizeObj), 1);
 }
 
+void iMemMgrD0Usage(U32* prefix, U32* mallocExtent)
+{
+    *prefix = (U32)((U8*)memoryManager.heap.arenaStart - (U8*)(UPtr)hiheap_start);
+    *mallocExtent =
+        (U32)((U8*)memoryManager.heap.arenaEnd - (U8*)memoryManager.heap.GetCurrentEnd());
+}
+
 bool iMemMgrCheckCollisionWithMallocHeap(void* mem, U32 size)
 {
+    // Every xMemAlloc passes through here, so it is where the arena's
+    // high-water mark is cheapest to take.
+    iD0MemSample();
+
     U8 collision =
         (U8*)mem + size >= memoryManager.heap.GetCurrentEnd() && mem < memoryManager.arenaEnd;
     return collision;

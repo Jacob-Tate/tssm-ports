@@ -11,7 +11,6 @@
 // instead and movies are skipped, which is what the port did before any of this.
 
 #include "iFMVDecoder.h"
-#include "iRasterFill.h"
 
 extern "C"
 {
@@ -27,6 +26,7 @@ extern "C"
 // CodeWarrior extensions the game needs, and pulling the MSVC STL in behind
 // that does not compile. Two hand-rolled buffers are less code than the
 // workaround would be, and this file only needs a queue and a byte bucket.
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +84,24 @@ struct iFMVDecoder
 };
 
 #define FMV_VQ_SIZE 16
+
+// FFmpeg's structs are read in place, so this file has to be compiled with the enum size FFmpeg was
+// (the 3DS build: CMakeLists.txt). Its own option table says where sample_rate is; a mismatch moves
+// that and the frames' timestamps (every movie silent and at the wrong speed).
+static bool iLayoutAgrees(AVCodecContext* c)
+{
+    const AVOption* o = av_opt_find(c, "ar", NULL, 0, 0);
+    if (o == NULL || o->offset == (int)offsetof(AVCodecContext, sample_rate))
+    {
+        return true;
+    }
+
+    printf("tssm: movie: FFmpeg's AVCodecContext is laid out differently here (sample_rate at %d, "
+           "FFmpeg's at %d): movies are skipped\n",
+           (int)offsetof(AVCodecContext, sample_rate), o->offset);
+    fflush(stdout);
+    return false;
+}
 
 static void pushVideo(iFMVDecoder* d, AVFrame* f)
 {
@@ -233,7 +251,15 @@ iFMVDecoder* iFMVDecoderOpen(const char* path, iFMVDecoderInfo* info)
     d->vstream = -1;
     d->astream = -1;
 
-    if (avformat_open_input(&d->fmt, path, NULL, NULL) < 0)
+#ifdef __3DS__
+    // FFmpeg reads the SD card's "sdmc:" as the name of a protocol it does
+    // not have; "file:" says the rest is a path.
+    char url[600];
+    snprintf(url, sizeof(url), "file:%s", path);
+#else
+    const char* url = path;
+#endif
+    if (avformat_open_input(&d->fmt, url, NULL, NULL) < 0)
     {
         delete d;
         return NULL;
@@ -275,6 +301,13 @@ iFMVDecoder* iFMVDecoderOpen(const char* path, iFMVDecoderInfo* info)
         return NULL;
     }
     d->vdec = avcodec_alloc_context3(vc);
+    if (d->vdec == NULL || !iLayoutAgrees(d->vdec))
+    {
+        avcodec_free_context(&d->vdec);
+        avformat_close_input(&d->fmt);
+        delete d;
+        return NULL;
+    }
     avcodec_parameters_to_context(d->vdec, vs->codecpar);
     if (avcodec_open2(d->vdec, vc, NULL) < 0)
     {
@@ -304,7 +337,7 @@ iFMVDecoder* iFMVDecoderOpen(const char* path, iFMVDecoderInfo* info)
 
     // The order the raster wants, which sws does for the same price as either
     // one. See iRasterFill.h: an 8888 raster is BGRA on D3D and RGBA on GL3.
-    const AVPixelFormat out = IRASTERFILL_RED == 0 ? AV_PIX_FMT_RGBA : AV_PIX_FMT_BGRA;
+    const AVPixelFormat out = iFMVRasterRed() == 0 ? AV_PIX_FMT_RGBA : AV_PIX_FMT_BGRA;
 
     d->sws = sws_getContext(d->vdec->width, d->vdec->height, d->vdec->pix_fmt, d->vdec->width,
                             d->vdec->height, out, SWS_BILINEAR, NULL, NULL, NULL);
@@ -470,9 +503,12 @@ S32 iFMVDecoderNextFrame(iFMVDecoder* d, const void** pixels, U32* pitch, F32* p
         return FALSE;
     }
 
-    U8* dst[4] = { d->rgb, NULL, NULL, NULL };
-    int dstride[4] = { d->rgb_pitch, 0, 0, 0 };
-    sws_scale(d->sws, f->data, f->linesize, 0, d->vdec->height, dst, dstride);
+    if (pixels != NULL)
+    {
+        U8* dst[4] = { d->rgb, NULL, NULL, NULL };
+        int dstride[4] = { d->rgb_pitch, 0, 0, 0 };
+        sws_scale(d->sws, f->data, f->linesize, 0, d->vdec->height, dst, dstride);
+    }
 
     if (pts != NULL)
     {

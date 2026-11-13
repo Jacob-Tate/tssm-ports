@@ -1,0 +1,32 @@
+; rw::c3d's vertex-shader register map (docs/3DS.md, "The renderer").
+;
+; picasso has no .include, so CMakeLists.txt writes each program's .v.pica as
+; this block followed by the program's .vsh. Every program therefore declares
+; the same uniforms in the same order and sees them in the same c registers:
+; picasso numbers .fvec from c0 in declaration order and puts .constf from c95
+; down. c3dimpl.h's kReg* constants are these numbers; keep the two together.
+.fvec u_mvp[4]        ; c0-c3   object -> clip: tilt * proj * view * world * rebase, rows
+.fvec u_matColor      ; c4      material colour, 0..1
+.fvec u_ambient       ; c5      the ambient lights, summed (scaled by u_surf.x per material)
+.fvec u_surf          ; c6      x surfProps.ambient, y unused, z surfProps.diffuse, w normal scale
+.fvec u_lightDir[4]   ; c7-c10  directional lights in OBJECT space, towards the light
+.fvec u_lightCol[4]   ; c11-c14 their colours (0 in an unused slot)
+.fvec u_uvMat[2]      ; c15-c16 uv' = rows . (u, v, 1, 1), rw::uvTransform's convention
+.fvec u_envMat[2]     ; c17-c18 environment uv = rows . (n, 1), n the object-space normal
+.fvec u_scrMat[2]     ; c19-c20 Im2D: rows . (x, y, 1, 1), pixels -> clip x, y (tilt included)
+.fvec u_bones[60]     ; c21-c80 skin palette, 20 bones x 3 rows (x, y, z of the 4x3, transposed)
+.fvec u_fog           ; c81     fog: x scale, y bias (camera z -> the ramp's u), z Im2D's w factor
+; INV255 is a hair over 1/255: picasso keeps 16 bits of mantissa, and 1/255
+; itself becomes 257/65536 * 2^-8, so 255 * k fell short of 1 and an opaque byte
+; could reach the fragment stage as 254 (an alpha test against 255 failing on a
+; console; Azahar computes in 32 bits). 0.003921628 keeps mantissa 258: 255 * k
+; is just over 1 and saturates.
+.constf k0(0.0, 1.0, 0.003921628, -1.0)
+.alias ZERO   k0.xxxx
+.alias ONE    k0.yyyy
+.alias INV255 k0.zzzz
+.alias MONE   k0.wwww
+.out outpos position
+.out outclr color
+.out outtc0 texcoord0
+.out outtc2 texcoord2 ; the fog ramp's coordinate (texture unit 2)

@@ -49,7 +49,20 @@ namespace
     // Block sizes stay below 4 GB: first-level indices 0..23.
     const int kFlCount = 32 - kFlShift + 1;
 
+#ifdef __SWITCH__
+    // Memory there is real from the moment it is mapped, not when first
+    // touched (iHostSwitch.cpp), so the reservation is what it costs. 64 MB is
+    // five times the measured peak to first gameplay (iLowHeap.h).
+    // TODO(switch): measure the peak over a whole playthrough.
+    const U32 kDefaultMB = 64;
+#elif defined(__3DS__)
+    // Only with TSSM_RWHEAP=1 on the 3DS (a 32-bit build uses the C heap; see
+    // iLowHeapWanted), where memory is committed when allocated: the measured
+    // 12-15 MB peak plus a margin.
+    const U32 kDefaultMB = 20;
+#else
     const U32 kDefaultMB = 256;
+#endif
 
     std::mutex sLock;
 
@@ -523,6 +536,12 @@ size_t iLowHeapPeak()
 {
     std::lock_guard<std::mutex> hold(sLock);
     return sPeak;
+}
+
+void iLowHeapPeakReset()
+{
+    std::lock_guard<std::mutex> hold(sLock);
+    sPeak = sUsed;
 }
 
 void iLowHeapReport(const char* when)

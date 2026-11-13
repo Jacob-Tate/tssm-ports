@@ -1,17 +1,19 @@
-# The SpongeBob SquarePants Movie: PC port
+# The SpongeBob SquarePants Movie: New 3DS port (in progress)
 
-A native Windows version of *The SpongeBob SquarePants Movie* game, built from the
-matching decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
-this repository starts from). The
-game's own decompiled code runs unchanged in behaviour; a new platform layer
-(`src/SB/Core/pc`) replaces the GameCube one, draws through librw (Direct3D 9, Direct3D
-11 or OpenGL 3), and uses SDL 3 for the window, controllers and sound.
+*The SpongeBob SquarePants Movie* game as a homebrew program for the **New 3DS**, built
+from the matching decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork))
+and the PC port (the `pc` branch). It is the PC port's code built with devkitPro for the
+3DS, drawing through citro3d on the top screen, with the settings menu on the bottom
+screen.
 
-- Windows, 64-bit (x64) and 32-bit (x86). The code also has Linux and macOS paths, but
-  they are not tested.
-- Widescreen, any resolution, high frame rates, MSAA, a settings window (F1, or Back +
-  Start on a controller), controller and keyboard bindings, mods, and save import and
-  export with Dolphin and the GameCube.
+- **Still in progress.** It runs the whole game, but it has been played on a console only
+  a little; `docs/3DS.md` ("Known gaps") says what is still unchecked.
+- **New 3DS, New 3DS XL and New 2DS XL only**, running custom firmware (Luma3DS). An
+  original 3DS or 2DS is too slow and has too little memory; the game says so and stops.
+- Two packages from the same program: `tssm.3dsx` for the Homebrew Launcher and
+  `tssm.cia` for the HOME Menu.
+- This branch still builds the Windows version too. It started from an early copy of the
+  Switch port and still carries that copy: for the Switch, use the `switch` branch.
 
 This repository and its branches
 --------------------------------
@@ -23,10 +25,10 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 
 | Branch | What it is for |
 |---|---|
-| `pc` (this one) | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
+| `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
 | `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
 | `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
-| `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
+| `3ds` (this one) | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
 | `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
 | `coop-android` | The co-op app for Android, a second app beside the normal one. Built on `android`. |
 | `coop-switch` | The co-op Switch program, `tssm-coop.nro`. Built on `switch`. |
@@ -36,58 +38,81 @@ Every branch builds from source; you bring your own game files.
 You need your own copy of the game
 ----------------------------------
 
-This repository contains **no game data**. The port reads the files of the **Xbox**
-release of *The SpongeBob SquarePants Movie*, so you need your own copy of that disc and
-its files copied off it (about 1 GB): the folder that directly holds `boot.HIP`,
-`font.HIP` and `FMV\`. Never put those files in the repository.
+This repository contains **no game data**, and neither does the program. It reads the
+files of the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own
+copy of that disc and its files copied off it (about 1 GB). Never put those files in the
+repository.
 
-Building on Windows
--------------------
+Building
+--------
 
-You need:
+Everything but the two `.cia` tools comes from devkitPro. Build in devkitPro's MSYS2 shell
+on Windows, or any shell with `DEVKITPRO` set on Linux or macOS.
 
-- Visual Studio 2022 or its Build Tools, with the "Desktop development with C++" workload
-  and a Windows SDK
-- LLVM (`clang++`), CMake 3.16 or newer, Ninja, Python 3 and git
-- optional, for the game's movies: FFmpeg from vcpkg,
-  `vcpkg install ffmpeg[core,avcodec,avformat,swresample,swscale]:x64-windows`
-  (and `:x86-windows` for a 32-bit build). Without it the movies are skipped.
+1. devkitPro with the 3DS packages: `pacman -S 3ds-dev 3ds-cmake 3ds-pkg-config`
+2. The source and its submodules:
 
-Then, in a normal command prompt:
+       git clone --branch 3ds <this repository's address> tssm
+       cd tssm
+       git submodule update --init --depth 1
 
-    git clone --branch pc <this repository's address> tssm
-    cd tssm
-    git submodule update --init --depth 1
-    build-release.bat
+3. SDL 3 for the 3DS, from the `third_party/SDL` submodule:
 
-`build-release.bat` finds Visual Studio by itself, and LLVM and CMake in their default
-install folders. It puts `tssm.exe` and the DLLs it needs in `bin\`.
-`build-release.bat GL3 x86` builds one renderer, 32-bit; `build-debug.bat` makes a debug
-build. `src/SB/Core/pc/README.md` lists the CMake options and the rest.
+       sh tools/3ds/build_sdl.sh third_party/SDL <sdl build folder> <prefix>
+
+4. Optional, for the movies: FFmpeg from its own source (LGPL-only settings):
+
+       sh tools/3ds/build_ffmpeg.sh <ffmpeg source> <work folder> <prefix>
+
+5. The port:
+
+       sh tools/3ds/build_port.sh <build folder> <prefix>
+
+   This makes `<build folder>/tssm.3dsx` and `tssm.elf` beside it (crash reports refer to
+   it). With makerom and bannertool on the `PATH` (or in the folder `TSSM_CTR_TOOLS`
+   names) it also makes `tssm.cia`. Add `-DTSSM_PYTHON=<python 3>` so the HOME Menu shows
+   the whole name (devkitPro's shell has no Python of its own). Pass it on the first run
+   (or delete the build folder first): later runs do not configure again.
+6. Optional: the `.cia`'s HOME Menu banner is a plain picture of the port's own. To have
+   the Patty Wagon moving there instead, `tools/3ds/banner_from_game_files.py` makes a
+   banner from your own game files and `-DTSSM_3DS_BANNER=<its banner.bnr>` builds it in
+   (`docs/3DS.md`, "An animated HOME Menu banner from your own game files"). It is made
+   from your copy of the game: keep that banner and that `.cia` to yourself, and keep the
+   build folder outside this repository's folder (or under its `build/`). Likewise
+   `tools/3ds/icon_from_game_files.py` makes the icon of both packages from your game
+   files (the title image's life ring, or a Krabby Patty with `--image save`) and
+   `-DTSSM_3DS_ICON=<its folder>` builds it in (`docs/3DS.md`, "An icon from your own game
+   files"); the same goes for keeping it to yourself.
+
+None of the folders may contain spaces (FFmpeg's configure). `docs/3DS.md` explains each
+step and which versions were tested.
 
 Playing
 -------
 
-1. Start `bin\tssm.exe`. On the first run it writes `config.ini` beside itself.
-2. Point the game at your Xbox files: set `path` under `[assets]` in `config.ini` (or the
-   `TSSM_ASSETS` environment variable) to the folder that holds `boot.HIP`.
-3. F1, or Back + Start on a controller, opens the settings window.
-
-Saves go to `%APPDATA%\tssm\saves`, and the log of the last run to
-`%APPDATA%\tssm\last_run.log`.
+1. Copy your Xbox game files into `/3ds/tssm/files/` on the SD card: the files at the top
+   of the disc (`boot.HIP`, `font.HIP`, `plat.HIP`, `FMV/` and the level folders), not the
+   folder above them and not a disc image.
+2. Install one or both packages:
+   - **.3dsx:** copy `tssm.3dsx` to `/3ds/tssm/tssm.3dsx` and start it from the Homebrew
+     Launcher.
+   - **.cia:** copy `tssm.cia` anywhere on the SD card, open FBI (or another CIA
+     installer), find the file and choose *Install CIA*. The game is then on the HOME
+     Menu.
+3. For sound, dump the console's DSP firmware once: Rosalina menu (L + Down + SELECT),
+   Miscellaneous options, Dump DSP firmware.
+4. START + SELECT opens the settings menu on the bottom screen. Settings, saves and the
+   log are written into `/3ds/tssm/`.
 
 More documentation:
 
 | File | What |
 |---|---|
-| `docs/CONTROLS.md` | the controls, and how each was worked out |
-| `docs/GUI.md` | the settings window and the launcher |
-| `docs/SAVES.md` | save files, and moving them to and from Dolphin or a GameCube |
-| `docs/MODDING.md` | mods: replacing textures, sounds, text and whole assets |
-| `docs/RENDERING.md`, `docs/WIDESCREEN.md` | how the console's screen effects and widescreen are done |
-| `docs/ICON.md` | using your own picture as the program's icon |
-| `src/SB/Core/pc/README.md` | building in detail, settings, switches and test runs |
-| `src/SB/Core/pc/PORTING.md` | where every file of the platform layer came from, and what is still stubbed |
+| `docs/3DS.md` | installing, playing, controls, the settings menu, building, developer tools, how the 3DS layer works, known gaps |
+| `docs/CONTROLS.md` | the controls |
+| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube |
+| `docs/MODDING.md` | mods |
+| `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |
 
 The GameCube build still works here
 -----------------------------------
@@ -154,3 +179,6 @@ needed to relink it with another FFmpeg).
 | Vulkan-Headers (Vulkan renderer only) | git submodule | Apache 2.0 / MIT |
 | FFmpeg (optional, for the movies) | not in the repository: you install or build it | LGPL 2.1 or later |
 | treedome (code adapted into `src/SB/Core/pc`) | copied, see `src/SB/Core/pc/PORTING.md` | CC0 1.0 |
+| libctru, citro3d | devkitPro's 3DS packages, linked statically; notes in `dist/3ds/licenses` | zlib |
+| newlib (the C library), libgcc, libstdc++ | devkitARM, linked statically | newlib's permissive licences; GPL 3 with the GCC Runtime Library Exception |
+| FFmpeg on the 3DS (optional) | built by `tools/3ds/build_ffmpeg.sh` and linked statically | LGPL 2.1 or later |

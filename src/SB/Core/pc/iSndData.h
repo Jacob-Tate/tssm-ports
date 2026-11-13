@@ -47,6 +47,14 @@ void iSndDataReset();
 // For the log: how much is cached and how much of it is spoken for.
 void iSndDataStats(U32* entries, U32* bytes, U32* pinned);
 
+// The most decoded PCM the cache has held since the last reset, in bytes; with
+// reset, starts the next period from what it holds now (iD0Stats).
+U32 iSndDataPeak(bool reset);
+
+// The decoded size of every distinct sound used since the last reset: what a
+// cache would have to hold to never decode one twice in that period.
+U32 iSndDataWorkingSet(bool reset);
+
 // TSSM_SND_DUMP names a folder: each sound decoded is also written there as
 // <asset id>.wav, once. Diagnostics only; NULL when it is not set.
 const char* iSndDataDumpDir();

@@ -85,9 +85,14 @@ namespace
 
     double CpuNs()
     {
+#ifdef CLOCK_THREAD_CPUTIME_ID
         struct timespec ts;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
         return ts.tv_sec * 1.0e9 + ts.tv_nsec;
+#else
+        // The 3DS's newlib has no thread clock: the wall clock stands in.
+        return WallNs();
+#endif
     }
 #endif
 

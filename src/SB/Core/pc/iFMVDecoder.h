@@ -57,7 +57,7 @@ void iFMVDecoderClose(iFMVDecoder* dec);
 //
 // `pitch` is the stride in bytes, which is NOT width*4 in general. Returns
 // FALSE at the end of the movie, and the pixels belong to the decoder until the
-// next call.
+// next call. With `pixels` NULL the frame is skipped: decoded, not converted.
 S32 iFMVDecoderNextFrame(iFMVDecoder* dec, const void** pixels, U32* pitch, F32* pts);
 
 // Decoded audio, interleaved 16-bit at the rate Open reported, written into the
@@ -73,5 +73,10 @@ U32 iFMVDecoderReadAudio(iFMVDecoder* dec, S16* out, U32 frames);
 // is no decoder, which is what makes a build without one obvious in a log
 // rather than a silent skip.
 const char* iFMVDecoderName();
+
+// For a decoder: which byte of a pixel red goes in (iRasterFill.h's IRASTERFILL_RED), asked of
+// iFMV.cpp so that the decoder includes no game header (the 3DS compiles it with FFmpeg's enum
+// size).
+S32 iFMVRasterRed();
 
 #endif

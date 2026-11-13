@@ -128,7 +128,8 @@ static void drawInto(iScreenPassTarget* t, RwRaster* src, RwBlendFunction srcBle
 void iHDRGlowRender(RwCamera* cam, F32 overbrighten, S32 downsamples, S32 downSrc, S32 downDst,
                     S32 src, S32 dst)
 {
-    if (!sEnabled || sFailed || cam == NULL || !iScreenPassReady())
+    if (!sEnabled || sFailed || cam == NULL || !iScreenPassReady() ||
+        !iScreenPassOn(ISCREENPASS_GLOW))
     {
         return;
     }

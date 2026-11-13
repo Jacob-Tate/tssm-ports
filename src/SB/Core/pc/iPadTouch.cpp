@@ -3,6 +3,7 @@
 #include "iCameraLook.h"
 #include "iConfig.h"
 #include "iPadHost.h"
+#include "iPadTokens.h"
 #include "iTouchOverlay.h"
 #include "xPad.h"
 
@@ -80,6 +81,44 @@ namespace
     };
 
     const S32 kButtonCount = (S32)(sizeof(kButtons) / sizeof(kButtons[0]));
+
+    // On the Switch (iPadSwitchLabels) a button is named by the letter printed
+    // on the Switch button in its place, on a neutral grey: the Xbox's A is
+    // B, its X is Y, the triggers ZL and ZR, black R, Back - and Start +.
+    void SwitchLabel(const Button& b, iTouchOverlayShape& s)
+    {
+        struct Name
+        {
+            U32 bits;
+            char label;
+            char label2;
+            bool face;
+        };
+        static const Name kNames[] = {
+            { XPAD_BUTTON_X, 'B', 0, true },
+            { XPAD_BUTTON_TRIANGLE, 'A', 0, true },
+            { XPAD_BUTTON_O, 'Y', 0, true },
+            { XPAD_BUTTON_SQUARE, 'X', 0, true },
+            { XPAD_BUTTON_L1, 'Z', 'L', false },
+            { XPAD_BUTTON_R1, 'Z', 'R', false },
+            { XPAD_BUTTON_SELECT | XPAD_BUTTON_Z, '-', 0, false },
+            { XPAD_BUTTON_R2 | XPAD_BUTTON_Z, 'R', 0, false },
+            { XPAD_BUTTON_START, '+', 0, false },
+        };
+        for (U32 i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
+        {
+            if (kNames[i].bits == b.bits)
+            {
+                s.label = kNames[i].label;
+                s.label2 = kNames[i].label2;
+                if (kNames[i].face)
+                {
+                    s.r = s.g = s.b = 150;
+                }
+                return;
+            }
+        }
+    }
 
     // The stick, as fractions of the window's height.
     const F32 kStickRadius = 0.13f;
@@ -372,6 +411,10 @@ namespace
                 s.b = b.b;
                 s.a = held ? 200 : 90;
                 s.label = b.label;
+                if (iPadSwitchLabels())
+                {
+                    SwitchLabel(b, s);
+                }
             }
         }
 

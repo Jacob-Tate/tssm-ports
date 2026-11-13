@@ -26,6 +26,10 @@
 //   TSSM_TEST_WARP=<list>,      debug events at given frames, through the same
 //   TSSM_TEST_PLACE=<list>,     hook; see iTestEvents.h.
 //   TSSM_TEST_CAMLOG=<n>
+//   TSSM_FIXED_STEP=<fps>       every presented frame is exactly 1/fps of game
+//                               time, however long it took (iTimeFixedStepFrame),
+//                               so frame N shows the same moment on a slow
+//                               machine or an emulator as on a fast one.
 //
 // A "frame" is one RwCameraShowRaster: everything the game, the boot screens
 // and the movie player present counts, in the order they present it. The
@@ -42,5 +46,12 @@ void iCaptureInit();
 
 // Frames presented so far.
 S32 iCaptureFrameCount();
+
+// For the 3DS spike (iSpike.h), which plays TSSM_INPUT's script once per level:
+// the script starts again from its frame 1 on the next frame, and an override
+// holds the given buttons (XPAD_BUTTON_*) instead of the script's until it is
+// turned off (or the script restarts).
+void iCaptureScriptRestart();
+void iCaptureScriptOverride(S32 on, U32 buttons);
 
 #endif

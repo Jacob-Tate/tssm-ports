@@ -184,7 +184,14 @@ namespace
     bool DecodeFFmpeg(const char* path, iModPcm* out, std::string* error)
     {
         AVFormatContext* fmt = NULL;
-        if (avformat_open_input(&fmt, path, NULL, NULL) < 0)
+#ifdef __3DS__
+        // "sdmc:" would be taken for a protocol (iFMVDecoderFFmpeg.cpp).
+        char url[600];
+        snprintf(url, sizeof(url), "file:%s", path);
+#else
+        const char* url = path;
+#endif
+        if (avformat_open_input(&fmt, url, NULL, NULL) < 0)
         {
             *error = "FFmpeg cannot open it";
             return false;

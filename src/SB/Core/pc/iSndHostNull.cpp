@@ -344,6 +344,16 @@ void iSndHostFeedEnd(S32 voice)
     }
 }
 
+bool iSndHostMixStatsTake(iSndHostMixStats* out, bool)
+{
+    out->calls = 0;
+    out->totalNs = 0;
+    out->maxNs = 0;
+    out->frames = 0;
+    out->rate = 0;
+    return false;
+}
+
 const char* iSndHostName()
 {
     return "null (silent, but keeps time)";

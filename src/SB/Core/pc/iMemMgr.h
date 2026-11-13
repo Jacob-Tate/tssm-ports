@@ -15,4 +15,9 @@ void iMemMgrEnableRenderWareMemoryHack(bool hackEnabled);
 bool iMemMgrCheckCollisionWithMallocHeap(void* mem, U32 size);
 S32 iMemMgrGetMinFreeSpace();
 
+// PC-only (iD0Stats): bytes of the arena before DRAM.addr (the resource
+// arena and the fixed pools), and how far the general heap -- the "malloc
+// pool" growing down from the top of DRAM -- reaches below its end now.
+void iMemMgrD0Usage(U32* prefix, U32* mallocExtent);
+
 #endif

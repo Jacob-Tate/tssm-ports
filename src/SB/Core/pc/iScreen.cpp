@@ -320,6 +320,8 @@ const char* iScreenBackendName(iScreenBackend backend)
         return "vulkan";
     case iSCREENBACKEND_NULL:
         return "null";
+    case iSCREENBACKEND_C3D:
+        return "c3d";
     default:
         return "auto";
     }

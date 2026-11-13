@@ -1,0 +1,161 @@
+# The New 3DS port as an installed title: tssm.cia, made from tssm.elf by
+# CMakeLists.txt with makerom (docs/3DS.md, "The .cia", says why each value).
+
+BasicInfo:
+  Title                   : "TSSM"
+  ProductCode             : "CTR-H-TSSM"
+  # makerom's built-in community splash, in the ExeFS (-exefslogo), as in
+  # FBI's CIA. The HOME Menu stops with an error when a title has none.
+  Logo                    : Homebrew
+
+RomFs:
+  RootPath                : "$(ROMFS)"
+
+TitleInfo:
+  Category                : Application
+  # 000400000F755300: in the homebrew range, away from the known ones. Kept for
+  # every build, so a new one installs over the old.
+  UniqueId                : 0xF7553
+
+Option:
+  UseOnSD                 : true
+  FreeProductCode         : true
+  MediaFootPadding        : false
+  EnableCrypt             : false
+  EnableCompress          : true
+
+AccessControlInfo:
+  CoreVersion                   : 2
+  DescVersion                   : 2
+  ReleaseKernelMajor            : "02"
+  ReleaseKernelMinor            : "44"
+  # 2.44 and up puts the linear heap at 0x30000000, as for the .3dsx.
+  UseExtSaveData                : false
+  FileSystemAccess:
+   - DirectSdmc
+   - DirectSdmcWrite
+  MemoryType                    : Application
+  ResourceLimitCategory         : Application
+  # Old 3DS: only long enough for the "New 3DS only" screen.
+  SystemMode                    : 64MB
+  # New 3DS: the 124 MB mode a .3dsx gets from the Homebrew Launcher.
+  SystemModeExt                 : 124MB
+  CpuSpeed                      : 804MHz
+  EnableL2Cache                 : true
+  CanAccessCore2                : true
+  IdealProcessor                : 0
+  AffinityMask                  : 1
+  Priority                      : 16
+  # The system core's time SDL's audio thread asks for (30%) fits in it.
+  MaxCpu                        : 0x9E
+  HandleTableSize               : 0x200
+  DisableDebug                  : false
+  EnableForceDebug              : false
+  CanWriteSharedPage            : true
+  CanUsePrivilegedPriority      : false
+  CanUseNonAlphabetAndNumber    : true
+  PermitMainFunctionArgument    : true
+  CanShareDeviceMemory          : true
+  RunnableOnSleep               : false
+  SpecialMemoryArrange          : true
+  IORegisterMapping:
+   - 1ff00000-1ff7ffff
+  MemoryMapping:
+   - 1f000000-1f5fffff:r
+  SystemCallAccess:
+    ControlMemory: 1
+    QueryMemory: 2
+    ExitProcess: 3
+    GetProcessAffinityMask: 4
+    SetProcessAffinityMask: 5
+    GetProcessIdealProcessor: 6
+    SetProcessIdealProcessor: 7
+    CreateThread: 8
+    ExitThread: 9
+    SleepThread: 10
+    GetThreadPriority: 11
+    SetThreadPriority: 12
+    GetThreadAffinityMask: 13
+    SetThreadAffinityMask: 14
+    GetThreadIdealProcessor: 15
+    SetThreadIdealProcessor: 16
+    GetCurrentProcessorNumber: 17
+    Run: 18
+    CreateMutex: 19
+    ReleaseMutex: 20
+    CreateSemaphore: 21
+    ReleaseSemaphore: 22
+    CreateEvent: 23
+    SignalEvent: 24
+    ClearEvent: 25
+    CreateTimer: 26
+    SetTimer: 27
+    CancelTimer: 28
+    ClearTimer: 29
+    CreateMemoryBlock: 30
+    MapMemoryBlock: 31
+    UnmapMemoryBlock: 32
+    CreateAddressArbiter: 33
+    ArbitrateAddress: 34
+    CloseHandle: 35
+    WaitSynchronization1: 36
+    WaitSynchronizationN: 37
+    SignalAndWait: 38
+    DuplicateHandle: 39
+    GetSystemTick: 40
+    GetHandleInfo: 41
+    GetSystemInfo: 42
+    GetProcessInfo: 43
+    GetThreadInfo: 44
+    ConnectToPort: 45
+    SendSyncRequest1: 46
+    SendSyncRequest2: 47
+    SendSyncRequest3: 48
+    SendSyncRequest4: 49
+    SendSyncRequest: 50
+    OpenProcess: 51
+    OpenThread: 52
+    GetProcessId: 53
+    GetProcessIdOfThread: 54
+    GetThreadId: 55
+    GetResourceLimit: 56
+    GetResourceLimitLimitValues: 57
+    GetResourceLimitCurrentValues: 58
+    GetThreadContext: 59
+    Break: 60
+    OutputDebugString: 61
+    ControlPerformanceCounter: 62
+    InvalidateProcessDataCache: 82
+    StoreProcessDataCache: 83
+    FlushProcessDataCache: 84
+    GetProcessList: 101
+    GetThreadList: 102
+  ServiceAccessControl:
+   - APT:U
+   - fs:USER
+   - hid:USER
+   - ir:rst
+   - gsp::Gpu
+   - dsp::DSP
+   - soc:U
+   - cfg:u
+   - ptm:sysm
+
+SystemControlInfo:
+  # Saves are files on the SD card, as for the .3dsx.
+  SaveDataSize            : 0KB
+  RemasterVersion         : 0
+  # Only the start-up's (libctru moves the main thread to a 1 MB stack); 12 KB
+  # leaves the heap as big as the .3dsx's.
+  StackSize               : 0x3000
+  Dependency:
+    ac: 0x0004013000002402
+    am: 0x0004013000001502
+    cfg: 0x0004013000001702
+    dsp: 0x0004013000001a02
+    gsp: 0x0004013000001c02
+    hid: 0x0004013000001d02
+    ir: 0x0004013000003302
+    mcu: 0x0004013000001f02
+    ptm: 0x0004013000002202
+    socket: 0x0004013000002e02

@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(tssm_sdltest C)
+find_package(SDL3 CONFIG REQUIRED)
+add_executable(sdltest main.c)
+target_link_libraries(sdltest PRIVATE SDL3::SDL3)
+nx_generate_nacp(sdltest.nacp NAME "TSSM SDL3 test" AUTHOR "TSSM port" VERSION "0.0.1")
+nx_create_nro(sdltest NACP sdltest.nacp)

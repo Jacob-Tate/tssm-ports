@@ -51,6 +51,9 @@ void iLowHeapFree(void* mem);
 size_t iLowHeapUsed();
 size_t iLowHeapPeak();
 
+// Starts the peak again from what is in use now (iD0Stats, per scene).
+void iLowHeapPeakReset();
+
 // One line to stdout: size, used, peak, the base address.
 void iLowHeapReport(const char* when);
 

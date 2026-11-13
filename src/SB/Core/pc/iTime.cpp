@@ -7,6 +7,7 @@
 
 #include <types.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 static iTime sStartupTime;
@@ -18,14 +19,76 @@ static U64 sSuspendedNs;
 static U64 sSuspendStartNs;
 static bool sSuspended;
 
+// iTimeFrameAtLeast: time added to the clock, and where the last frame ended.
+static U64 sSkippedNs;
+static U64 sFrameEndNs;
+static bool sFrameEndSet;
+
+// TSSM_FIXED_STEP=<fps> (iTimeFixedStepFrame): the clock at the last frame.
+// Between frames it holds still, however long a frame takes (a level load can
+// take seconds on a slow machine), until it has been read kStepSpinReads times:
+// then something is waiting on it without presenting (the legal screen waits
+// 5 s that way), and it runs with the host's from there. Reads from every
+// thread count, without atomics: a lost count only delays that by a read.
+static U64 sStepNs;
+static bool sStepChecked;
+static bool sStepOn;
+static U64 sStepBaseNs;
+static U32 sStepReads;
+static bool sStepRunning;
+static U64 sStepRunFromNs;
+static const U32 kStepSpinReads = 20000;
+
 // A monotonic clock, not the wall clock: retail reads the GameCube timebase,
 // which no user action can move. Wall-clock jumps (NTP, DST, the user editing
 // the clock) would otherwise show up as a single enormous frame delta. Which
 // clock that is on this host is iHost's problem.
-static iTime iTicksNow()
+static U64 iClockNs()
 {
     U64 now = sSuspended ? sSuspendStartNs : iHostMonotonicNs();
-    return (iTime)((now - sSuspendedNs) / (1000000000ULL / ITIME_TICKS_PER_SECOND));
+    return now - sSuspendedNs + sSkippedNs;
+}
+
+static iTime iTicksNow()
+{
+    U64 t = iClockNs();
+    if (sStepOn)
+    {
+        if (!sStepRunning && ++sStepReads > kStepSpinReads)
+        {
+            sStepRunning = true;
+            sStepRunFromNs = t;
+        }
+        t = sStepBaseNs + (sStepRunning ? t - sStepRunFromNs : 0);
+    }
+    return (iTime)(t / (1000000000ULL / ITIME_TICKS_PER_SECOND));
+}
+
+void iTimeFixedStepFrame()
+{
+    if (!sStepChecked)
+    {
+        sStepChecked = true;
+        const char* e = getenv("TSSM_FIXED_STEP");
+        const int fps = e != NULL ? atoi(e) : 0;
+        sStepNs = fps > 0 ? 1000000000ULL / (U64)fps : 0;
+    }
+    if (sStepNs == 0)
+    {
+        return;
+    }
+    const U64 real = iClockNs();
+    if (!sStepOn)
+    {
+        sStepOn = true;
+        sStepBaseNs = real;
+    }
+    else
+    {
+        sStepBaseNs += sStepNs + (sStepRunning ? real - sStepRunFromNs : 0);
+    }
+    sStepReads = 0;
+    sStepRunning = false;
 }
 
 void iTimeSuspend()
@@ -44,6 +107,22 @@ void iTimeResume()
         sSuspendedNs += iHostMonotonicNs() - sSuspendStartNs;
         sSuspended = false;
     }
+}
+
+void iTimeFrameAtLeast(U64 periodNs)
+{
+    if (sSuspended)
+    {
+        return;
+    }
+    U64 now = iHostMonotonicNs() - sSuspendedNs + sSkippedNs;
+    if (sFrameEndSet && now < sFrameEndNs + periodNs)
+    {
+        sSkippedNs += sFrameEndNs + periodNs - now;
+        now = sFrameEndNs + periodNs;
+    }
+    sFrameEndNs = now;
+    sFrameEndSet = true;
 }
 
 void iTimeInit()

@@ -22,6 +22,7 @@
 #include "iFMVAudio.h"
 #include "iAudioSDL.h"
 #include "iAudioSDLTest.h"
+#include "iSndMeter.h"
 
 #include <SDL3/SDL.h>
 
@@ -116,6 +117,17 @@ namespace
         return (U32)queued / (sChannels * (U32)sizeof(S16));
     }
 
+    // TSSM_SND_METER: what the movie's device mixed, on SDL's audio thread.
+    void SDLCALL MeterPostmix(void* userdata, const SDL_AudioSpec* spec, float* buffer, int buflen)
+    {
+        (void)userdata;
+        if (spec != NULL && spec->channels > 0)
+        {
+            U32 frames = (U32)buflen / ((U32)sizeof(float) * (U32)spec->channels);
+            iSndMeterF32(iSNDMETER_MOVIE_OUT, buffer, frames, (U32)spec->channels);
+        }
+    }
+
     // Everything SDL holds for the movie, the subsystem reference included.
     // TSSM: the format stays, for opening again.
     void Drop()
@@ -182,6 +194,11 @@ namespace
         {
             Drop();
             return false;
+        }
+
+        if (iSndMeterOn())
+        {
+            SDL_SetAudioPostmixCallback(sDevice, MeterPostmix, NULL);
         }
 
         // Both ends of the stream are the movie's format; binding it to the
@@ -360,6 +377,9 @@ U32 iFMVAudioWrite(const S16* frames, U32 num_frames)
     const U32 put = PutFrames(frames, take);
 
     sPutBytes += (Uint64)put * sChannels * sizeof(S16);
+
+    // The frames handed over, as they were before the movie volume.
+    iSndMeterS16(iSNDMETER_MOVIE, frames, put, sChannels);
 
     return put;
 }

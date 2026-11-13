@@ -13,6 +13,7 @@
 // The folder gets the test's config.ini (default: the system temp folder).
 // Exit status 0 when every check passes.
 
+#include "iConfig.h"
 #include "iPad.h"
 #include "iPadBind.h"
 #include "iPadControls.h"
@@ -21,6 +22,7 @@
 #include "iPadLayout.h"
 #include "iPadPrompts.h"
 #include "iPadSettings.h"
+#include "iPadStick.h"
 #include "iPadTest.h"
 #include "iPadTokens.h"
 #include "xPad.h"
@@ -332,6 +334,38 @@ static void TestTables()
         Check(!iPadPromptsPatchVerb(&len, tight, sizeof(tight), true) && strcmp(tight, "pull") == 0,
               "no room for 'press': left alone");
     }
+
+    {
+        // The Switch's names in a sentence, there and back.
+        char title[24] = "Press the START button";
+        U32 len = 22;
+        Check(iPadPromptsPatchWords(&len, title, sizeof(title), "the START button",
+                                    "the + button") &&
+                  strcmp(title, "Press the + button") == 0 && len == 18,
+              "Switch: 'START' becomes '+'");
+        Check(!iPadPromptsPatchWords(&len, title, sizeof(title), "the START button",
+                                     "the + button"),
+              "already '+': nothing to do");
+        Check(iPadPromptsPatchWords(&len, title, sizeof(title), "the + button",
+                                    "the START button") &&
+                  strcmp(title, "Press the START button") == 0 && len == 22,
+              "back to 'START'");
+        char tight[8] = "a + b";
+        len = 5;
+        Check(!iPadPromptsPatchWords(&len, tight, sizeof(tight), "+", "START") &&
+                  strcmp(tight, "a + b") == 0,
+              "no room for the longer word: left alone");
+    }
+
+    // The Switch's names for the game's (Xbox-named) buttons, by position.
+    CheckStr(iPadSwitchRowLabel("a"), "B", "Switch: the Xbox's A is the button printed B");
+    CheckStr(iPadSwitchRowLabel("b"), "A", "Switch: the Xbox's B is the button printed A");
+    CheckStr(iPadSwitchRowLabel("x"), "Y", "Switch: the Xbox's X is the button printed Y");
+    CheckStr(iPadSwitchRowLabel("y"), "X", "Switch: the Xbox's Y is the button printed X");
+    CheckStr(iPadSwitchRowLabel("rt"), "ZR", "Switch: RT is ZR");
+    CheckStr(iPadSwitchRowLabel("start"), "+", "Switch: Start is +");
+    CheckStr(iPadSwitchRowLabel("back"), "-", "Switch: Back is -");
+    CheckStr(iPadSwitchRowLabel("up"), NULL, "Switch: the d-pad rows are not renamed");
 
     CheckBits(iPadPromptsTextureBits("pad_button3"), XPAD_BUTTON_TRIANGLE, "pad_button3 is B");
     CheckBits(iPadPromptsTextureBits("pad_button4"), XPAD_BUTTON_O, "pad_button4 is X");
@@ -666,6 +700,153 @@ static void TestOtherPads()
     }
 }
 
+// The New 3DS as SDL's 3DS driver reports it: libctru's key bits as joystick
+// buttons (A 0, B 1, SELECT 2, START 3, right 4, left 5, up 6, down 7, R 8,
+// L 9, X 10, Y 11, ZL 14, ZR 15), the Circle Pad on axes 0-1 and the C-Stick
+// on 2-3, laid out by SDL's own mapping for it (SDL_gamepad_db.h) under this
+// virtual joystick's GUID.
+static void TestN3DS()
+{
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+    desc.naxes = 4;
+    desc.nbuttons = 23;
+    desc.name = "Nintendo 3DS (virtual)";
+
+    Pad pad;
+    pad.id = SDL_AttachVirtualJoystick(&desc);
+    pad.joy = (pad.id != 0) ? SDL_OpenJoystick(pad.id) : NULL;
+    if (pad.joy == NULL)
+    {
+        Check(false, "attach a virtual 3DS");
+        return;
+    }
+
+    // Mappings never carry the name CRC in their GUID.
+    SDL_GUID guid = SDL_GetJoystickGUIDForID(pad.id);
+    guid.data[2] = 0;
+    guid.data[3] = 0;
+    char gs[64];
+    SDL_GUIDToString(guid, gs, sizeof(gs));
+    char mapping[512];
+    snprintf(mapping, sizeof(mapping),
+             "%s,Nintendo 3DS,a:b1,b:b0,back:b2,dpdown:b7,dpleft:b5,dpright:b4,dpup:b6,"
+             "leftshoulder:b9,lefttrigger:b14,leftx:a0,lefty:a1,rightshoulder:b8,"
+             "righttrigger:b15,rightx:a2,righty:a3,start:b3,x:b11,y:b10,"
+             "hint:!SDL_GAMECONTROLLER_USE_BUTTON_LABELS:=1,",
+             gs);
+    Check(SDL_AddGamepadMapping(mapping) >= 0, "SDL takes the 3DS mapping");
+
+    iConfigSet("input.preset", "3ds");
+    iPadHostReloadBindings();
+    Frame();
+    Frame();
+    CheckStr(iPadBindActivePreset(), "3ds", "preset 3ds");
+    CheckInt(iPadLayoutActive(), IPAD_LAYOUT_XBOX, "3ds: the xbox move layout");
+
+    struct Key
+    {
+        S32 bit;
+        U32 want;
+        const char* what;
+    };
+    // By position: the bottom button does the Xbox's A, and so on round.
+    static const Key kKeys[] = {
+        { 1, XPAD_BUTTON_X, "3DS B (bottom) = the Xbox's A: jump, accept" },
+        { 0, XPAD_BUTTON_TRIANGLE, "3DS A (right) = the Xbox's B: SpongeBowl, back" },
+        { 11, XPAD_BUTTON_O, "3DS Y (left) = the Xbox's X: Karate Spin" },
+        { 10, XPAD_BUTTON_SQUARE, "3DS X (top) = the Xbox's Y: Bash" },
+        { 14, XPAD_BUTTON_L1, "3DS ZL = LT: camera" },
+        { 15, XPAD_BUTTON_R1, "3DS ZR = RT: talk, throw, Sonic Wave" },
+        { 9, XPAD_BUTTON_L2, "3DS L = white" },
+        { 8, XPAD_BUTTON_R2 | XPAD_BUTTON_Z, "3DS R = black" },
+        { 2, XPAD_BUTTON_SELECT | XPAD_BUTTON_Z, "3DS SELECT = Back: upgrade window" },
+        { 3, XPAD_BUTTON_START, "3DS START = Start: pause" },
+        { 6, XPAD_BUTTON_UP, "3DS d-pad up" },
+        { 7, XPAD_BUTTON_DOWN, "3DS d-pad down" },
+        { 5, XPAD_BUTTON_LEFT, "3DS d-pad left" },
+        { 4, XPAD_BUTTON_RIGHT, "3DS d-pad right" },
+        { 20, 0, "3DS touch screen = nothing" },
+    };
+    for (U32 i = 0; i < sizeof(kKeys) / sizeof(kKeys[0]); i++)
+    {
+        SDL_SetJoystickVirtualButton(pad.joy, kKeys[i].bit, true);
+        U32 on = Frame().on;
+        SDL_SetJoystickVirtualButton(pad.joy, kKeys[i].bit, false);
+        Frame();
+        CheckBits(on, kKeys[i].want, kKeys[i].what);
+    }
+
+    // The Circle Pad as SDL's driver sends full tilt (156 of its 160).
+    SDL_SetJoystickVirtualAxis(pad.joy, 1, (Sint16)(-156 * 32767 / 160));
+    _tagxPad& f = Frame();
+    Check(f.analog1.y <= -120, "Circle Pad full up is a full stick up");
+    SDL_SetJoystickVirtualAxis(pad.joy, 1, 0);
+    SDL_SetJoystickVirtualAxis(pad.joy, 2, (Sint16)(156 * 32767 / 160));
+    Check(Frame().analog2.x >= 120, "C-Stick full right is a full camera stick");
+    SDL_SetJoystickVirtualAxis(pad.joy, 2, 0);
+    Frame();
+
+    // The pictures and the words: the 3DS's letters, by position.
+    CheckStr(iPadPromptsLabelFor("3ds", "a"), "B", "3DS icons: the Xbox's A shows B");
+    CheckStr(iPadPromptsLabelFor("3ds", "b"), "A", "3DS icons: the Xbox's B shows A");
+    CheckStr(iPadPromptsLabelFor("3ds", "x"), "Y", "3DS icons: the Xbox's X shows Y");
+    CheckStr(iPadPromptsLabelFor("3ds", "y"), "X", "3DS icons: the Xbox's Y shows X");
+    CheckStr(iPadPromptsLabelFor("3ds", "lt"), "ZL", "3DS icons: LT shows ZL");
+    CheckStr(iPadPromptsLabelFor("3ds", "rt"), "ZR", "3DS icons: RT shows ZR");
+    CheckStr(iPadPromptsLabelFor("3ds", "white"), "L", "3DS icons: white shows L");
+    CheckStr(iPadPromptsLabelFor("3ds", "black"), "R", "3DS icons: black shows R");
+    CheckStr(iPadPromptsLabelFor("3ds", "back"), "SELECT", "3DS icons: Back shows SELECT");
+    CheckStr(iPadPromptsLabelFor("3ds", "start"), "START", "3DS icons: Start shows START");
+    CheckStr(iPadPromptsLabelFor("3ds", "move_up"), "", "3DS icons: the Circle Pad");
+    CheckStr(iPadPromptsLabelFor("3ds", "camera_up"), "C", "3DS icons: the C-Stick");
+    CheckStr(iPadControlsInputLabel(IPAD_BIND_PAD, "a"), "B", "3DS: the bottom button is B");
+
+    // The start-up lines.
+    bool head = false, jump = false, back = false, circle = false, select = false;
+    for (S32 i = 0; iPadHostControlLine(i) != NULL; i++)
+    {
+        const char* l = iPadHostControlLine(i);
+        printf("      %s\n", l);
+        head = head || strstr(l, "face labels B/A/Y/X") != NULL;
+        jump = jump || strncmp(l, "B (bottom) -> Xbox a: jump", 26) == 0;
+        back = back || strncmp(l, "A (right) -> Xbox b: SpongeBowl", 31) == 0;
+        circle = circle || strncmp(l, "Circle Pad -> move", 18) == 0;
+        select = select || strncmp(l, "SELECT -> Xbox back", 19) == 0;
+    }
+    Check(head, "log: SDL's face labels are the 3DS's (B bottom, A right)");
+    Check(jump, "log: B (bottom) jumps");
+    Check(back, "log: A (right) is the Xbox's B");
+    Check(circle, "log: the Circle Pad moves");
+    Check(select, "log: SELECT is Back");
+
+    iConfigUnset("input.preset");
+    iPadHostReloadBindings();
+    SDL_CloseJoystick(pad.joy);
+    SDL_DetachVirtualJoystick(pad.id);
+    Frame();
+    Frame();
+}
+
+static void TestStickRim()
+{
+    // The 3DS's sticks: 85% of SDL's range is full, the direction kept.
+    F32 x = 0.0f;
+    F32 y = 0.975f;
+    iPadStickScaleToRim(&x, &y, 0.85f);
+    Check(x == 0.0f && y == 1.0f, "rim: full tilt straight up is 1");
+    x = 0.65f;
+    y = 0.65f;
+    iPadStickScaleToRim(&x, &y, 0.85f);
+    Check(fabsf(x - 0.7071f) < 0.001f && fabsf(y - 0.7071f) < 0.001f,
+          "rim: a worn diagonal reaches the rim at 45 degrees");
+    x = 0.17f;
+    y = 0.0f;
+    iPadStickScaleToRim(&x, &y, 0.85f);
+    Check(fabsf(x - 0.2f) < 0.001f, "rim: inside it, scaled straight");
+}
+
 static void TestMenus()
 {
     // In a menu xPadUpdate turns the left stick into d-pad presses with a
@@ -719,6 +900,8 @@ int main(int argc, char** argv)
     TestXboxPad();
     TestKeyboard();
     TestOtherPads();
+    TestN3DS();
+    TestStickRim();
     TestMenus();
 
     xPadKill();

@@ -31,6 +31,11 @@ void iGuiRenderBackground();
 // reset the D3D9 device (size, display, fullscreen). Nothing on the others.
 void iGuiRenderReleaseVolatile();
 
+// The 3DS's bottom screen: the next pictures drawn there scaled toward black,
+// 256 as drawn, 0 black (the closed overlay's hint fading out). A new value
+// draws the next picture even if ImGui's is unchanged. Nothing elsewhere.
+void iGuiRenderSetBrightness(int bright);
+
 // The next present that draws the overlay also writes the window's back
 // buffer -- the game's picture and the overlay on it, exactly as presented --
 // to `path` as a PNG. For TSSM_GUI_CAPTURE.

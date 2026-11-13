@@ -16,6 +16,22 @@
 
 struct SDL_Window;
 
+// A console with no desktop (the Switch, the 3DS): the overlay is made for a
+// controller and a touch screen, shows nothing that would open a folder, a
+// link or the system keyboard, and its Quit returns to the menu
+// TSSM_GUI_HOMEBREW names (on the 3DS, i3DSMenuName: the .cia's HOME Menu or
+// the .3dsx's Homebrew Launcher).
+#if defined(__SWITCH__) || defined(__3DS__)
+#define TSSM_GUI_CONSOLE 1
+#else
+#define TSSM_GUI_CONSOLE 0
+#endif
+#ifdef __3DS__
+#include "3ds/i3DS.h"
+#else
+#define TSSM_GUI_HOMEBREW "Homebrew Menu"
+#endif
+
 namespace iGui
 {
     // --- where the GUI is drawing ----------------------------------------------
@@ -86,8 +102,27 @@ namespace iGui
     // "(?)" with `text` as its tooltip.
     void HelpMarker(const char* text);
 
+    // A modal's Cancel: Esc, and on a console the controller's back button.
+    bool BackPressed();
+
+    // Every slider's flags. On a console a held button must not turn a
+    // slider into a text field: that opens the system keyboard.
+#if TSSM_GUI_CONSOLE
+    const ImGuiSliderFlags kSliderFlags = ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput;
+#else
+    const ImGuiSliderFlags kSliderFlags = ImGuiSliderFlags_AlwaysClamp;
+#endif
+
+    // The controller's open-the-overlay combo by its buttons' names: "Back+Start",
+    // on the Switch (iPadSwitchLabels) "- and +", on the 3DS "START + SELECT".
+    const char* PadComboName();
+
     // A dimmed line of explanation under a control.
     void Note(const char* fmt, ...);
+
+    // A path as the player sees it: on the 3DS without the "sdmc:" device
+    // prefix (the SD card in a card reader); as it is elsewhere.
+    const char* ShownPath(const char* path);
 
     // A highlighted "applies after a restart" tag after the last item, when
     // `key` differs from the value the session started with.
@@ -104,6 +139,9 @@ namespace iGui
     // The system's folder picker, through SDL. Asynchronous: the answer
     // arrives on a later frame, and PollFolder hands it over once, tagged with
     // the `tag` it was asked with so the caller knows which field it was for.
+    // Where the system has no dialogs (the Switch), or with
+    // TSSM_FILE_PICKER=builtin, the GUI's own browser answers instead
+    // (iGuiFilePicker.h), through the same PollFolder.
     void PickFolder(const char* tag, const char* start);
     bool PickingFolder();
     bool PollFolder(const char* tag, char* out, size_t outSize);
@@ -119,6 +157,10 @@ namespace iGui
     };
     void PickOpenFile(const char* tag, const char* start, const FileFilter* filters, int count);
     void PickSaveFile(const char* tag, const char* start, const FileFilter* filters, int count);
+
+    // The answer to the request open now: a path, or NULL for Cancel. For the
+    // GUI's own browser (iGuiFilePicker.cpp).
+    void AnswerPick(const char* path);
 
     // A whole file in or out, through SDL's file streams, so a path the
     // system's dialog answered with works whatever it is (an Android

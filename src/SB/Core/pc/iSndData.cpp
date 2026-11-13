@@ -25,7 +25,13 @@
 // Only a stream whose package will not open for streaming falls back to this.
 
 #define ISNDDATA_MAX_ENTRIES 1024
+#ifdef __3DS__
+// One level's effects decode to up to about 6 MB of PCM; the 3DS has no room
+// for PC's generous cache (docs/3DS.md). TSSM_SNDCACHE still overrides it.
+#define ISNDDATA_DEFAULT_BUDGET_MB 6
+#else
 #define ISNDDATA_DEFAULT_BUDGET_MB 256
+#endif
 
 struct snd_entry
 {
@@ -35,11 +41,17 @@ struct snd_entry
     void* data;
     S32 refs;
     U64 stamp;
+    U32 gen; // the iSndDataWorkingSet period it was last used in
 };
 
 static snd_entry sEntries[ISNDDATA_MAX_ENTRIES];
 static U32 sEntryCount;
 static U64 sTotalBytes;
+// The most sTotalBytes has been since iSndDataPeak last reset it (iD0Stats).
+static U64 sPeakBytes;
+// Bytes of distinct sounds used since iSndDataWorkingSet last reset it.
+static U32 sGen = 1;
+static U64 sGenBytes;
 static U64 sStampCounter;
 static U64 sBudgetBytes;
 static bool sBudgetRead;
@@ -266,12 +278,21 @@ const void* iSndDataAcquire(U32 assetID, const iSndDataSource* src, U32* bytes)
         e->data = pcm;
         e->refs = 0;
         sTotalBytes += got;
+        if (sTotalBytes > sPeakBytes)
+        {
+            sPeakBytes = sTotalBytes;
+        }
 
         iDump(assetID, pcm, got, src, src->sample_rate);
     }
 
     e->refs++;
     e->stamp = ++sStampCounter;
+    if (e->gen != sGen)
+    {
+        e->gen = sGen;
+        sGenBytes += e->bytes;
+    }
 
     if (bytes != NULL)
     {
@@ -313,6 +334,27 @@ void iSndDataReset()
     sTotalBytes = 0;
     sStampCounter = 0;
     sSaidUnreadable = false;
+}
+
+U32 iSndDataWorkingSet(bool reset)
+{
+    U32 bytes = (U32)sGenBytes;
+    if (reset)
+    {
+        sGen++;
+        sGenBytes = 0;
+    }
+    return bytes;
+}
+
+U32 iSndDataPeak(bool reset)
+{
+    U32 peak = (U32)sPeakBytes;
+    if (reset)
+    {
+        sPeakBytes = sTotalBytes;
+    }
+    return peak;
 }
 
 void iSndDataStats(U32* entries, U32* bytes, U32* pinned)

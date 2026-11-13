@@ -111,3 +111,29 @@ SAME_OFFSET(RwIm3DVertex, u, rw::gl3::Im3DVertex, u);
 SAME_OFFSET(RwIm3DVertex, v, rw::gl3::Im3DVertex, v);
 
 #endif
+
+#ifdef RW_C3D
+
+// The 3DS's citro3d device copies the game's vertices into its frame ring as
+// they are and has its vertex shader read them, so these are the offsets its
+// attribute loaders were written for (3ds/c3d/c3dsubmit.cpp).
+#include "3ds/c3d/rwc3d.h"
+
+SAME_SIZE(RwIm2DVertex, rw::c3d::Im2DVertex);
+SAME_OFFSET(RwIm2DVertex, x, rw::c3d::Im2DVertex, x);
+SAME_OFFSET(RwIm2DVertex, z, rw::c3d::Im2DVertex, z);
+SAME_OFFSET(RwIm2DVertex, w, rw::c3d::Im2DVertex, w);
+SAME_OFFSET(RwIm2DVertex, emissiveColor, rw::c3d::Im2DVertex, b);
+SAME_OFFSET(RwIm2DVertex, u, rw::c3d::Im2DVertex, u);
+SAME_OFFSET(RwIm2DVertex, v, rw::c3d::Im2DVertex, v);
+
+SAME_SIZE(RwIm3DVertex, rw::c3d::Im3DVertex);
+SAME_OFFSET(RwIm3DVertex, x, rw::c3d::Im3DVertex, x);
+SAME_OFFSET(RwIm3DVertex, nx, rw::c3d::Im3DVertex, nx);
+SAME_OFFSET(RwIm3DVertex, b, rw::c3d::Im3DVertex, b);
+SAME_OFFSET(RwIm3DVertex, r, rw::c3d::Im3DVertex, r);
+SAME_OFFSET(RwIm3DVertex, a, rw::c3d::Im3DVertex, a);
+SAME_OFFSET(RwIm3DVertex, u, rw::c3d::Im3DVertex, u);
+SAME_OFFSET(RwIm3DVertex, v, rw::c3d::Im3DVertex, v);
+
+#endif

@@ -92,6 +92,18 @@
 #include "android/iAndroid.h"
 #endif
 
+#ifdef __SWITCH__
+// The Switch's start-up (RomFS, nxlink, the applet-mode check) and its crash
+// report, which is libnx's exception handler rather than a signal.
+#include "switch/iSwitch.h"
+#endif
+
+#ifdef __3DS__
+// The 3DS's start-up (RomFS, 804 MHz, 3dslink, the New 3DS check) and its
+// crash report, which is libctru's exception handler rather than a signal.
+#include "3ds/i3DS.h"
+#endif
+
 #ifdef _WIN32
 namespace
 {
@@ -813,6 +825,34 @@ namespace
     }
 }
 
+#elif defined(__SWITCH__) || defined(__3DS__)
+
+namespace
+{
+    // No signals for faults on the Switch or the 3DS: a data abort reaches
+    // libnx's or libctru's exception handler, which switch/iSwitch.cpp and
+    // 3ds/i3DS.cpp provide (registers, the callers, crash.log). abort() still
+    // raises SIGABRT through newlib, so that one is caught here as on POSIX.
+    // No watchdog: there is no way to sample another thread's stack.
+    void AbortSignal(int)
+    {
+        printf("\ntssm: ABORT -- assertion or abort() call\n");
+        iHostPrintCallers("abort", 32);
+#ifdef __3DS__
+        i3DSCrashLog("tssm: ABORT -- assertion or abort() call");
+#else
+        iSwitchCrashLog("tssm: ABORT -- assertion or abort() call");
+#endif
+        iLogDrain(1500);
+        _exit(3);
+    }
+
+    void InstallDiagnostics()
+    {
+        signal(SIGABRT, AbortSignal);
+    }
+}
+
 #else
 
 namespace
@@ -1018,6 +1058,9 @@ namespace
 #ifdef RW_VULKAN
         ", Vulkan"
 #endif
+#ifdef RW_C3D
+        ", citro3d"
+#endif
         ;
 
     struct StartupBanner
@@ -1028,6 +1071,16 @@ namespace
             // FIRST. Everything below this line prints, and on Android
             // nothing printed before it survives.
             iAndroidOpenLog();
+#endif
+#ifdef __SWITCH__
+            // FIRST as well: the nxlink socket the log tee writes to, and the
+            // applet-mode screen, which may end the process here.
+            iSwitchEarly();
+#endif
+#ifdef __3DS__
+            // FIRST as well: the 3dslink socket the log tee writes to, 804
+            // MHz, and the model check, which ends the process on an Old 3DS.
+            i3DSEarly();
 #endif
             // Before anything prints: stdout and stderr through the log's
             // tee (iLog.h), and crash.log's place settled for the handlers.
@@ -1043,6 +1096,12 @@ namespace
             printf("tssm: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
                    kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
                    iFMVAudioName());
+#ifdef __SWITCH__
+            iSwitchStartup();
+#endif
+#ifdef __3DS__
+            i3DSStartup();
+#endif
             // TSSM_TEST_CRASH: at startup, or at a frame when it is a number
             // above 1 (iTestEvents.cpp).
             const char* testCrash = getenv("TSSM_TEST_CRASH");

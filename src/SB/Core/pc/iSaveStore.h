@@ -39,6 +39,10 @@
 #define ISS_GAMES 3
 #define ISS_BACKUPS 3
 
+// The largest file read as a save, a card or a zip of saves. Card images are
+// the largest: 2043 blocks of 8 KB, 16 MB.
+#define ISS_MAX_INPUT (64u * 1024u * 1024u)
+
 // --- where -----------------------------------------------------------------------
 
 // The save folder. A folder set with iSaveStoreSetRoot (the command line's

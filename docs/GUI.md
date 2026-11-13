@@ -28,6 +28,13 @@ the GUI and a setting typed into the file by hand are the same thing.
 | **Esc** | closes only |
 | **Resume** | closes only |
 
+On the Switch - and + open it (or three fingers, or `[gui] key` on a USB keyboard), B chooses, A
+goes back and L/R change the tab; docs/SWITCH.md, "The settings window", has the rest.
+
+On the 3DS the overlay is on the bottom screen, the game stays on the top one, and START + SELECT
+(in either order) open and close it; B chooses, A goes back, L/R change the tab, and a tap works too.
+docs/3DS.md, "The settings menu (bottom screen)", has the rest.
+
 The game does not take input while the overlay is open.
 
 The overlay's own controls:
@@ -137,6 +144,14 @@ These settings take effect at the next start, and are tagged **restart**:
   - **Backups** lists a slot's last three saves; **Restore** puts one back (what is there becomes
     backup 1). **Delete** empties a slot, keeping the save as backup 1.
   - `docs/SAVES.md` has the formats.
+  - **Where there is no system file dialog** (the Switch; or `[gui] file_picker = builtin` /
+    `TSSM_FILE_PICKER=builtin` on a PC) the GUI's own file browser stands in, see "The built-in file
+    browser" below: Import starts it in the import folder, and the exports need no dialog at all.
+    **Export** writes the slot's `.gci` into the export folder under the name Dolphin gives it,
+    **Every save as a .zip** writes `tssm-saves-YYYYMMDD-HHMMSS.zip` there, and **Every save into a
+    GCI folder** a new `gci-YYYYMMDD-HHMMSS/` folder. Nothing is written over: a second export of
+    the same name gets `-2`, `-3`. The status line says where each file went, and the tab says where
+    the two folders are.
 - **Mods:** the mods folder, with **Open**, **Rescan** and the **Use mods** switch, then the mods in
   load order: each switched on or off, moved with the arrows or by dragging its name, with what it
   replaces and how many conflicts it has; a click shows its description and counts. Then the
@@ -145,6 +160,39 @@ These settings take effect at the next start, and are tagged **restart**:
   `[assets] mod` is kept at the bottom. `docs/MODDING.md` is the modder's guide.
 - **About:** the version, the renderer and library versions in use, and the full license text of
   every third-party component.
+
+### The built-in file browser
+
+`iGuiFilePicker.cpp`. The system's dialogs come through SDL, and SDL has none on the Switch (its
+stubs answer "unsupported"). There, and wherever a system dialog fails at run time, the GUI's own
+browser answers the same `iGui::PickFolder` / `PickOpenFile` / `PickSaveFile` request, so the tabs
+that ask do not know which one answered.
+
+- **Which one:** `[gui] file_picker` = `auto` (the default: the system's dialog, and the built-in
+  browser from the first time a system file dialog fails, for the rest of the run; a failed folder
+  dialog -- Android's SDL has none -- hands over only that request), `system` or `builtin`.
+  `TSSM_FILE_PICKER` overrides the setting. The Switch and the 3DS always use the built-in one.
+- **Folders:** saves to import are looked for in `<base>/import/`, exports go to `<base>/export/`,
+  both made when first needed. `<base>` is `/switch/tssm` on the Switch, `/3ds/tssm` on the 3DS
+  (`sdmc:/3ds/tssm`, shown without the `sdmc:`, whose top the browser knows), the per-user data
+  folder's `tssm` elsewhere (`%APPDATA%/tssm` on Windows), or `TSSM_FILE_PICKER_DIR` when that is
+  set.
+- **Opening a file or a folder:** a list of the folder's folders, then the files the dialog's
+  filter takes (Import: `.gci .gcs .raw .gcp .zip`; **Every file** shows the rest), sorted by name.
+  A long name is cut in the middle in the list and shown whole under it. **Up**, **SD card** (the
+  top of the drive on a PC) and **Import folder** (the folder it started in) move about. A folder
+  picker (the launcher's **Browse...**, the Mods tab's single mod folder) lists only folders and
+  has **Choose this folder**.
+- **Controller:** the d-pad or stick moves, the accept button (the button that presses buttons
+  everywhere else in the overlay) opens a folder or chooses a file, the back button returns to the
+  folder before or, in the first folder, cancels; the top face button goes up a folder, the left
+  one chooses the folder shown in a folder picker, and L and R move a page. The line at the bottom
+  names the buttons as the controller in hand prints them. Keyboard: arrows, Enter, Backspace,
+  Page Up/Down, Esc cancels.
+- **Touch and mouse:** a tap opens or chooses; dragging the list scrolls it (the row under the
+  finger is not chosen when it lets go), and so does the scroll bar.
+- **Saving a file** asks nothing: the file goes into the export folder under the name the caller
+  suggests, made unique.
 
 ### The launcher
 
@@ -173,6 +221,7 @@ that turns the "files not found" error into a folder picker.
 | `[gui] key` | `F1` | the key that opens the overlay. Any name SDL knows, such as `F1`, `F10` or `Insert`. |
 | `[gui] pad_combo` | `on` | whether Back+Start opens the overlay |
 | `[gui] scale` | `auto` | the overlay's size: `auto`, or a factor from 0.5 to 4 |
+| `[gui] file_picker` | `auto` | `auto`, `system` or `builtin`: which file and folder picker Import, Export and Browse use; see "The built-in file browser" |
 | `[audio] master_volume`, `music_volume`, `sfx_volume`, `movie_volume` | `100` | 0 to 100. At 100 the sound is exactly what it would be without them. They count in a build without the overlay too. See "Panels other modules fill" below. |
 
 `auto` scale takes the display's own scaling (150%, 200%), raises it for a big window so the text can be
@@ -197,6 +246,7 @@ All of the GUI is under `src/SB/Core/pc/gui/` and is port-only. The table below 
 | `iGuiMods.cpp` | the Mods tab, on the mod system (`iMod.h`) |
 | `iGuiTabs.cpp` | the About tab |
 | `iGuiUtil.cpp` | the look, scaling, the system's folder and file dialogs, whole-file reads and writes through SDL, the asset-folder check and the PNG writer |
+| `iGuiFilePicker.h/.cpp` | the built-in file browser, for where the system has no file dialog (the Switch, the 3DS) |
 | `iGuiSelfTest.cpp` | `TSSM_GUI_SELFTEST` |
 | `iGuiNull.cpp` | the whole interface as no-ops, built with `TSSM_GUI=OFF`, except that config.ini's volumes still reach the audio listener |
 
@@ -242,6 +292,32 @@ While the overlay is open, each backend does the following:
   `virtualScreenTexture()`, drawn with blending off and placed with librw's letterbox arithmetic. ImGui's
   DX11 renderer then draws it and the overlay into the back buffer, and the hook calls `Present` with
   the same vsync flag librw would have used.
+- **C3D (the 3DS):** the overlay has the bottom screen to itself, which shows nothing of the game's
+  (`3ds/c3d/c3doverlay.cpp`, `rwc3d.h`'s overlay calls).
+  - **Where:** a 240x320 RGBA8 target of its own in VRAM (300 KB), made once in `iGuiInit` while
+    VRAM is still free, its output the bottom screen. RGBA8 like the screen's own buffer, so the
+    transfer never widens 16-bit colour. No depth (`TSSM_3DS_GUI_DEPTH=1` adds a D16 buffer).
+  - **How:** the device's own 2D program (`vs_im2d`) and vertex format: ImGui's vertices are turned
+    into `rw::c3d::Im2DVertex` on the CPU, straight into the frame ring, with the indices after
+    them; one combiner stage (the vertex colour, its alpha times texture 0's); blending, no depth
+    test, no culling; each command's clip rectangle as the scissor, turned into the sideways target's
+    pixels the way the top screen's viewport is. Texture units 1 and 2 are not touched.
+  - **Textures:** `ImGuiBackendFlags_RendererHasTextures` with ImGui's atlas in `ImTextureFormat_Alpha8`:
+    an A8 texture in linear memory (512x128 is 64 KB), written by the CPU in place at the present
+    (the frame before was waited for when this one opened) and freed only after the GPU is done.
+  - **When:** at the present, inside the game's frame, before librw's present: one `C3D_FrameEnd`
+    sends both screens. Room in the frame ring and the command buffer is taken first
+    (`overlayBegin`), so no split of the frame can land inside the overlay; the hard split and the
+    read-backs keep the bottom screen's output off. A frame whose draw data hashes the same as the
+    last one drawn draws nothing at all, and the screen keeps its picture: most open frames.
+    `TSSM_3DS_GUI_ALWAYS=1` draws every one, for measuring.
+  - **Closed:** the bottom screen shows one line, drawn at start-up, when the overlay closes and after
+    the HOME menu or sleep (the APT hook's count, `i3DSResumeCount`); no other frame costs anything.
+  - **Open and idle:** an ImGui frame is built only from an input until four frames after it (and
+    every frame while a button is held), otherwise every two seconds (`iGui.cpp`, `Frame`): a built
+    frame costs the 3DS's CPU several milliseconds.
+  - **Errors:** the error box shuts citro3d down (the target and the textures with it) and takes the
+    bottom screen with libctru's console, as before.
 - **Vulkan:** there is no ImGui renderer for it here yet. The overlay logs that it cannot draw and stays
   off.
 
@@ -290,6 +366,15 @@ are handled.
     input, and does not see a missing controller either.
   - After the overlay closes, it masks the buttons that were held at that moment until each one is
     released.
+  - On the 3DS, START or SELECT going down alone is held back from the game for up to 120 ms
+    (`TSSM_3DS_COMBO_MS`): the game acts on each press by itself (pause, the upgrade window), and the
+    other button may follow. If it does, the overlay opens and the game sees neither; if not, the
+    button reaches the game late, or for one frame when it was a tap already let go. The game bits
+    held back are the ones the `start` and `back` bindings set, so a rebinding is followed.
+- **The 3DS's bottom screen.** SDL gets a window there (`iWindow3DS.cpp`) for ImGui's SDL3 backend;
+  SDL's 3DS driver makes no framebuffer for it. SDL's touch-to-mouse is off, and the event watch hands
+  the bottom screen's finger events to ImGui as touch input itself. ImGui's IME hook is cleared, so
+  nothing can call `SDL_StartTextInput`, which opens the system keyboard there.
 
 ### Scale and touch
 
@@ -298,6 +383,9 @@ are handled.
   eighths. `[gui] scale` overrides it.
 - The overlay's font is ImGui's scalable default (`AddFontDefaultVector`) at 16 px times the scale.
 - On Android, `ImGuiConfigFlags_IsTouchScreen` and larger touch padding are set.
+- On the 3DS the scale is 0.8125 (13-pixel text on the 320x240 screen), with tighter padding, no
+  rounding, a 14-pixel scroll bar, and every line of a tab wrapped at the screen's edge. `[gui]
+  scale` goes from 0.625 to 1 there.
 
 ### Panels other modules fill
 
@@ -404,6 +492,21 @@ All of these are environment variables.
 | `TSSM_GUI_SELFTEST_CONTINUE=1` | go on into the game after the selftest instead of exiting |
 | `TSSM_GUI_LAUNCHER=<auto\|always\|never>` | override `[gui] launcher` |
 | `TSSM_GUI_LAUNCHER_PLAY=<n>` | press Play after n frames, if the folder is good |
+| `TSSM_FILE_PICKER=<auto\|system\|builtin>` | override `[gui] file_picker` |
+| `TSSM_FILE_PICKER_DIR=<folder>` | the folder holding `import/` and `export/` for the built-in file browser |
+| `TSSM_GUI_SCRIPT=<steps>` | play input into the open overlay: steps apart by spaces or commas, each `<frame>:<action>`, the frame counted from the overlay opening. Actions: `a b x y` (face buttons by position, `a` the bottom one), `up down left right`, `l r`, `enter esc backspace tab space kup kdown`, `click:X:Y`, `drag:X:Y:X2:Y2`, `wheel:X:Y:N`, `tab:<name>`, `shot:<name>`, `quit`. With `TSSM_GUI_SELFTEST` this drives a tab without a game running. |
+| `TSSM_GUI_SCRIPT_SHOTS=<file.png>` | where `shot:<name>` writes; `%s` becomes the name |
+| `TSSM_GUI_PAD_HINTS=<xbox\|playstation\|switch>` | the built-in file browser's button hints for that controller, with none plugged in (for a capture) |
+| `TSSM_PAD_LABELS=switch` | (PC only) every label as the Switch build shows it: the game's prompts, the Controls tab, the hints (docs/SWITCH.md, Controls) |
+| `TSSM_PAD_LABELS=3ds` | (PC only) the same for the 3DS's letters, and the combo named START + SELECT |
+| `TSSM_3DS_COMBO_MS=<ms>` | (3DS) how long START or SELECT alone is held back from the game; 0 turns the hold-back off. Default 120. |
+| `TSSM_3DS_GUI_ALWAYS=1` | (3DS) draw the bottom screen every open frame, not only when its picture changed |
+| `TSSM_3DS_GUI_DEPTH=1` | (3DS) give the bottom screen's target a depth buffer |
+| `TSSM_C3D_STATS=1` | (3DS) also a line a second while the overlay draws: ImGui's time a frame, the conversion's, frames drawn and unchanged, draws, indices, ring bytes, textures |
+
+On the 3DS `TSSM_GUI_CAPTURE` and `shot:` write one 400x480 picture of both screens as the console
+shows them: the top one above, the bottom one centred below it. `[gui] overlay = off` in config.ini
+turns the overlay off there.
 
 Example: every tab on OpenGL, letterboxed, written into a scratch folder:
 
@@ -428,9 +531,10 @@ tssm.exe          (with [video] backend = gl3, width = 640, height = 480, mode =
 - **Only the game's input is paused, not the game.** Opening the overlay mid-level leaves the level
   running, with SpongeBob standing still. Pausing the game itself would need a call into the game's
   pause path.
-- **The file dialogs** are SDL's. On Android the folder export (GCI folder) needs a folder path the
-  system's picker may not give; the zip and `.gci` exports and every import go through SDL's
-  streams and do not.
+- **The file dialogs** are SDL's, or the built-in browser where SDL has none (the Switch). On Android
+  the folder export (GCI folder) needs a folder path the system's picker may not give; the zip and
+  `.gci` exports and every import go through SDL's streams and do not. The built-in browser cannot
+  type a file name: it saves under a name it makes.
 - A debug build's Direct3D 11 device asks for the D3D11 debug layer (`D3D11_CREATE_DEVICE_DEBUG` in
   librw), which fails on a machine without the Windows "Graphics Tools" feature. A release build is not
   affected. This is librw's behaviour, not the GUI's.

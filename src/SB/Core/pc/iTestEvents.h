@@ -29,6 +29,11 @@
 //   TSSM_TEST_POWERUP=<frame>:<level>
 //                           sets every move's power-up to level at that frame.
 //
+//   TSSM_TEST_MP=<list>     adds manliness points at given frames, a
+//                           comma-separated list of "frame:points", through
+//                           the game's own zRewardsMgr::IncManlinessPoints
+//                           (so upgrade points and the HUD follow). Logged.
+//
 //   TSSM_TEST_CAMLOG=<n>    every n frames, logs the camera's position and
 //                           whether a level fly-through is playing ("tssm: test:
 //                           frame 120: camera at (x, y, z), fly-through on"),
@@ -38,6 +43,10 @@
 //                           number above 1), for the crash handler, crash.log
 //                           and the log. Any other value crashes at startup,
 //                           before main (tssm_main.cpp).
+//
+//   TSSM_TEST_CLOSE=<frame> asks the window to close at that frame, as the
+//                           window's close button, the overlay's Quit and
+//                           the 3DS's HOME menu Close do (iWindowRequestClose).
 //
 // Nothing happens unless a variable is set.
 

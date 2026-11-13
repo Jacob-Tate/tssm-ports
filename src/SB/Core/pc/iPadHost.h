@@ -89,9 +89,15 @@ const char* iPadHostDeviceName(S32 port);
 const char* iPadHostBoundInput(U32 xpadButton);
 
 // What sort of controller is on port 0, as a preset name: "xbox",
-// "playstation", "switch", "gamecube". NULL when there is no pad, or when the
-// backend cannot tell one kind from another.
+// "playstation", "switch", "gamecube", "3ds". NULL when there is no pad, or
+// when the backend cannot tell one kind from another.
 const char* iPadHostPadKind();
+
+// The controls of the pad on port 0 in words, one line each: first what SDL
+// makes of it, then each physical control and what the game does with it.
+// NULL past the last line, or with no pad. Logged when port 0 changes hands
+// on the 3DS, and under the input test elsewhere.
+const char* iPadHostControlLine(S32 i);
 
 // Which device input carries the letter `letter` ('A', 'B', 'X' or 'Y') on the
 // controller on port 0, by the name config.ini writes it as. NULL when there is

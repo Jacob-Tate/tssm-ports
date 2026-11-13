@@ -15,6 +15,7 @@
       Android   gradle -Ptssm.icon=<folder>           android/res overrides
                                                       the launcher icon
       Switch    nx_create_nro ... --icon=<folder>/icon.jpg
+      3DS       ctr_generate_smdh ... ICON <folder>/icon-48.png
 
     Without the folder every build keeps its default icon. docs/ICON.md.
 
@@ -25,6 +26,9 @@
       icon-64.png       64 px, the same, for an SDL window icon
       icon.jpg          256x256 JPEG on the background colour (no alpha):
                         the Switch's NRO icon
+      icon-48.png       48x48 on the background colour (opaque): the 3DS's
+                        SMDH icon (smdhtool takes exactly 48x48; the SMDH
+                        stores it as RGB565, without alpha)
       play-512.png      512 px on the background colour, Play Store style
       preview.png       a sheet of the above as launchers show them
       android/res/      mipmap-*dpi/ic_launcher.png (48 dp, legacy launchers),
@@ -450,6 +454,12 @@ $written.Add('play-512.png')
 $nx = New-Bitmap 256 (New-IconPixels 256 (Get-FitScale 256 0.9) $true)
 Save-Jpeg (Join-Path $OutDir 'icon.jpg') $nx
 $written.Add('icon.jpg')
+
+# --- 3DS: 48x48 PNG, opaque -----------------------------------------------------------
+# smdhtool wants exactly 48x48 and stores RGB565, so the background is drawn in.
+$ctr = New-Bitmap 48 (New-IconPixels 48 (Get-FitScale 48 0.9) $true)
+Save-Png (Join-Path $OutDir 'icon-48.png') $ctr
+$written.Add('icon-48.png')
 
 # --- preview.png: how launchers show it -------------------------------------------
 # Top row, on a light and a dark strip: the adaptive icon under a circle, a

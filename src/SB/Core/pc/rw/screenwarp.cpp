@@ -27,8 +27,8 @@ static S32 sReported;
 
 void iScreenWarpRender(RwCamera* cam, const F32* uv, S32 cells)
 {
-    if (!sEnabled || sFailed || cam == NULL || uv == NULL || cells < 1 ||
-        cells > WARP_MAX_CELLS || !iScreenPassReady())
+    if (!sEnabled || sFailed || cam == NULL || uv == NULL || cells < 1 || cells > WARP_MAX_CELLS ||
+        !iScreenPassReady() || !iScreenPassOn(ISCREENPASS_WARP))
     {
         return;
     }

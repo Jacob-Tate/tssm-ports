@@ -24,6 +24,9 @@
 #include "src/d3d/rwd3dimpl.h"
 #endif
 // GL3 needs no header of its own here: rw.h includes src/gl/rwgl3.h itself.
+#ifdef RW_C3D
+#include "3ds/c3d/rwc3d.h"
+#endif
 
 #include "backend.h"
 #include "iDeviceReset.h"
@@ -45,7 +48,25 @@ bool iScreenPassReady()
         return rw::gl3::virtualScreenFramebuffer() != 0;
     }
 #endif
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        return rw::c3d::deviceOpen() != 0;
+    }
+#endif
     return false;
+}
+
+bool iScreenPassOn(S32 pass)
+{
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        return rw::c3d::screenPassOn((int)pass) != 0;
+    }
+#endif
+    (void)pass;
+    return true;
 }
 
 void iScreenPassExtent(RwInt32* w, RwInt32* h)
@@ -66,6 +87,14 @@ void iScreenPassExtent(RwInt32* w, RwInt32* h)
         *h = (RwInt32)rw::gl3::virtualScreenHeight;
     }
 #endif
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        // The top screen, which the device draws every full-screen camera into.
+        *w = 400;
+        *h = 240;
+    }
+#endif
 }
 
 // The copy itself. Both want a camera texture of exactly the picture's size:
@@ -83,6 +112,14 @@ static bool copyFrame(RwRaster* dst)
     if (iBackendIsGL3())
     {
         return rw::gl3::copyVirtualScreen(reinterpret_cast<rw::Raster*>(dst)) != 0;
+    }
+#endif
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        // Every pass's copy shares one block: each is drawn from before the
+        // next copy is made.
+        return rw::c3d::copyScreen(reinterpret_cast<rw::Raster*>(dst), 0) != 0;
     }
 #endif
     return false;

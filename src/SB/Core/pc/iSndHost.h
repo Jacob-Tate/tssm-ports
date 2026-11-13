@@ -183,4 +183,17 @@ void iSndHostFeedEnd(S32 voice);
 // Names the backend that was linked in, for the startup log.
 const char* iSndHostName();
 
+// The 3DS spike (iSpike.h): how long the audio thread's mixing took since the
+// last reset -- callbacks, their total and longest time, the frames they
+// produced, and the output rate. FALSE when no device is running (no counts).
+struct iSndHostMixStats
+{
+    U32 calls;
+    U64 totalNs;
+    U64 maxNs;
+    U64 frames;
+    U32 rate;
+};
+bool iSndHostMixStatsTake(iSndHostMixStats* out, bool reset);
+
 #endif

@@ -110,14 +110,32 @@ namespace
         const char* folder = iModFolder();
         if (folder[0] != '\0')
         {
-            ImGui::TextWrapped("%s", folder);
+            ImGui::TextWrapped("%s", iGui::ShownPath(folder));
         }
         else
         {
+#if TSSM_GUI_CONSOLE
+            ImGui::TextWrapped("There is no mods folder yet. Make it, then put each mod in its own "
+                               "folder in %s.",
+                               iGui::ShownPath(iModDefaultFolder()));
+#else
             ImGui::TextWrapped("There is no mods folder yet. Open it to make one at %s.",
                                iModDefaultFolder());
+#endif
         }
 
+#if TSSM_GUI_CONSOLE
+        // Nothing on the console can show a folder; making one is all there is.
+        if (folder[0] == '\0')
+        {
+            if (ImGui::Button("Make the mods folder"))
+            {
+                iHostMakeDir(iModDefaultFolder());
+                iModRescan();
+            }
+            ImGui::SameLine();
+        }
+#else
         if (ImGui::Button("Open the mods folder"))
         {
             const char* dir = folder[0] != '\0' ? folder : iModDefaultFolder();
@@ -129,6 +147,7 @@ namespace
             iGui::OpenFolder(dir);
         }
         ImGui::SameLine();
+#endif
         if (ImGui::Button("Rescan"))
         {
             const S32 n = iModRescan();
@@ -322,10 +341,12 @@ namespace
             }
             ImGui::EndTable();
         }
+#if !TSSM_GUI_CONSOLE
         if (ImGui::Button("Open its folder"))
         {
             iGui::OpenFolder(m->path);
         }
+#endif
     }
 
     void DrawConflicts()
@@ -385,6 +406,11 @@ namespace
         snprintf(title, sizeof(title), "Log (%d)###log", (int)n);
         ImGui::SeparatorText(title);
 
+#if TSSM_GUI_CONSOLE
+        // No filter (it would open the system keyboard), no clipboard to copy
+        // to and nothing to open mods.log with.
+        ImGui::Checkbox("Follow", &sFollowLog);
+#else
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
         ImGui::InputTextWithHint("##filter", "filter", sFilter, sizeof(sFilter));
         ImGui::SameLine();
@@ -415,13 +441,39 @@ namespace
             iGui::OpenFolder(path);
         }
         ImGui::EndDisabled();
+#endif
 
+#ifdef __3DS__
+        // No sideways scrolling on the small screen: the lines wrap.
+        const ImGuiWindowFlags logFlags = 0;
+#else
+        const ImGuiWindowFlags logFlags = ImGuiWindowFlags_HorizontalScrollbar;
+#endif
         if (ImGui::BeginChild("log", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 10.0f),
-                              ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
+                              ImGuiChildFlags_Borders, logFlags))
         {
+#ifdef __3DS__
+            ImGui::PushTextWrapPos(0.0f);
+#endif
             for (S32 i = 0; i < n; i++)
             {
                 const char* line = iModLogLine(i);
+#ifdef __3DS__
+                // The SD card's paths as the rest of this menu shows them.
+                char shown[1024];
+                size_t o = 0;
+                for (const char* c = line; *c != '\0' && o + 1 < sizeof(shown);)
+                {
+                    if (strncmp(c, "sdmc:/", 6) == 0)
+                    {
+                        c += 5;
+                        continue;
+                    }
+                    shown[o++] = *c++;
+                }
+                shown[o] = '\0';
+                line = shown;
+#endif
                 if (sFilter[0] != '\0' && SDL_strcasestr(line, sFilter) == NULL)
                 {
                     continue;
@@ -438,6 +490,9 @@ namespace
                     ImGui::TextUnformatted(line);
                 }
             }
+#ifdef __3DS__
+            ImGui::PopTextWrapPos();
+#endif
             if (sFollowLog && n != sLogSeen)
             {
                 ImGui::SetScrollHereY(1.0f);
@@ -467,7 +522,8 @@ namespace
         }
 
         const char* folder = iConfigGetString("assets.mod", "");
-        ImGui::TextWrapped("[assets] mod: %s", folder[0] != '\0' ? folder : "(none)");
+        ImGui::TextWrapped("[assets] mod: %s",
+                           folder[0] != '\0' ? iGui::ShownPath(folder) : "(none)");
         ImGui::BeginDisabled(iGui::PickingFolder());
         if (ImGui::Button("Choose a folder..."))
         {

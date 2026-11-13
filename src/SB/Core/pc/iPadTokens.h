@@ -76,4 +76,30 @@ S32 iPadInputFromSDLButton(S32 button);
 // NULL for the Xbox's.
 const char* iPadInputLabel(S32 input, const char* kind);
 
+// The console whose printed letters everything on screen shows: "switch" (the
+// Switch, or TSSM_PAD_LABELS=switch on a PC), "3ds" (the 3DS, or
+// TSSM_PAD_LABELS=3ds), or NULL. Both play the Xbox layout by position and
+// print the same face letters there (B bottom, A right, Y left, X top); the
+// 3DS names its small buttons START and SELECT and its sticks Circle Pad and
+// C-Stick.
+const char* iPadPrintedSet();
+
+// TRUE where everything on screen names the Switch's buttons: on the Switch
+// (__SWITCH__), and on a PC started with TSSM_PAD_LABELS=switch, which previews
+// it for captures (PC only; nothing else on a PC changes). The Switch plays the
+// Xbox layout by POSITION (its bottom button, printed B, is the Xbox's A), so a
+// label names the letter printed where the Xbox button would be: Xbox A is "B",
+// B is "A", X is "Y", Y is "X", the triggers ZL/ZR, white and black L/R, Back
+// and Start - and +.
+bool iPadSwitchLabels();
+
+// A game button (a kPadBindButtons row: "a", "lt", "white", "start") named by
+// the Switch button in its default position ("B", "ZL", "L", "+"), or NULL for
+// a row that is not one of the ten (the d-pad, the keyboard's stick rows).
+const char* iPadSwitchRowLabel(const char* row);
+
+// The same by iPadPrintedSet: the Switch's labels there, the 3DS's ("B",
+// "ZL", "L", "START") on a 3DS, NULL where no console's letters are shown.
+const char* iPadPrintedRowLabel(const char* row);
+
 #endif

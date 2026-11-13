@@ -138,6 +138,7 @@ const char* iPadBindDescribe(const iPadBindButton* button);
 //   playstation   DualShock / DualSense; the same rows as xbox
 //   switch        Switch Pro and Joy-Cons; the same rows, found by letter
 //   gamecube      GameCube adapters: Z is the Back button, Z+L white, Z+R black
+//   3ds           the New 3DS's own buttons; the faces by position, not letter
 
 struct iPadBindPreset
 {

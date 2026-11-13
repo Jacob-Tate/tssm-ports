@@ -72,23 +72,45 @@ const iConfigSetting kConfigSettings[] = {
       "; this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "video", "mode", "borderless",
+#ifdef __SWITCH__
+      "Not used on the Switch: the picture always fills the screen.",
+#else
       "Window mode: borderless, fullscreen (exclusive) or windowed. Alt+Enter\n"
       "; switches between windowed and borderless.",
+#endif
       ICONFIG_ENUM, "borderless|fullscreen|windowed", kNone, kNone },
+#ifdef __3DS__
+    // The 3DS draws the top screen, 400 x 240, at 30 frames a second
+    // (docs/3DS.md).
+    { "video", "aspect", "custom",
+#else
     { "video", "aspect", "wide",
+#endif
       "Picture shape: wide (the display's shape: more of the world at the sides,\n"
       "; menus and HUD in a centered 4:3 area), 4:3 (the original picture) or custom\n"
       "; (exactly width x height).",
       ICONFIG_ENUM, "wide|4:3|custom", kNone, kNone },
+#ifdef __3DS__
+    { "video", "width", "400",
+#else
     { "video", "width", "640",
+#endif
       "Render width in pixels. Used only with aspect = custom; otherwise it follows\n"
       "; from the height and the aspect.",
       ICONFIG_INT, NULL, 320.0f, 15360.0f },
+#ifdef __3DS__
+    { "video", "height", "240",
+#else
     { "video", "height", "480",
+#endif
       "Render height in pixels (lines). The picture is scaled to the window keeping\n"
       "; its shape.",
       ICONFIG_INT, NULL, 240.0f, 8640.0f },
+#ifdef __3DS__
+    { "video", "framerate", "30",
+#else
     { "video", "framerate", "60",
+#endif
       "Frame rate cap: a number, display (the monitor's refresh rate), or 0 or off\n"
       "; for no cap. Above 60 the work per second, and a phone's heat, go up with\n"
       "; the rate. Movies play at 60 at most. Below about 45 the SpongeBall keeps\n"
@@ -105,13 +127,28 @@ const iConfigSetting kConfigSettings[] = {
       "Horizontal field of view in degrees at 4:3. Wider screens show more at the\n"
       "; sides.",
       ICONFIG_FLOAT, NULL, 30.0f, 140.0f },
+#ifdef __3DS__
     { "video", "backend", "auto",
+      "Renderer: auto or c3d (the 3DS's GPU), or null: draw nothing (for timing the\n"
+      "; game's own work).",
+      ICONFIG_ENUM, "auto|c3d|null", kNone, kNone },
+#else
+    { "video", "backend", "auto",
+#ifdef __SWITCH__
+      "Renderer: auto or gl3. The Switch build has gl3 only.",
+#else
       "Renderer: auto, d3d9, d3d11, gl3 or vulkan. auto picks the best one in this\n"
       "; build. Only gl3 and vulkan run outside Windows.",
+#endif
       ICONFIG_ENUM, "auto|d3d9|d3d11|gl3|vulkan", kNone, kNone },
+#endif
     { "video", "pipeline", "auto",
+#ifdef __SWITCH__
+      "Direct3D 9 only; not used on the Switch.",
+#else
       "Direct3D 9 rendering path: auto, shader or fixed. fixed supports pre-2002\n"
       "; GPUs but has no glow, distortion or per-pixel lighting.",
+#endif
       ICONFIG_ENUM, "auto|shader|fixed", kNone, kNone },
     // TSSM: the console's screen passes, drawn by the port (src/SB/Core/pc/iHDRGlow.h,
     // iScreenWarp.h).
@@ -127,22 +164,48 @@ const iConfigSetting kConfigSettings[] = {
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
       ICONFIG_INT, "auto", 1.0f, 4.0f },
     { "input", "preset", "auto",
+#ifdef __3DS__
+      "What the controller is, for its default buttons and its button pictures:\n"
+      "; auto (the 3DS's own: the Xbox layout by position, B jumps), xbox,\n"
+      "; playstation, switch (found by letter: A jumps), gamecube or 3ds. Lines in\n"
+      "; [pad] override it.",
+      ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube|3ds", kNone, kNone },
+#else
       "What the controller is, for its default buttons and its button pictures:\n"
       "; auto (whatever is plugged in), xbox, playstation, switch or gamecube\n"
       "; (Z is Back, Z+L white, Z+R black). Lines in [pad] override it.",
       ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube", kNone, kNone },
+#endif
     { "input", "layout", "auto",
+#if defined(__SWITCH__) || defined(__3DS__)
+      // The Switch and the 3DS name the buttons by the letter printed where
+      // the Xbox's would be (docs/SWITCH.md and docs/3DS.md, Controls).
+      "Which face button the moves use. xbox: Karate Spin on Y, SpongeBowl on A,\n"
+      "; as the Xbox release. gamecube: Karate Spin on A, SpongeBowl on Y, as the\n"
+      "; GameCube release. Menus are the same in both (B accept, A back). auto:\n"
+      "; xbox. The game's button prompts follow. [pad] names the buttons the\n"
+      "; Xbox's way: a is the bottom button (B), b the right one (A), x the left\n"
+      "; one (Y), y the top one (X).",
+#else
       "Which face button the moves use. xbox: Karate Spin on X, SpongeBowl on B,\n"
       "; as the Xbox release. gamecube: Karate Spin on B, SpongeBowl on X, as the\n"
       "; GameCube release. Menus are the same in both (A accept, B back). auto:\n"
       "; gamecube with a GameCube controller, xbox otherwise. The game's button\n"
       "; prompts follow.",
+#endif
       ICONFIG_ENUM, "auto|xbox|gamecube", kNone, kNone },
     { "input", "button_icons", "auto",
+#ifdef __3DS__
+      "Button pictures in the game's prompts: auto (the 3DS's letters), xbox,\n"
+      "; playstation, switch, gamecube, 3ds, keyboard, or off (the disc's own).\n"
+      "; They show what each button is bound to.",
+      ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube|3ds|keyboard|off", kNone, kNone },
+#else
       "Button pictures in the game's prompts: auto (the device you last used),\n"
       "; xbox, playstation, switch, gamecube, keyboard, or off (the disc's own).\n"
       "; They show what each button is bound to.",
       ICONFIG_ENUM, "auto|xbox|playstation|switch|gamecube|keyboard|off", kNone, kNone },
+#endif
     { "input", "keyboard", "always",
       "Keyboard and mouse: always (play alongside a controller), fallback (only\n"
       "; with no controller) or off.",
@@ -157,17 +220,34 @@ const iConfigSetting kConfigSettings[] = {
       "; own) or 0 to 90.",
       ICONFIG_INT, "auto", 0.0f, 90.0f },
     { "input", "trigger_threshold", "auto",
+#ifdef __SWITCH__
+      "How far ZL and ZR must be pressed, as a percentage: auto (30) or 5 to 95.\n"
+      "; The Switch's ZL and ZR only click, so every value works the same there.",
+#else
       "How far LT and RT must be pulled to press, as a percentage: auto (30, where\n"
       "; the GameCube code clicks) or 5 to 95.",
+#endif
       ICONFIG_INT, "auto", 5.0f, 95.0f },
     { "input", "camera_sensitivity", "1.0",
+#ifdef __3DS__
+      "C-Stick camera speed. 1.0 is the original speed.",
+#else
       "Right-stick camera speed. 1.0 is the original speed.",
+#endif
       ICONFIG_FLOAT, NULL, 0.1f, 5.0f },
     { "input", "camera_invert_x", "off",
+#ifdef __3DS__
+      "Turn the camera the other way left and right.",
+#else
       "Turn the camera the other way left and right (stick and mouse).",
+#endif
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "camera_invert_y", "off",
+#ifdef __3DS__
+      "Turn the camera the other way up and down.",
+#else
       "Turn the camera the other way up and down (stick and mouse).",
+#endif
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "mouse_camera", "on",
       "Turn the camera with the mouse while the game window has focus.",
@@ -180,7 +260,11 @@ const iConfigSetting kConfigSettings[] = {
       "; option still applies.",
       ICONFIG_INT, NULL, 0.0f, 100.0f },
     { "input", "touch_controls", "auto",
+#ifdef __SWITCH__
+      "On-screen touch controls: auto (off on the Switch), on or off.",
+#else
       "On-screen touch controls: auto (on for Android), on or off.",
+#endif
       ICONFIG_ENUM, "auto|on|off", kNone, kNone },
     { "input", "test", "off",
       "Input test: log prints what the game reads from the controller every time\n"
@@ -198,19 +282,63 @@ const iConfigSetting kConfigSettings[] = {
     { "audio", "movie_volume", "100", "Movie and cutscene volume, 0 to 100.", ICONFIG_INT, NULL,
       0.0f, 100.0f },
     { "gui", "launcher", "auto",
+#if defined(__3DS__)
+      "Not used on the 3DS: the game's files are always in /3ds/tssm/files.",
+#elif defined(__SWITCH__)
+      "Launcher window at startup, to choose the game's folder and settings: auto\n"
+      "; (only when the game's files are not found) or never. always is auto on the\n"
+      "; Switch.",
+#else
       "Launcher window at startup, to choose the game's folder and settings: auto\n"
       "; (only when the game's files are not found), always or never.",
+#endif
       ICONFIG_ENUM, "auto|always|never", kNone, kNone },
     { "gui", "key", "F1",
-      "Key that opens the settings overlay in the game.", ICONFIG_STRING, NULL, kNone,
-      kNone },
+#if defined(__3DS__)
+      "Not used on the 3DS: START + SELECT open the settings overlay.",
+#elif defined(__SWITCH__)
+      "Key on a USB keyboard that opens the settings overlay in the game.",
+#else
+      "Key that opens the settings overlay in the game.",
+#endif
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "gui", "pad_combo", "on",
+#if defined(__3DS__)
+      "Not used on the 3DS: START + SELECT always open the settings overlay.",
+#elif defined(__SWITCH__)
+      "Not used on the Switch: - and + (hold -, press +) always open the settings\n"
+      "; overlay.",
+#else
       "Back+Start on a controller (hold Back, press Start) opens the settings overlay.",
+#endif
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "gui", "scale", "auto",
       "Size of the overlay and launcher: auto (from the display's scaling and the\n"
       "; window's height) or a factor from 0.5 to 4.",
       ICONFIG_FLOAT, "auto", 0.5f, 4.0f },
+    { "gui", "file_picker", "auto",
+      "File and folder picker for Import, Export and Browse: auto (the system's\n"
+      "; dialog where there is one, the built-in one where there is not, as on the\n"
+      "; Switch), system or builtin. TSSM_FILE_PICKER overrides it.",
+      ICONFIG_ENUM, "auto|system|builtin", kNone, kNone },
+#ifdef __3DS__
+    { "gui", "overlay", "on",
+      "The settings overlay on the bottom screen (START + SELECT). off leaves the\n"
+      "; bottom screen dark and the two buttons to the game.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "gui", "bottom_hint_seconds", "10",
+      "Seconds the bottom screen says START + SELECT: menu after the game starts\n"
+      "; (and after a tap on it) before it fades to black. -1 keeps it, 0 never\n"
+      "; shows it.",
+      ICONFIG_INT, NULL, -1.0f, 3600.0f },
+    { "3ds", "effects", "all",
+      "The drawing effects: all (the default), none, or any of fog, rtt (pictures\n"
+      "; drawn into textures), shadow, glow, warp, copy (screen copies: the\n"
+      "; loading-screen picture), orthoz (the menus' 3D models' depth), separated\n"
+      "; by commas. shadow and glow turn on rtt, glow and warp turn on copy.\n"
+      "; selftest (a GPU test at start) runs only when named. none is the fastest.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+#endif
 };
 
 const S32 kConfigSettingCount = (S32)(sizeof(kConfigSettings) / sizeof(kConfigSettings[0]));

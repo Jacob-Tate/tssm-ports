@@ -20,6 +20,12 @@ namespace rw
     }
 }
 
+#include "iD0Stats.h"
+
+#ifdef RW_C3D
+#include "3ds/c3d/rwc3d.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -225,6 +231,51 @@ static rw::Texture* convertRasterToPlatform(rw::Texture* texture, void* data)
             (texture->raster->format & ~0xF00) | rw::Raster::C8888;
     }
 
+    // TSSM_D0_TEX3DS / TSSM_D0_PICA (iD0Stats.h): the 3DS texture path, timed,
+    // and with TSSM_D0_PICA kept in place of the conversion below.
+    if (iD0Texture(texture, paddedRGB))
+    {
+        return texture;
+    }
+
+    // The NULL backend (TSSM_RENDER_BACKENDS=NULL: headless, and the first 3DS
+    // builds) has no raster of its own to convert to: Raster::create answers
+    // NULL and convertTexToCurrentPlatform dereferences it. Nothing is drawn,
+    // so the Xbox raster stays as it was read.
+    if (rw::platform == rw::PLATFORM_NULL)
+    {
+        return texture;
+    }
+
+#ifdef RW_C3D
+    // The 3DS: the Xbox raster decoded and packed the PICA's way, at half size
+    // with the font atlases kept whole (3ds/c3d/rwc3d.h). It reads the Xbox
+    // raster itself because the half-size texture is the file's own level 1,
+    // which an Image of level 0 would not give it. A texture it cannot read
+    // stays an Xbox raster, which draws untextured; the padded-RGB fix below
+    // is done inside (it would write the texture again from a lock).
+    if (rw::platform == rw::PLATFORM_C3D)
+    {
+        if (texture->raster->platform == rw::PLATFORM_XBOX)
+        {
+            rw::Raster* c3d = rw::c3d::convertXboxRaster(texture->raster, paddedRGB ? 1 : 0);
+            if (c3d != NULL)
+            {
+                texture->raster->destroy();
+                texture->raster = c3d;
+            }
+            else
+            {
+                printf("tssm: c3d: texture '%s' (format %04x, %dx%d) could not be converted\n",
+                       texture->name, (unsigned)texture->raster->format,
+                       (int)texture->raster->width, (int)texture->raster->height);
+                fflush(stdout);
+            }
+        }
+        return texture;
+    }
+#endif
+
     const rw::int32 wasPlatform = texture->raster->platform;
     const rw::int32 wasFormat = texture->raster->format;
     const rw::int32 wasDepth = texture->raster->depth;
@@ -234,7 +285,9 @@ static rw::Texture* convertRasterToPlatform(rw::Texture* texture, void* data)
     const rw::int32 level0Alpha = GlLevel0AlphaKind(texture->raster, paddedRGB);
 #endif
 
+    const S64 d0Start = iD0Now();
     texture->raster = rw::Raster::convertTexToCurrentPlatform(texture->raster);
+    iD0Add(iD0_TEX_CONVERT, d0Start, 0);
 
 #ifdef RW_GL3
     GlKeepLevel0AlphaKind(texture->raster, level0Alpha);

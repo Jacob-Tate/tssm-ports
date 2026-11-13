@@ -55,10 +55,16 @@
 #include "iScreenWarp.h"
 #include "iSnapshot.h"
 #include "iCapture.h"
+#include "iD0Stats.h"
+#include "iSpike.h"
 #include "iLowHeap.h"
 
 // The overlay and the launcher (docs/GUI.md).
 #include "gui/iGui.h"
+
+#ifdef __3DS__
+#include "3ds/i3DS.h"
+#endif
 
 // PC iSystem: the boot sequence of gc/iSystem.cpp on a host.
 //
@@ -145,6 +151,10 @@ static iWindowMode sWindowMode = iWINDOW_BORDERLESS;
 
 static iWindowMode WindowModeFromConfig()
 {
+#ifdef __SWITCH__
+    // The window always fills the screen there (iWindowSDL.cpp).
+    return iWINDOW_WINDOWED;
+#endif
     const char* name = iConfigGetString("video.mode", "borderless");
 
     if (iHostStrCaseCmp(name, "fullscreen") == 0)
@@ -256,12 +266,24 @@ static void ApplyConfig()
     {
         iScreenSetBackend(iSCREENBACKEND_VULKAN);
     }
+#ifdef __3DS__
+    // The 3DS's own device, and none at all (the game's work timed without
+    // drawing, as the spike measured it).
+    else if (iHostStrCaseCmp(backend, "c3d") == 0)
+    {
+        iScreenSetBackend(iSCREENBACKEND_C3D);
+    }
+    else if (iHostStrCaseCmp(backend, "null") == 0)
+    {
+        iScreenSetBackend(iSCREENBACKEND_NULL);
+    }
+#endif
     else
     {
         if (iHostStrCaseCmp(backend, "auto") != 0)
         {
-            printf("tssm: config: video.backend is not auto, d3d9, d3d11, gl3 or vulkan, using "
-                   "the default: %s\n",
+            printf("tssm: config: video.backend is not one this build knows, using the "
+                   "default: %s\n",
                    backend);
         }
         iScreenSetBackend(iSCREENBACKEND_AUTO);
@@ -281,8 +303,38 @@ static void ApplyConfig()
         iScreenSetPipeline(iSCREENPIPE_AUTO);
     }
 
-    iBootSetScene(iConfigGetString("game.boot", ""));
-    iBootSetIntroMovies(iConfigGetBool("game.intro_movies", TRUE));
+    // TSSM_BOOT and TSSM_INTRO_MOVIES stand in for game.boot and game.intro_movies for one run (a
+    // console's test-env.txt), so a test never edits config.ini. An empty TSSM_BOOT is the menu.
+    const char* bootEnv = getenv("TSSM_BOOT");
+    iBootSetScene(bootEnv != NULL ? bootEnv : iConfigGetString("game.boot", ""));
+
+    S32 intro = iConfigGetBool("game.intro_movies", TRUE);
+    const char* introEnv = getenv("TSSM_INTRO_MOVIES");
+    if (introEnv != NULL)
+    {
+        if (iHostStrCaseCmp(introEnv, "on") == 0 || iHostStrCaseCmp(introEnv, "1") == 0)
+        {
+            intro = TRUE;
+        }
+        else if (iHostStrCaseCmp(introEnv, "off") == 0 || iHostStrCaseCmp(introEnv, "0") == 0)
+        {
+            intro = FALSE;
+        }
+        else
+        {
+            printf("tssm: TSSM_INTRO_MOVIES is not on or off, using config.ini's: %s\n", introEnv);
+            introEnv = NULL;
+        }
+    }
+    iBootSetIntroMovies(intro);
+
+    if (bootEnv != NULL || introEnv != NULL)
+    {
+        printf("tssm: boot: %s, intro movies %s (from TSSM_BOOT / TSSM_INTRO_MOVIES; config.ini "
+               "unchanged)\n",
+               bootEnv == NULL ? "as config.ini says" : (bootEnv[0] != 0 ? bootEnv : "the menu"),
+               intro ? "on" : "off");
+    }
 
     // Where saves go, before xSaveGameInit resolves the root; empty is the
     // per-user data folder (isavegame.cpp).
@@ -329,8 +381,76 @@ static void ApplyConfig()
 // The asset folder, checked before anything reads from it. zMainLoadFontHIP
 // spins on xSTLoadStep('FONT') with no exit, so a wrong path is a hang on a
 // blank window unless it is caught here (treedome).
+#ifdef __3DS__
+// The 3DS's own screen for game files that are not there (3ds/i3DS.cpp): the
+// folder, then font.HIP and boot.HIP in it and readable.
+static void Check3DSGameFiles()
+{
+    const char* root = iFileAssetRoot();
+    const char* env = getenv("TSSM_ASSETS");
+    const int fromConfig = (env == NULL || env[0] == '\0') && root[0] != '\0';
+    // Without the folder i3DSStartup leaves TSSM_ASSETS unset.
+    char folder[512];
+    snprintf(folder, sizeof(folder), "%s", root[0] != '\0' ? root : "sdmc:/3ds/tssm/files");
+    size_t n = strlen(folder);
+    while (n > 1 && folder[n - 1] == '/')
+    {
+        folder[--n] = '\0';
+    }
+
+    const char* file = NULL;
+    int unreadable = 0;
+    if (root[0] != '\0' && iHostPathExists(folder))
+    {
+        static const char* const kFiles[] = { "font.HIP", "boot.HIP" };
+        for (size_t i = 0; i < sizeof(kFiles) / sizeof(kFiles[0]) && file == NULL; i++)
+        {
+            char path[600];
+            snprintf(path, sizeof(path), "%s/%s", folder, kFiles[i]);
+            bool readable = false;
+            const bool found = iFileResolveCase(path, sizeof(path));
+            if (found)
+            {
+                FILE* f = fopen(path, "rb");
+                char head[4];
+                readable = f != NULL && fread(head, 1, sizeof(head), f) == sizeof(head);
+                if (f != NULL)
+                {
+                    fclose(f);
+                }
+            }
+            if (!readable)
+            {
+                file = kFiles[i];
+                unreadable = found;
+            }
+        }
+        if (file == NULL)
+        {
+            return;
+        }
+    }
+
+    printf("tssm: FATAL -- the game's files were not found.\n");
+    if (file == NULL)
+    {
+        printf("tssm:   no folder %s\n", folder);
+    }
+    else
+    {
+        printf("tssm:   %s/%s %s\n", folder, file, unreadable ? "cannot be read" : "is not there");
+    }
+    fflush(stdout);
+    i3DSGameFilesScreen(folder, file, unreadable, fromConfig);
+    exit(1);
+}
+#endif
+
 static void CheckAssets()
 {
+#ifdef __3DS__
+    Check3DSGameFiles();
+#endif
     const char* missing = iFileMissingAssetPath();
     if (missing != NULL)
     {
@@ -649,6 +769,10 @@ static void ClaimSaveFolder()
 
 void iSystemInit(U32 options)
 {
+    // The 3DS spike (iSpike.h) runs on settings and folders of its own, so it
+    // sets them up before anything reads them. Off unless asked for.
+    iSpikeEarly();
+
     // Before anything that may want a setting, and before iFileInit reads
     // where the assets are.
     iConfigLoad();
@@ -675,6 +799,9 @@ void iSystemInit(U32 options)
 
     // TSSM_CAPTURE_FRAMES / TSSM_EXIT_AFTER: off unless asked for.
     iCaptureInit();
+
+    // TSSM_D0: the 3DS study's measurements (iD0Stats.h). Off unless asked for.
+    iD0Init();
 
     xDebugInit();
     xMemInit();
@@ -715,6 +842,10 @@ void iSystemInitGraphics()
     // did; kept as retail has it.
     xShadowInit();
     xFXInit();
+#ifdef __3DS__
+    // Probe 11's layers that stop before the game (3ds/i3DS.cpp).
+    i3DSLadderCheckpoint();
+#endif
 }
 
 void iSystemExit()
