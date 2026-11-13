@@ -20,10 +20,10 @@ struct _xCounter : xBase
 
 void xCounterInit();
 void xCounterInit(void* b, void* asset);
-void xCounterInit(xBase* b, xCounterAsset* asset);
 void xCounterReset(xBase* b);
 void xCounterSave(_xCounter* ent, xSerial* s);
 void xCounterLoad(_xCounter* ent, xSerial* s);
-int xCounterEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*);
+void xCounterEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32);
+void xCounterStartup();
 
 #endif

@@ -25,11 +25,15 @@ struct _xFog : xBase
 
 void xFogClearFog();
 void xFogInit(void* b, void* tasset);
-void xFogInit(xBase* ent, xFogAsset* tasset);
-void xFogReset(_xFog* ent);
+
+inline void xFogReset(_xFog* ent)
+{
+    xBaseReset(ent, ent->tasset);
+}
+
 void xFogSave(_xFog* ent, xSerial* s);
 void xFogLoad(_xFog* ent, xSerial* s);
-S32 xFogEventCB(xBase* to, xBase* from, U32 toEvent, const F32* toParam, xBase* b3);
+void xFogEventCB(xBase* to, xBase* from, U32 toEvent, const F32* toParam, xBase* b3, U32);
 void xFogUpdate(xBase* ent, xScene* sc, F32 dt);
 
 #endif

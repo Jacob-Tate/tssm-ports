@@ -2,12 +2,13 @@
 #define ZENTTRIGGER_H
 
 #include "zEnt.h"
+#include "xEntDrive.h"
 
 struct zEntTrigger : zEnt
 {
-    xMat4x3 triggerMatrix;
     xBox triggerBox;
     U32 entered;
+    xEntDrive drive;
 };
 
 struct xTriggerAsset
@@ -27,11 +28,15 @@ struct xTriggerAsset
 void zEntTriggerInit(void* ent, void* asset);
 void zEntTriggerInit(zEntTrigger* ent, xEntAsset* asset);
 void zEntTriggerUpdate(zEntTrigger* trig, xScene*, F32);
-S32 zEntTriggerEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*);
+void zEntTriggerEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32);
 void zEntTriggerSave(zEntTrigger* ent, xSerial* s);
 void zEntTriggerLoad(zEntTrigger* ent, xSerial* s);
 void zEntTriggerReset(zEntTrigger* ent);
 bool zEntTriggerHitsSphere(const zEntTrigger& trig, const xSphere& o, const xVec3& dir);
-xTriggerAsset* zEntTriggerAsset(const zEntTrigger& trig);
+
+inline xTriggerAsset* zEntTriggerAsset(const zEntTrigger& trig)
+{
+    return (xTriggerAsset*)(trig.asset + 1);
+}
 
 #endif

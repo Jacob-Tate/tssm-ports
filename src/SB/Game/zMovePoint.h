@@ -21,8 +21,24 @@ struct zMovePoint : xMovePoint
     {
         return pos;
     }
-    U32 NumNodes();
-    U8 IsOn();
+    // No GC symbols (always inlined, e.g. into zNMEArena::NextBestNav); BfBB has the bodies.
+    U32 NumNodes()
+    {
+        return asset->numPoints;
+    }
+    F32 RadiusArena()
+    {
+        return asset->arenaRadius;
+    }
+    zMovePoint* NodeByIndex(S32 i)
+    {
+        return (zMovePoint*)nodes[i];
+    }
+    // No GC symbol (inlined); weak S32 IsOn in BfBB.
+    S32 IsOn()
+    {
+        return on;
+    }
 };
 
 zMovePoint* zMovePoint_GetMemPool(S32 cnt);

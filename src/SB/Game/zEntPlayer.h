@@ -6,6 +6,7 @@
 #include "xAnim.h"
 #include "zEnt.h"
 #include "zLasso.h"
+#include "xIni.h"
 
 enum zControlOwner
 {
@@ -208,6 +209,68 @@ enum _tagePlayerStreamSnd
     ePlayerStreamSnd_Total
 };
 
+struct zTimerBase
+{
+    F32 mCurrentTime;
+    F32 mDuration;
+    U32 mFlags;
+    void (*mTimeOutCB)(zTimerBase*);
+
+    // All weak in retail (no PS2 symbols: always inlined there).
+    void MightTick()
+    {
+        mFlags &= ~1;
+    }
+
+    void TimerTick(F32 dt)
+    {
+        if (mCurrentTime > 0.0f)
+        {
+            mFlags |= 1;
+            mCurrentTime -= dt;
+            if (mCurrentTime <= 0.0f)
+            {
+                mTimeOutCB(this);
+                TimerReset();
+            }
+        }
+    }
+
+    bool DidTick()
+    {
+        return mFlags & 1;
+    }
+
+    void TimerReset()
+    {
+        if (mFlags & 2)
+        {
+            mCurrentTime = 0.0f;
+        }
+        else
+        {
+            mCurrentTime = mDuration;
+        }
+    }
+
+    void TimerTickElseReset(bool tick, F32 dt)
+    {
+        if (tick)
+        {
+            TimerTick(dt);
+        }
+        else
+        {
+            TimerReset();
+        }
+    }
+
+    void TimerStop()
+    {
+        mCurrentTime = 0.0f;
+    }
+};
+
 struct zDelayedStreamSound
 {
     _tagePlayerStreamSnd start;
@@ -234,7 +297,8 @@ enum eSNDCurrentPlayer
 {
     eCurrentPlayerSpongeBob,
     eCurrentPlayerPatrick,
-    eCurrentPlayerSandy,
+    eCurrentPlayerCar,
+    eCurrentPlayerSpongePat,
     eCurrentPlayerCount
 };
 
@@ -243,7 +307,9 @@ enum _zPlayerWallJumpState
     k_WALLJUMP_NOT,
     k_WALLJUMP_LAUNCH,
     k_WALLJUMP_FLIGHT,
-    k_WALLJUMP_LAND
+    k_WALLJUMP_LAND,
+    k_WALLJUMP_STUCK,
+    k_WALLJUMP_FALL
 };
 
 struct zJumpParam
@@ -322,6 +388,8 @@ struct zPlayerCarryInfo
     F32 maxCosAngle;
     F32 throwMinDist;
     F32 throwMaxDist;
+    F32 throwHammerMinDist;
+    F32 throwHammerMaxDist;
     F32 throwMinHeight;
     F32 throwMaxHeight;
     F32 throwMaxStack;
@@ -337,6 +405,7 @@ struct zPlayerCarryInfo
     F32 throwGravity;
     F32 throwHeight;
     F32 throwDistance;
+    F32 throwPowerAddDistance;
     F32 fruitFloorDecayMin;
     F32 fruitFloorDecayMax;
     F32 fruitFloorBounce;
@@ -349,70 +418,111 @@ struct zPlayerCarryInfo
 
 struct zPlayerLassoInfo
 {
-    xEnt* target; // 0x1880 in globals
     F32 dist;
-    U8 destroy;
-    U8 targetGuide;
-    F32 lassoRot;
-    xEnt* swingTarget; // 0x1890
+    xEnt* swingTarget;
     xEnt* releasedSwing;
-    F32 copterTime;
-    S32 canCopter;
     zLasso lasso;
-    xAnimState* zeroAnim;
 };
 
 #define SHINY_MAX 99999
 
 extern eSNDCurrentPlayer gCurrentPlayer;
+extern eSNDCurrentPlayer lastgCurrentPlayer;
+extern S32 gSpongeBall;
+extern struct xEntBoulder* boulderVehicle;
+extern F32 gThrowPower;
 extern S32 gWaitingToAutoSave;
+extern S32 gBungeeDeath;
+extern xMat4x3 sCameraLastMat;
+
+// No symbol (always inlined); the name is a guess. Retail materializes the bool before testing it,
+// as for an inline's result.
+inline bool player_is_sponge_ball()
+{
+    return gCurrentPlayer == eCurrentPlayerSpongeBob && gSpongeBall;
+}
 
 void zEntPlayer_Load(xEnt*, xSerial*);
+void zEntPlayer_InitPlayerDefaultValues(xIniFile* ini);
 
 S32 zEntPlayer_Damage(xBase* src, U32 damage);
 S32 zEntPlayer_Damage(xBase* src, U32 damage, const xVec3* knockback);
+void zEntPlayer_PatrickLaunch(xEnt* patLauncher);
+S32 zEntPlayerIsInSlidingMode();
+void SetPlayerKillsVillainTimer(F32 time);
+struct xEntBoulder* zEntPlayerGetBBowl();
 
 xAnimTable* zSandy_AnimTable();
 xAnimTable* zPatrick_AnimTable();
 xAnimTable* zEntPlayer_AnimTable();
 xAnimTable* zSpongeBobTongue_AnimTable();
+xAnimTable* zEntPlayer_BoulderVehicleAnimTable();
+xAnimTable* zSpongePat_AnimTable();
 
 void zEntPlayerExit(xEnt*);
 void zEntPlayerPreReset();
+void zEntPlayerHealthResetAll();
 void zEntPlayerReset(xEnt* ent);
 void zEntPlayer_LoadSounds();
 void zEntPlayer_UnloadSounds();
+void zEntPlayer_SceneExit();
 void zEntPlayer_ShadowModelEnable();
 void zEntPlayer_ShadowModelDisable();
+void zEntPlayerExplodeBowl();
+void zEntPlayerBowlTargetRemoveAll();
+F32 zEntPlayerGetBowlBlastRadius();
+void zEntPlayerKillGauntlet();
+void zEntPlayerGauntletBlastRadius(F32 radius);
+void zEntPlayerExplodeHammerThrow(xVec3* pos);
+void zEntPlayer_TikiKilledBy(struct zNMECommon* tiki, const xBase* killedBy);
+bool zEntPlayer_SoundsCurrentlyAllowed();
 
-void zEntPlayerJumpStart(class xEnt* ent, class zJumpParam* jump);
+void zEntPlayerJumpStart(struct xEnt* ent, struct zJumpParam* jump);
 S32 zEntPlayer_IsSneaking();
 
+void zEntPlayerPopOffOnAtomic(xModelInstance* model, F32 rate);
 void zEntPlayer_setBoulderMode(U32 mode);
 void zEntPlayer_GiveHealth(S32);
 void zEntPlayer_GiveSpatula(S32);
 void zEntPlayer_GivePatsSocksCurrentLevel(S32 quantity);
+void zEntPlayer_GiveShinyObject(S32 quantity);
+void zEntPlayer_GiveLevelPickupCurrentLevel(S32 quantity);
+void zEntPlayer_DamageKnockIntoAir(F32 height);
 
 void zEntPlayer_LoadCheckPoint();
 
 void zEntPlayer_MinimalRender(zEnt* ent);
+void zEntPlayer_Render(zEnt* ent);
+void zEntPlayer_RenderEffects(zEnt* ent);
+void zEntPlayerEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
+                       xBase* toParamWidget, U32 toParamWidgetID);
 U8 zEntPlayer_MinimalUpdate(xEnt* ent, xScene* sc, F32 dt, xVec3& drive_motion);
+void zEntPlayer_Update(xEnt* ent, xScene* sc, F32 dt);
 
-S32 zEntPlayer_MoveInfo();
+void zEntPlayer_SpongeBallInit(xEnt* ent, xEntAsset* asset);
+void zEntPlayer_SpongePatInit(xEnt* ent, xEntAsset* asset);
+void zEntPlayer_CarInit(xEnt* ent, xEntAsset* asset);
+void zEntPlayer_PatrickInit(xEnt* ent, xEntAsset* asset, S32 costumeIndex);
+void zEntPlayer_SpongeBobInit(xEnt* ent, xEntAsset* asset, S32 costumeIndex);
 
-void zEntPlayer_SNDPlay(_tagePlayerSnd player_snd, F32 delay);
+U32 zEntPlayer_MoveInfo();
+
+void zEntPlayer_SNDPlay(_tagePlayerSnd player_snd, bool playRumble);
 void zEntPlayer_SNDPlayRandom(_tagePlayerSnd player_snd_start, _tagePlayerSnd player_snd_end,
                               F32 delay);
 void zEntPlayer_SNDPlayStream(_tagePlayerStreamSnd player_snd);
 void zEntPlayer_SNDPlayStream(_tagePlayerStreamSnd player_snd, U32 flags);
 // Only plays sound if player's spatula count is between lower and upper
 void zEntPlayer_SNDPlayStream(U32 lower, U32 upper, _tagePlayerStreamSnd player_snd, U32 flags);
+void zEntPlayer_SNDPlayStream(U32 lower, U32 upper, _tagePlayerStreamSnd player_snd);
 
 // Only plays sound if player's spatula count is between lower and upper
 void zEntPlayer_SNDPlayStreamRandom(U32 lower, U32 upper, _tagePlayerStreamSnd player_snd_start,
                                     _tagePlayerStreamSnd player_snd_end, F32 delay);
 void zEntPlayer_SNDPlayStreamRandom(_tagePlayerStreamSnd player_snd_start,
                                     _tagePlayerStreamSnd player_snd_end, F32 delay);
+
+void zEntPlayer_SNDPlayUpgradeVO(S32 powerupIndex);
 
 void zEntPlayer_SNDSetVol(_tagePlayerSnd player_snd, F32 new_vol);
 void zEntPlayer_SNDSetPitch(_tagePlayerSnd player_snd, F32 new_pitch);
@@ -422,13 +532,21 @@ void zEntPlayerSpeakStop();
 
 void zEntPlayerControlOff(zControlOwner owner);
 void zEntPlayerControlOn(zControlOwner owner);
+void zEntPlayerKillCarry();
+void zEntPlayerUpdateModel();
 
 void zEntPlayer_StoreCheckPoint(xVec3* pos, F32 rot, U32 initCamID);
-S32 load_talk_filter(U8* filter, xModelAssetParam* params, U32 params_size, S32 max_size);
 
-S32 zEntPlayer_DamageNPCKnockBack(xBase* src, U32 damage, xVec3* npcPos);
+enum ePlayerNMEDamage
+{
+    ePlayerNMEDamageDefault,
+    ePlayerNMEDamageEnemyLaserBeam,
+    ePlayerNMEDamageEnemyProjectile,
+    ePlayerNMEDamageEnemyParticle,
+    ePlayerNMEDamageCount
+};
 
-S32 zEntPlayer_DamageNPCKnockBack(xBase* src, U32 damage, xVec3* npcPos);
+S32 zEntPlayer_DamageNPCKnockBack(xBase* src, U32 damage, xVec3* npcPos, ePlayerNMEDamage type);
 void zEntPlayer_PredictPos(xVec3* pos, F32 timeIntoFuture, F32 leadFactor, S32 useTurn);
 
 #endif

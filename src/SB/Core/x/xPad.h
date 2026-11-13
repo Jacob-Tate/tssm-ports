@@ -45,10 +45,10 @@ struct analog_data
 
 struct _tagxPad
 {
-    S8 value[22];
+    U8 value[22];
 
     // Offset: 0x16
-    S8 last_value[22];
+    U8 last_value[22];
 
     // Offset: 0x2C
     U32 on;
@@ -93,6 +93,8 @@ struct _tagxPad
 // GameCube
 #define XPAD_BUTTON_Z 0x100000
 
+#define XPAD_MOVE(mask) (mask)
+
 extern _tagxPad mPad[4];
 extern _tagxRumble mRumbleList[32];
 extern _tagxPad* gPlayerPad;
@@ -108,6 +110,33 @@ void xPadDestroyRumbleChain(_tagxPad* pad);
 void xPadDestroyRumbleChain(S32 idx);
 S32 xPadAddRumble(S32 idx, _tagRumbleType type, F32 time, S32 replace, U32 fxflags);
 
-void xPadAnalogIsDigital(F32, F32);
+inline F32 normalize_analog(S32 v, S32 v_min, S32 v_max, S32 dead_center, S32 dead_min,
+                            S32 dead_max)
+{
+    if (v <= dead_center)
+    {
+        if (v >= dead_min)
+        {
+            return 0.0f;
+        }
+        if (v <= v_min)
+        {
+            return -1.0f;
+        }
+        return (F32)(v - dead_min) / (F32)(dead_min - v_min);
+    }
+    else
+    {
+        if (v <= dead_max)
+        {
+            return 0.0f;
+        }
+        if (v >= v_max)
+        {
+            return 1.0f;
+        }
+        return (F32)(v - dead_max) / (F32)(v_max - dead_max);
+    }
+}
 
 #endif

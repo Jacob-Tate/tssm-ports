@@ -5,6 +5,7 @@
 
 #include <rwcore.h>
 #include <rpworld.h>
+#include <rpcollis.h>
 
 struct xClumpCollBSPBranchNode
 {
@@ -25,20 +26,44 @@ struct xClumpCollBSPTriangle
     union
     {
         xClumpCollBSPVertInfo i;
+        U32 rawIdx;
         RwV3d* p;
     } v;
     U8 flags;
-    U8 platData;
+    U8 detailed_info_cache_index;
     U16 matIndex;
 };
 
 struct xClumpCollBSPTree
 {
-    U32 numBranchNodes;
+    S32 numBranchNodes;
     xClumpCollBSPBranchNode* branchNodes;
-    U32 numTriangles;
+    S32 numTriangles;
     xClumpCollBSPTriangle* triangles;
 };
+
+struct xClumpCollV3dGradient
+{
+    F32 dydx;
+    F32 dzdx;
+    F32 dxdy;
+    F32 dzdy;
+    F32 dxdz;
+    F32 dydz;
+};
+
+extern U8 xClumpColl_FilterFlags;
+extern U8 xClumpColl_FilterFlagsAllMask;
+extern U8 xClumpColl_FilterFlagsAllEqual;
+
+// Name and signature from the Ratatouille GC DWARF (absent from the PS2 DWARF).
+inline U8 xClumpColl_IsCollidableTriangle(U8 flags)
+{
+    return (flags & xClumpColl_FilterFlags) ||
+           xClumpColl_FilterFlagsAllEqual == (flags & xClumpColl_FilterFlagsAllMask);
+}
+
+typedef S32 (*xClumpCollIntersectionCallback)(xClumpCollBSPTriangle*, void*);
 
 struct nodeInfo
 {
@@ -59,6 +84,19 @@ struct TempAtomicList
     RwMeshCache* meshCache;
 };
 
+xClumpCollBSPTree*
+xClumpColl_ForAllIntersections(xClumpCollBSPTree* tree, RpIntersection* intersection,
+                               RpCollisionTriangle* (*callBack)(RpIntersection*, RpWorldSector*,
+                                                                RpCollisionTriangle*, F32, void*),
+                               void* data);
+xClumpCollBSPTree*
+xClumpColl_ForAllCapsuleLeafNodeIntersections(xClumpCollBSPTree* tree, RwLine* line, F32 radius,
+                                              xClumpCollV3dGradient* grad,
+                                              xClumpCollIntersectionCallback callBack, void* data);
+xClumpCollBSPTree*
+xClumpColl_ForAllLineLeafNodeIntersections(xClumpCollBSPTree* tree, RwLine* line,
+                                           xClumpCollV3dGradient* grad,
+                                           xClumpCollIntersectionCallback callBack, void* data);
 void xClumpColl_InstancePointers(xClumpCollBSPTree* tree, RpClump* clump);
 xClumpCollBSPTree* xClumpColl_StaticBufferInit(void* data, U32 param_2);
 

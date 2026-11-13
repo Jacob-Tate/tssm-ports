@@ -65,8 +65,9 @@ struct zFMVFile
     U8 happensBeforePortal;
 };
 
-U32 zFMVPlay(char* filename, U32 buttons, F32 time, U32 unk0, bool skippable, bool lockController);
-char* zFMVFileGetName(eFMVFile fileEnum);
+U32 zFMVPlay(const char* name, U32 buttons, F32 time, U32 uSubtitlesAID, bool skippable,
+             bool lockController);
+char* zFMVFileGetName(eFMVFile fmvId);
 zFMVFile* zFMVFileGetFile(eFMVFile fmvId);
 
 #endif

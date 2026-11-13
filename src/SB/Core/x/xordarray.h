@@ -21,6 +21,8 @@ void XOrdAppend(st_XORDEREDARRAY* array, void* elt);
 void XOrdInsert(st_XORDEREDARRAY* array, void* elt, XOrdCompareCallback compare);
 void* XOrdRemove(st_XORDEREDARRAY* array, void* elt, S32 index);
 S32 XOrdLookup(st_XORDEREDARRAY* array, const void* key, XOrdTestCallback test);
+S32 XOrdFind(st_XORDEREDARRAY* array, const void* key, XOrdTestCallback test);
+void XOrdCopy(st_XORDEREDARRAY* tgt, const st_XORDEREDARRAY* src);
 void XOrdSort(st_XORDEREDARRAY* array, S32 (*test)(void*, void*));
 
 #endif

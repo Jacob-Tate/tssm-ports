@@ -29,7 +29,10 @@ extern "C" {
 #endif
 
 extern RwBool RpSkinPluginAttach(void);
+extern RpSkin* RpSkinCreate(RwUInt32 numVertices, RwUInt32 numBones, RwMatrixWeights* weights,
+                            RwUInt32* indices, const RwMatrix* skinToBoneMatrices);
 extern RpAtomic* RpSkinAtomicSetHAnimHierarchy(RpAtomic* atomic, RpHAnimHierarchy* hierarchy);
+extern RpHAnimHierarchy* RpSkinAtomicGetHAnimHierarchy(const RpAtomic* atomic);
 extern RpSkin* RpSkinGeometryGetSkin(RpGeometry* geometry);
 extern RpGeometry* RpSkinGeometrySetSkin(RpGeometry* geometry, RpSkin* skin);
 extern RpSkin* RpSkinDestroy(RpSkin* skin);
@@ -38,6 +41,7 @@ extern const RwMatrixWeights* RpSkinGetVertexBoneWeights(RpSkin* skin);
 extern const RwUInt32* RpSkinGetVertexBoneIndices(RpSkin* skin);
 extern const RwMatrix* RpSkinGetSkinToBoneMatrices(RpSkin* skin);
 extern RpAtomic* RpSkinAtomicSetType(RpAtomic* atomic, RpSkinType type);
+extern RpSkinType RpSkinAtomicGetType(const RpAtomic* atomic);
 
 #ifdef __cplusplus
 }

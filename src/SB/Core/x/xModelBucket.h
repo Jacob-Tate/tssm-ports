@@ -7,9 +7,13 @@ struct xModelBucket
 {
     RpAtomic* Data;
     RpAtomic* OriginalData;
-    xModelInstance* List;
+    union
+    {
+        xModelInstance* List;
+        xModelBucket** BackRef;
+    };
     S32 ClipFlags;
-    U32 PipeFlags;
+    xModelPipe Pipe;
 };
 
 struct xModelAlphaBucket
@@ -25,19 +29,22 @@ extern S32 xModelBucketEnabled;
 
 void xModelBucket_RenderAlpha();
 
-S32 CmpAlphaBucket(const void* _a, const void* _b);
 void xModelBucket_PreCountReset();
-void xModelBucket_PreCountBucket(RpAtomic* data, U32 pipeFlags, U32 subObjects);
+void xModelBucket_PreCountBucket(RpAtomic* data, xModelPipe& pipe, U32 subObjects);
 void xModelBucket_PreCountAlloc(S32 maxAlphaModels);
-void xModelBucket_InsertBucket(RpAtomic* data, U32 pipeFlags, U32 subObjects);
+void FullAtomicDupe(RpAtomic* atomic, S32 count, RpAtomic** output);
+void xModelBucket_InsertBucket(RpAtomic* data, xModelPipe& pipe, U32 subObjects);
 void xModelBucket_Init();
 void xModelBucket_Deinit();
 xModelBucket** xModelBucket_GetBuckets(RpAtomic* data);
 void xModelBucket_Begin();
 void xModelBucket_Add(xModelInstance* minst);
-void xModelBucket_RenderOpaque();
+void xModelBucket_AddAlphaFade(xModelInstance* minst, F32 alphaFade);
+void xModelBucket_RenderOpaqueBegin();
+void xModelBucket_RenderOpaque(S32 maxLayer);
 void xModelBucket_RenderAlphaBegin();
 void xModelBucket_RenderAlphaLayer(S32 maxLayer);
+bool xModelBucket_RenderAny(S32 maxLayer);
 void xModelBucket_RenderAlphaEnd();
 
 #endif

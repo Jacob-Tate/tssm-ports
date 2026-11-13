@@ -5,12 +5,14 @@
 
 u8 gWriteBuf[BUFF_LEN];
 u8 gReadBuf[BUFF_LEN];
+u8 TRK_Use_BBA;
 s32 _MetroTRK_Has_Framing;
 s32 gReadCount;
 s32 gReadPos;
 s32 gWritePos;
 
-DBCommTable gDBCommTable = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+DBCommTable gDBCommTable = { nullptr, nullptr, nullptr, nullptr, nullptr,
+                             nullptr, nullptr, nullptr, nullptr, nullptr };
 
 /*
  * --INFO--
@@ -116,6 +118,7 @@ void TRKUARTInterruptHandler(void)
 DSError TRKInitializeIntDrivenUART(u32 param_0, u32 param_1, u32 param_2, volatile u8** param_3)
 {
     gDBCommTable.initialize_func(param_3, TRKEXICallBack);
+    gDBCommTable.open_func();
     return DS_NoError;
 }
 
@@ -126,7 +129,13 @@ DSError TRKInitializeIntDrivenUART(u32 param_0, u32 param_1, u32 param_2, volati
  */
 void EnableEXI2Interrupts(void)
 {
-    gDBCommTable.init_interrupts_func();
+    if (!TRK_Use_BBA)
+    {
+        if (gDBCommTable.init_interrupts_func != NULL)
+        {
+            gDBCommTable.init_interrupts_func();
+        }
+    }
 }
 
 /*
@@ -235,7 +244,7 @@ UARTError TRKReadUARTPoll(u8* arg0)
  */
 void ReserveEXI2Port(void)
 {
-    gDBCommTable.open_func();
+    gDBCommTable.post_stop_func();
 }
 
 /*
@@ -245,7 +254,7 @@ void ReserveEXI2Port(void)
  */
 void UnreserveEXI2Port(void)
 {
-    gDBCommTable.close_func();
+    gDBCommTable.pre_continue_func();
 }
 
 /*

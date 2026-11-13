@@ -23,7 +23,9 @@ namespace xhud
     struct unit_meter_widget : meter_widget
     {
         unit_meter_asset res;
-        xModelInstance* model[2][6];
+        // Indexed [unit][which]. The PS2 DWARF dump shows [2][6], but the 8-byte unit stride
+        // in unit_meter_widget::update and KrabbyPattyMeter::setup proves [6][2].
+        xModelInstance* model[6][2];
         F32 anim_time;
 
         static void load(xBase& data, xDynAsset& asset, size_t);

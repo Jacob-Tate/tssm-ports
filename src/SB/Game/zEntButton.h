@@ -39,10 +39,25 @@ void zEntButton_Load(_zEntButton* ent, xSerial* s);
 void zEntButton_Reset(_zEntButton* ent, xScene* sc);
 void zEntButton_Update(_zEntButton* ent, xScene* sc, F32 dt);
 void zEntButton_Render(_zEntButton* ent);
-void zEntButton_SetReady(_zEntButton* ent);
-void zEntButton_Press(_zEntButton* ent);
 void zEntButton_Press(_zEntButton* ent, U32 mask);
 void zEntButton_Hold(_zEntButton* ent, U32 mask);
 void zEntButton_SceneUpdate(F32 dt);
+
+inline void zEntButton_SetReady(_zEntButton* ent)
+{
+    if (ent->state != 0)
+    {
+        ent->state = 4;
+    }
+}
+
+inline void zEntButton_Press(_zEntButton* ent)
+{
+    if (ent->state == 0)
+    {
+        ent->state = 1;
+        ent->counter = 0.0f;
+    }
+}
 
 #endif

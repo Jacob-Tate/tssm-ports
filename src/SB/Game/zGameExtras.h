@@ -48,14 +48,15 @@ void zGameExtras_MoDay(S32* month, S32* day);
 void zGameExtras_SceneReset();
 void zGameExtras_SceneInit();
 void zGameExtras_SceneExit();
-void zGameExtras_SceneUpdate(F32 dt);
+void zGameExtras_SceneUpdate(const F32 dt);
 S32 zGameExtras_CheatFlags();
+void zGameCheatsUpdate(F32 dt);
 void zGameExtras_NewGameReset();
 void zGameExtras_Save(xSerial* xser);
 void zGameExtras_Load(xSerial* xser);
 S32 TestCheat(U32* cheat);
 S32 EGG_check_ExtrasFlags(EGGItem* egg);
-void AddToCheatPressed(U32 param_1);
+void AddToCheatPressed(U32 button);
 void GEC_CheatFlagAdd(S32 bit);
 void GEC_CheatFlagToggle(S32 bit);
 void GEC_dfltSound();
@@ -84,6 +85,6 @@ void GEC_cb_PanHandle();
 void zGame_HackGalleryInit();
 U32 zGame_HackIsGallery();
 
-template <class T> T xUtil_choose(T const* list, S32 size, F32 const* c);
+template <class T> T xUtil_choose(const T* list, S32 cnt, const F32* wts);
 
 #endif

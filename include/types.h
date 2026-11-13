@@ -19,6 +19,30 @@ typedef unsigned long long U64;
 
 typedef float F32;
 typedef double F64;
+#elif !defined(__MWERKS__)
+// Host builds: the GameCube widths the game code assumes, from <stdint.h>.
+#include <stdint.h>
+typedef int8_t S8;
+typedef int16_t S16;
+typedef int32_t S32;
+typedef int64_t S64;
+typedef uint8_t U8;
+typedef uint16_t U16;
+typedef uint32_t U32;
+typedef uint64_t U64;
+typedef float F32;
+typedef double F64;
+#endif
+
+// Integers as wide as a pointer, for code that keeps a pointer in an integer or does address
+// arithmetic: U32/S32 on the GameCube, uintptr_t/intptr_t on a host. Asset data that stores
+// pointers in 4-byte fields is not widened with these; those sites are marked "copy-at-load".
+#if defined(GAMECUBE) || defined(__MWERKS__)
+typedef unsigned int UPtr;
+typedef int SPtr;
+#else
+typedef uintptr_t UPtr;
+typedef intptr_t SPtr;
 #endif
 
 #ifdef NULL
@@ -36,12 +60,36 @@ typedef double F64;
 #endif
 #define FALSE 0
 
-#ifdef __MWERKS__
+// The stub is for tools that parse CodeWarrior-only sources (clangd). A host build keeps the host's
+// __declspec: the Windows CRT headers need dllimport/selectany.
+#if !defined(__MWERKS__)
 #define __declspec(x)
 // #define asm
 #endif
 
+#ifdef __MWERKS__
 #define WEAK __declspec(weak)
+#else
+#define WEAK __attribute__((weak))
+#endif
+
+// File-scope objects that retail has as LOCAL symbols but that an earlier file of the same wad
+// reaches through an `extern` declaration. CodeWarrior accepts extern-then-static in one
+// translation unit; ISO C++ does not, so host builds give them external linkage.
+#ifdef __MWERKS__
+#define WAD_STATIC static
+#else
+#define WAD_STATIC
+#endif
+
+// Objects defined in a header that several wads include. CodeWarrior compiles with -common on,
+// which makes every copy a common symbol and the linker keeps one; ISO C++ has no common symbols,
+// so host builds make the definition a C++17 inline variable, which the linker merges the same way.
+#ifdef __MWERKS__
+#define WAD_COMMON
+#else
+#define WAD_COMMON inline
+#endif
 
 typedef signed char s8;
 typedef signed short s16;
@@ -50,7 +98,11 @@ typedef signed long long s64;
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned long u32;
+#ifdef __MWERKS__
 typedef unsigned long size_t;
+#else
+#include <stddef.h> // the host's size_t (unsigned int on 32-bit MSVC targets)
+#endif
 typedef unsigned long long u64;
 
 typedef unsigned short ushort;
@@ -83,7 +135,9 @@ typedef wchar_t wint_t;
 #define TRUE 1
 #define FALSE 0
 
+#if !defined(__cplusplus) || __cplusplus < 201103L
 #define nullptr 0
+#endif
 #define null 0
 
 #ifdef __MWERKS__
@@ -96,6 +150,8 @@ typedef wchar_t wint_t;
 #define NULL 0
 #endif
 
+#ifndef UINT32_MAX
 #define UINT32_MAX 0xffffffff
+#endif
 
 #endif // !TYPES_H

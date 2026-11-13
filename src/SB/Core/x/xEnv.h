@@ -21,7 +21,7 @@ struct xEnvAsset : xBaseAsset
     F32 climateStrengthMax;
     U32 bspLightKit;
     U32 objectLightKit;
-    F32 padF1;
+    U32 flags;
     U32 bspCollisionAssetID;
     U32 bspFXAssetID;
     U32 bspCameraAssetID;
@@ -29,6 +29,8 @@ struct xEnvAsset : xBaseAsset
     U32 bspMapperCollisionID;
     U32 bspMapperFXID; // 0x3C
     F32 loldHeight;
+    xVec3 minBounds;
+    xVec3 maxBounds;
 };
 
 struct _zEnv : xBase
@@ -44,12 +46,21 @@ void zEnvRender(xEnv* env);
 void zEnvSave(_zEnv* ent, xSerial* s);
 void zEnvLoad(_zEnv* ent, xSerial* s);
 void zEnvReset(_zEnv* env);
-S32 zEnvEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase*);
+void zEnvEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase*, U32);
+
+extern xEnv* gCurXEnv;
 
 void xEnvLoadBsp(xEnv* env, const void* data, U32 datasize, S32 dataType);
+void xEnvLoadJSPList(xEnv* env, S32 dataType);
 void xEnvFree(xEnv* env);
 void xEnvSetup(xEnv* env);
 void xEnvRender(xEnv* env);
-void xEnvRender(xEnv* env, bool);
+void xEnvRender(xEnv* env, bool alpha);
+void xEnvSceneReset(xEnv* env);
+
+inline RwBBox* xEnvGetBBox(xEnv* env)
+{
+    return iEnvGetBBox(env->geom);
+}
 
 #endif

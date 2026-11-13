@@ -99,10 +99,9 @@ S32 zGameStateGet();
 eGameMode zGameModeGet();
 _GameOstrich zGameGetOstrich();
 void zGameSetOstrich(_GameOstrich o);
-S32 zGameStateFindEvent(U32* eventList, S32 eventCount, S32 targetMode, S32 targetEvent,
-                          S32* new_mode, S32* new_state);
 void zGameStateSwitchEvent(S32 event);
 void zGameStateSwitch(S32 theNewState);
 void zGameModeSwitch(eGameMode modeNew);
+void zGameStatePauseUnpauseSnd(bool pause);
 
 #endif

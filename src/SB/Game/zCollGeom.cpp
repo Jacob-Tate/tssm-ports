@@ -1,99 +1,50 @@
 #include "zCollGeom.h"
+#include "xstransvc.h"
+#include "xString.h"
+#include "zBase.h"
+#include "iModel.h"
 
-static volatile U32 sNumTables;
-static U32 sTableCount[3];
-static zCollGeomTable* sTableList[3];
-
-void zCollGeom_CamDisable(xEnt* ent)
+struct zCollisionGeomTableEntry
 {
-    ent->camcollModel = NULL;
-}
+    U32 sTableCount;
+    zCollGeomTable* sTableList;
+};
 
-void zCollGeom_CamEnable(xEnt* ent)
+// 'COLL' asset header (the name is ours): the row count, then that many zCollGeomTable rows. Rows
+// are reached with '+ 1' so that they stay at offset 4 where pointers are 8 bytes.
+struct zCollGeomAssetHeader
 {
-    if (!ent->camcollModel)
-    {
-        ent->camcollModel = ent->model;
-    }
-}
+    U32 count;
+};
 
-void zCollGeom_Init()
-{
-    sNumTables = xSTAssetCountByType('COLL');
+static U32 sCollisionGeomTableCount;
+static zCollisionGeomTableEntry sCollisionGeomTable[20];
 
-    if (sNumTables)
-    {
-        U32 tmpsize, i, k;
-        void* data;
-
-        for (k = 0; k < sNumTables; k++)
-        {
-            data = xSTFindAssetByType('COLL', k, &tmpsize);
-
-            if (!data)
-            {
-                break;
-            }
-
-            sTableCount[k] = *(U32*)data;
-
-            if (!sTableCount[k])
-            {
-                sTableList[k] = NULL;
-                break;
-            }
-
-            sTableList[k] = (zCollGeomTable*)((U32*)data + 1);
-
-            for (i = 0; i < sTableCount[k]; i++)
-            {
-                if ((U32)sTableList[k][i].baseModel)
-                {
-                    sTableList[k][i].baseModel =
-                        (RpAtomic*)xSTFindAsset((U32)sTableList[k][i].baseModel, NULL);
-                }
-
-                if ((U32)sTableList[k][i].colModel[0])
-                {
-                    sTableList[k][i].colModel[0] =
-                        (RpAtomic*)xSTFindAsset((U32)sTableList[k][i].colModel[0], NULL);
-                }
-
-                if (!sTableList[k][i].colModel[0])
-                {
-                    if (sTableList[k][i].camcolModel)
-                    {
-                        sTableList[k][i].camcolModel =
-                            (RpAtomic*)xSTFindAsset((U32)sTableList[k][i].camcolModel, NULL);
-                    }
-                }
-            }
-        }
-    }
-}
-
-// PORTED FROM BATTLE, GOOD REFERENCE
 U32 zCollGeom_EntSetup(xEnt* ent)
 {
     U32 i, j;
-    S32 auto_cam_coll;
+    bool auto_cam_coll;
+    zCollGeomTable* tableList;
 
-    auto_cam_coll = (ent->baseType == eBaseTypeStatic);
+    auto_cam_coll = (ent->baseType == eBaseTypeStatic || ent->baseType == eBaseTypeButton ||
+                     ent->baseType == eBaseTypePlatform);
 
     ent->collModel = NULL;
     ent->camcollModel = NULL;
 
     if (ent->model)
     {
-        for (j = 0; j < sNumTables; j++)
+        for (j = 0; j < sCollisionGeomTableCount; j++)
         {
-            for (i = 0; i < sTableCount[j]; i++)
+            tableList = sCollisionGeomTable[j].sTableList;
+
+            for (i = 0; i < sCollisionGeomTable[j].sTableCount; i++)
             {
-                if (sTableList[j][i].baseModel == ent->model->Data)
+                if (tableList[i].baseModel == ent->model->Data)
                 {
                     RpAtomic* imodel;
 
-                    if (imodel = sTableList[j][i].colModel[0])
+                    if (imodel = tableList[i].colModel[0])
                     {
                         xModelInstance* model = xModelInstanceAlloc(imodel, ent, 0x2000, 0, NULL);
 
@@ -106,7 +57,7 @@ U32 zCollGeom_EntSetup(xEnt* ent)
                                                  model);
                         }
                     }
-                    else if (imodel = sTableList[j][i].camcolModel)
+                    else if (imodel = tableList[i].camcolModel)
                     {
                         xModelInstance* model = xModelInstanceAlloc(imodel, ent, 0x2000, 0, NULL);
 
@@ -121,7 +72,7 @@ U32 zCollGeom_EntSetup(xEnt* ent)
                     }
                     else
                     {
-                        auto_cam_coll = 0;
+                        auto_cam_coll = false;
                     }
                 }
             }
@@ -140,4 +91,94 @@ U32 zCollGeom_EntSetup(xEnt* ent)
 
     ent->collModel = ent->model;
     return 0;
+}
+
+void zCollGeom_Init()
+{
+    U32 tmpsize, i, j, k;
+    void* data;
+    U32 hash;
+
+    sCollisionGeomTableCount = xSTAssetCountByType('COLL');
+
+    if (sCollisionGeomTableCount)
+    {
+        if (sCollisionGeomTableCount > 20)
+        {
+            sCollisionGeomTableCount = 20;
+        }
+
+        for (k = 0; k < sCollisionGeomTableCount; k++)
+        {
+            data = xSTFindAssetByType('COLL', k, &tmpsize);
+
+            if (data)
+            {
+                sCollisionGeomTable[k].sTableCount = ((zCollGeomAssetHeader*)data)->count;
+
+                if (!sCollisionGeomTable[k].sTableCount)
+                {
+                    sCollisionGeomTable[k].sTableList = NULL;
+                }
+                else
+                {
+                    // copy-at-load: COLL rows keep their RpAtomic pointers in 4-byte fields that
+                    // hold asset IDs on disk and are resolved in place below, so a host with 8-byte
+                    // pointers must widen the rows when the asset is loaded.
+                    sCollisionGeomTable[k].sTableList =
+                        (zCollGeomTable*)((zCollGeomAssetHeader*)data + 1);
+
+                    for (i = 0; i < sCollisionGeomTable[k].sTableCount; i++)
+                    {
+                        if (sCollisionGeomTable[k].sTableList[i].baseModel)
+                        {
+                            hash = (U32)(UPtr)sCollisionGeomTable[k].sTableList[i].baseModel;
+                            sCollisionGeomTable[k].sTableList[i].baseModel =
+                                (RpAtomic*)xSTFindAsset(hash, NULL);
+
+                            if (!sCollisionGeomTable[k].sTableList[i].baseModel)
+                            {
+                                sCollisionGeomTable[k].sTableList[i].baseModel =
+                                    (RpAtomic*)xSTFindAsset(xStrHashCat(hash, ".dff"), NULL);
+                            }
+                        }
+
+                        // colModel[] has one entry; the one-pass loop is Ratatouille's
+                        for (j = 0; j < 1; j++)
+                        {
+                            if (sCollisionGeomTable[k].sTableList[i].colModel[j])
+                            {
+                                sCollisionGeomTable[k].sTableList[i].colModel[j] =
+                                    (RpAtomic*)xSTFindAsset(
+                                        (U32)(UPtr)sCollisionGeomTable[k].sTableList[i].colModel[j],
+                                        NULL);
+                            }
+                        }
+
+                        if (!sCollisionGeomTable[k].sTableList[i].colModel[0] &&
+                            sCollisionGeomTable[k].sTableList[i].camcolModel)
+                        {
+                            sCollisionGeomTable[k].sTableList[i].camcolModel =
+                                (RpAtomic*)xSTFindAsset(
+                                    (U32)(UPtr)sCollisionGeomTable[k].sTableList[i].camcolModel,
+                                    NULL);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void zCollGeom_CamEnable(xEnt* ent)
+{
+    if (!ent->camcollModel)
+    {
+        ent->camcollModel = ent->model;
+    }
+}
+
+void zCollGeom_CamDisable(xEnt* ent)
+{
+    ent->camcollModel = NULL;
 }

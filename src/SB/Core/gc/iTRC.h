@@ -6,6 +6,7 @@
 #include <dolphin/os/OSFont.h>
 #include <dolphin/types.h>
 #include <dolphin/dvd.h>
+#include <dolphin/os/OSThread.h>
 #include <types.h>
 
 // Copied from bfbb repo
@@ -23,8 +24,10 @@ namespace ROMFont
     extern void* mCurrentFrameBuffer;
     extern GXRenderModeObj* mRenderMode;
     extern bool mFirstFrame;
+    extern F32 mRomFontScale;
 
-    BOOL Init();
+    void Init();
+    void InitDisplay(GXRenderModeObj* mode);
     void InitGX();
     void InitVI();
     void RenderBegin();
@@ -32,9 +35,10 @@ namespace ROMFont
     void SwapBuffers();
     void DrawCell(S32 param_1, S32 param_2, S32 param_3, S32 param_4);
     void LoadSheet(void* image_ptr);
-    S32 DrawString(S32 param_1, S32 param_2, char* string);
+    S32 DrawString(S32 x, S32 y, char* string);
     S32 GetWidth(char* string);
-    void DrawTextBox(S32 param_1, S32 param_2, S32 param_3, S32 param_4, char* str);
+    void DrawTextBox(S32 x, S32 y, S32 width, S32 height, char* string);
+    void DrawBlackScreen();
 } // namespace ROMFont
 
 // Yes, this is a namespace, not a class.
@@ -51,6 +55,13 @@ namespace iTRCDisk
     extern void (*mAsyncLoadSuspend)();
     extern void (*mMovieResetCallBack)();
     extern bool mInFModLockingCode;
+    extern bool mInCriticalSection;
+    extern bool mFModError;
+    extern OSThread* mMainThread;
+    extern OSPriority mMainPriority;
+    extern OSThread* mFModThread;
+    extern OSPriority mFModPriority;
+    extern bool mDiskErrorInHigherPriorityThread;
 
     void SetPadStopRumblingFunction(void (*)(void));
     void SetSndSuspendFunction(void (*)(void));
@@ -59,18 +70,24 @@ namespace iTRCDisk
     void SetMovieSuspendFunction(void (*)(void));
     void SetMovieResumeFunction(void (*)(void));
     void SetMovieResetCallBack(void (*)(void));
+    void EnableMovieResetCallBack(bool);
     void SetAsyncLoadResumeFunction(void (*)(void));
     void SetAsyncLoadSuspendFunction(void (*)(void));
-    bool CheckDVDAndResetState();
     bool TRCCheck();
-    bool Init();
+    void Init();
     void ResetMessage();
     void DisplayErrorMessage();
-    void SetDVDState();
+    S32 SetDVDState();
     void SetErrorMessage(const char*);
     bool IsDiskIDed();
     bool SetInFModLockingCode(bool);
+    U8 CheckDiskErrorInHigherPriorityThread();
+    bool CheckDVDAndResetState();
+    void FMODCallBack(int status);
+    void FMODUpdateDiskError(int);
 } // namespace iTRCDisk
+
+extern S32 gWasDiskError;
 
 namespace ResetButton
 {
@@ -81,8 +98,9 @@ namespace ResetButton
     void EnableReset();
     void DisableReset();
     void SetSndKillFunction(void (*func)());
-    void SetMovieKillFunciton(void (*)(void));
+    void SetMovieKillFunction(void (*)(void));
     void CheckResetButton();
+    void ResetSystem();
 
 } // namespace ResetButton
 

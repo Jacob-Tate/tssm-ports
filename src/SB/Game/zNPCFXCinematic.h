@@ -69,6 +69,7 @@ struct NCINCustom
 {
     F32 f[1];
     xVec3 v[2];
+    S32 n[3];
 };
 
 struct NCINRast
@@ -183,7 +184,7 @@ struct NCINEntry
     NCINData fxdata;
 };
 
-struct NPCCone
+struct NMECone
 {
     F32 rad_cone;
     RwRGBA rgba_top;

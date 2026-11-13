@@ -106,35 +106,45 @@ public:
 
 */
 
-// Size should be 0x130
+enum en_ISG_WHYFAIL
+{
+    ISG_WHYERR_NONE,
+    ISG_WHYERR_NOCARD,
+    ISG_WHYERR_NOROOM,
+    ISG_WHYERR_DAMAGE,
+    ISG_WHYERR_OTHER,
+    ISG_WHYERR_NOMORE
+};
+
+// GameCube layouts; member names from the Ratatouille GC DWARF.
 struct st_ISG_MEMCARD_DATA
 {
-    S32 unk_0;
-    S32 chan;
-    S32 sectorSize;
-    CARDFileInfo finfo;
-    CARDStat fstat;
-    S32 unk_pad5[3];
-    S32 unk_98;
-    CARDFileInfo unk_9c;
-    CARDStat unk_b0;
-    S32 unk_pad6[4];
-    S32 unk_12c;
+    S32 ismounted; // 0x0
+    S32 chan; // 0x4
+    S32 sectorSize; // 0x8
+    CARDFileInfo finfo; // 0xC
+    CARDStat fstat; // 0x20
+    S64 cur_ftime; // 0x90
+    S32 off_nextwrite; // 0x98
+    CARDFileInfo finfcache; // 0x9C
+    CARDStat statcache; // 0xB0
+    S64 timecache; // 0x120
+    en_ISGMC_ERRSTATUS mcerr; // 0x128
+    S32 cardIsIll; // 0x12C
 };
 
 #define ISG_NUM_SLOTS 2
 #define ISG_NUM_FILES 3
 struct st_ISGSESSION
 {
-    st_ISG_MEMCARD_DATA mcdata[ISG_NUM_SLOTS];
-    S32 slot;
-    S32 unk_264;
-    en_ASYNC_OPERR unk_268;
-    en_ASYNC_OPSTAT unk_26c;
-    S32 unk_270;
+    st_ISG_MEMCARD_DATA mcdata[ISG_NUM_SLOTS]; // 0x0
+    S32 slot; // 0x260
+    en_CHGCODE chgcode; // 0x264
+    en_ASYNC_OPERR as_operr; // 0x268
+    en_ASYNC_OPSTAT as_fakestat; // 0x26C
+    en_ISG_WHYFAIL whyFail; // 0x270
     void (*chgfunc)(void*, en_CHGCODE); // 0x274
     void* cltdata; // 0x278
-    S32 unk_27c;
 };
 
 enum en_NAMEGEN_TYPE
@@ -160,6 +170,7 @@ S32 iSGTgtHaveRoom(st_ISGSESSION* isgdata, S32 tidx, S32 fsize, const char* dpat
 S32 iSGTgtHaveRoomStartup(st_ISGSESSION* isgdata, S32 tidx, S32 fsize, const char* dpath,
                           const char* fname, S32* bytesNeeded, S32* availOnDisk, S32* needFile);
 U8 iSGCheckMemoryCard(st_ISGSESSION* isgdata, S32 index);
+U8 iSGIsGameCorrupt(st_ISGSESSION* isgdata, S32 idx);
 S32 iSGFileSize(st_ISGSESSION* isgdata, const char* fname);
 char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname);
 char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname, S32* sec, S32* min, S32* hr,
@@ -179,6 +190,6 @@ st_ISGSESSION* iSGAutoSave_Connect(S32 idx_target, void* cltdata, void (*chg)(vo
 void iSGAutoSave_Disconnect(st_ISGSESSION* isg);
 S32 iSGAutoSave_Monitor(st_ISGSESSION* isg, S32 idx_target);
 S32 iSGCheckForWrongDevice();
-S32 iSGCheckForCorruptFiles(st_ISGSESSION*, char files[][64]);
+U8 iSGCheckForCorruptFiles(st_ISGSESSION*, char files[][64]);
 
 #endif

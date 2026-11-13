@@ -1,33 +1,30 @@
 #include "xEnt.h"
 
-#include "xEvent.h"
-#include "xString.h"
-#include "xGroup.h"
-#include "xstransvc.h"
-#include "xFX.h"
-#include "xShadow.h"
-#include "xMathInlines.h"
+#include "xClumpColl.h"
 #include "xMath.h"
+#include "xShadow.h"
 
-#include "zBase.h"
-#include "zPlatform.h"
+#include "zDestructible.h"
 #include "zEntDestructObj.h"
-#include "zCollGeom.h"
-#include "zSurface.h"
-#include "zLight.h"
 #include "zGrid.h"
+#include "zLight.h"
+#include "zPlatform.h"
+#include "zSurface.h"
 
-#include "iMath3.h"
 #include "iCollide.h"
 #include "iModel.h"
-#include "iMath.h"
 
-#include <string.h>
-
+// Global in the PS2 DWARF, dead-stripped from every build. Its "" initializer is still in the
+// wad's string pool here.
+char* g_xEnt_FMT = "";
 static F32 nsn_angle = DEG2RAD(30);
-static F32 sEntityTimePassed;
 static xBox all_ents_box;
 static S32 all_ents_box_init;
+
+static S32 setMaterialTextureRestore;
+
+static void xEntCollCheckOneGrid(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xScene*, void*),
+                                 xGrid* grid);
 
 namespace
 {
@@ -94,7 +91,7 @@ namespace
             }
         }
 
-        void refresh(xEnt& ent)
+        inline void refresh(xEnt& ent)
         {
             xEnt::anim_coll_data& ac = *ent.anim_coll;
             xMat4x3& bone_mat = *(xMat4x3*)(ent.model->Mat + 1);
@@ -105,15 +102,34 @@ namespace
             bone_mat = g_I3;
         }
 
-        void pre_move(xEnt& ent);
-        void post_move(xEnt& ent);
+        inline void pre_move(xEnt& ent)
+        {
+            xMat4x3& mat = *(xMat4x3*)ent.model->Mat;
+            xEnt::anim_coll_data& ac = *ent.anim_coll;
+
+            ent.frame->mat = mat = ac.old_mat;
+        }
+
+        inline void post_move(xEnt& ent)
+        {
+            xMat4x3& mat = *(xMat4x3*)ent.model->Mat;
+            xEnt::anim_coll_data& ac = *ent.anim_coll;
+
+            ac.old_mat = ent.frame->mat;
+
+            xMat4x3Mul(&mat, &ac.new_mat, &ac.old_mat);
+
+            ent.frame->mat = mat;
+        }
     } // namespace anim_coll
+
+    void drop_stacked_entity(xEnt& ent);
+    void dismount_stacked_entity(xEnt& ent);
+    inline void drop_driven_stacked_entity(xEnt& ent);
+    void stacked_owner_destroyed(zDestructible*, void* context);
 } // namespace
 
-void xEntSetTimePassed(F32 sec)
-{
-    sEntityTimePassed = sec;
-}
+void xEntGrowGlobalBoundingBox(const xVec3* pos);
 
 void xEntSceneInit()
 {
@@ -144,7 +160,8 @@ void xEntAddHittableFlag(xEnt* ent)
                 ent->link[i].srcEvent == eEventHit_PatrickSlam ||
                 ent->link[i].srcEvent == eEventHit_Throw ||
                 ent->link[i].srcEvent == eEventHit_PaddleLeft ||
-                ent->link[i].srcEvent == eEventHit_PaddleRight)
+                ent->link[i].srcEvent == eEventHit_PaddleRight ||
+                ent->link[i].srcEvent == eEventHit_Cartwheel)
             {
                 ent->moreFlags |= 0x10;
                 break;
@@ -153,20 +170,24 @@ void xEntAddHittableFlag(xEnt* ent)
     }
 }
 
-static const char* __deadstripped()
-{
-    return "";
-}
-
-static void hack_receive_shadow(xEnt* ent)
+static inline void hack_receive_shadow(xEnt* ent)
 {
     static U32 receive_models[15] = {
-        xStrHash("db03_path_a"), xStrHash("db03_path_b"), xStrHash("db03_path_c"),
-        xStrHash("db03_path_d"), xStrHash("db03_path_e"), xStrHash("db03_path_f"),
-        xStrHash("db03_path_g"), xStrHash("db03_path_h"), xStrHash("db03_path_i"),
-        xStrHash("db03_path_j"), xStrHash("db03_path_k"), xStrHash("db03_path_l"),
-        xStrHash("db03_path_m"), // No db03_path_n, odd
-        xStrHash("db03_path_o"), xStrHash("db03_path_p"),
+        0x923EE315, // xStrHash("db03_path_a")
+        0x923EE316, // xStrHash("db03_path_b")
+        0x923EE317, // xStrHash("db03_path_c")
+        0x923EE318, // xStrHash("db03_path_d")
+        0x923EE319, // xStrHash("db03_path_e")
+        0x923EE31A, // xStrHash("db03_path_f")
+        0x923EE31B, // xStrHash("db03_path_g")
+        0x923EE31C, // xStrHash("db03_path_h")
+        0x923EE31D, // xStrHash("db03_path_i")
+        0x923EE31E, // xStrHash("db03_path_j")
+        0x923EE31F, // xStrHash("db03_path_k")
+        0x923EE320, // xStrHash("db03_path_l")
+        0x923EE321, // xStrHash("db03_path_m"), no db03_path_n
+        0x923EE323, // xStrHash("db03_path_o")
+        0x923EE324, // xStrHash("db03_path_p")
     };
 
     U32* end = receive_models + sizeof(receive_models) / sizeof(U32);
@@ -185,69 +206,23 @@ static void hack_receive_shadow(xEnt* ent)
     }
 }
 
-static const char* __deadstripped2()
+static inline void xEntAddShadowRecFlag(xEnt* ent)
 {
-    return "%s.DFF\0"
-           "%s.SKA\0"
-           "ent-table\0"
-           "idle\0"
-           "anim-file\0"
-           "anim-table";
-}
-
-static void xEntAddShadowRecFlag(xEnt* ent)
-{
-    switch (ent->baseType - 6)
+    switch (ent->baseType)
     {
-    case eBaseTypeUnknown:
-    case eBaseTypeEnv:
-    case eBaseTypePendulum:
-    case eBaseTypeVFX:
-    case eBaseTypeLight:
-    case eBaseTypeEGenerator:
+    case eBaseTypePlatform:
+    case eBaseTypeStatic:
+    case eBaseTypeButton:
+    case eBaseTypeDestructObj:
+    case eBaseTypeNPC:
+    case eBaseTypeBoulder:
     {
-        if (ent->model->PipeFlags & 0x0000ff00)
+        if (ent->model && ent->model->Pipe.Flags & 0x0000ff00)
         {
             ent->baseFlags &= 0xffef;
         }
         break;
     }
-    case eBaseTypeTrigger:
-    case eBaseTypeVillain:
-    case eBaseTypePlayer:
-    case eBaseTypePickup:
-    case eBaseTypePlatform:
-    case eBaseTypeCamera:
-    case eBaseTypeDoor:
-    case eBaseTypeSavePoint:
-    case eBaseTypeItem:
-    case eBaseTypeStatic:
-    case eBaseTypeDynamic:
-    case eBaseTypeMovePoint:
-    case eBaseTypeTimer:
-    case eBaseTypeBubble:
-    case eBaseTypePortal:
-    case eBaseTypeGroup:
-    case eBaseTypeSFX:
-    case eBaseTypeFFX:
-    case eBaseTypeCounter:
-    case eBaseTypeHangable:
-    case eBaseTypeButton:
-    case eBaseTypeProjectile:
-    case eBaseTypeSurface:
-    case eBaseTypeDestructObj:
-    case eBaseTypeGust:
-    case eBaseTypeVolume:
-    case eBaseTypeDispatcher:
-    case eBaseTypeCond:
-    case eBaseTypeUI:
-    case eBaseTypeUIFont:
-    case eBaseTypeProjectileType:
-    case eBaseTypeLobMaster:
-    case eBaseTypeFog:
-    case eBaseTypeParticleEmitter:
-    case eBaseTypeParticleSystem:
-    case eBaseTypeCutsceneMgr:
     default:
     {
         ent->baseFlags &= 0xffef;
@@ -258,11 +233,11 @@ static void xEntAddShadowRecFlag(xEnt* ent)
     hack_receive_shadow(ent);
 }
 
+// The xEntGrowGlobalBoundingBox call compiles identically to the written-out body here, but only
+// the call lets retail's inlining of xEntInit into xEntBoulder_Init happen.
 void xEntInit(xEnt* ent, xEntAsset* asset)
 {
     xBaseInit(ent, asset);
-
-    // non-matching: instruction order
 
     ent->asset = asset;
     ent->update = xEntUpdate;
@@ -278,28 +253,33 @@ void xEntInit(xEnt* ent, xEntAsset* asset)
     ent->ffx = NULL;
     ent->num_ffx = 0;
     ent->driver = NULL;
+    ent->driven = NULL;
     ent->model = NULL;
     ent->collModel = NULL;
     ent->camcollModel = NULL;
     ent->frame = NULL;
     ent->collis = NULL;
-    ent->lightKit = NULL;
     ent->simpShadow = NULL;
     ent->entShadow = NULL;
-    ent->baseFlags |= 0x20;
+    ent->baseFlags |= (U16)0x20;
 
     xGridBoundInit(&ent->gridb, ent);
 
     ent->anim_coll = NULL;
 
+    xEntGrowGlobalBoundingBox(&asset->pos);
+}
+
+void xEntGrowGlobalBoundingBox(const xVec3* pos)
+{
     if (all_ents_box_init)
     {
-        iBoxInitBoundVec(&all_ents_box, &asset->pos);
+        iBoxInitBoundVec(&all_ents_box, pos);
         all_ents_box_init = 0;
     }
     else
     {
-        iBoxBoundVec(&all_ents_box, &all_ents_box, &asset->pos);
+        iBoxBoundVec(&all_ents_box, &all_ents_box, pos);
     }
 }
 
@@ -308,73 +288,120 @@ void xEntInitForType(xEnt* ent)
     ent->update = xEntUpdate;
     ent->render = xEntRender;
 
-    if (ent->collType == XENT_COLLTYPE_TRIG)
+    switch (ent->collType)
     {
+    case XENT_COLLTYPE_TRIG:
         ent->pflags &= ~0x3;
         ent->chkby = XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR;
         ent->penby = 0;
-    }
-    else if (ent->collType == XENT_COLLTYPE_STAT)
-    {
+        break;
+    case XENT_COLLTYPE_STAT:
         ent->pflags &= ~0x3;
         ent->chkby = XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR;
         ent->penby = XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR;
-    }
-    else if (ent->collType == XENT_COLLTYPE_DYN)
-    {
+        break;
+    case XENT_COLLTYPE_DYN:
         ent->pflags |= 0x1;
         ent->move = NULL;
         ent->frame = (xEntFrame*)xMemAllocSize(sizeof(xEntFrame));
-
         memset(ent->frame, 0, sizeof(xEntFrame));
-
         ent->pflags &= (U8)~0x2;
         ent->chkby = XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR;
         ent->penby = XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR;
-    }
-    else if (ent->collType == XENT_COLLTYPE_NPC)
-    {
+        break;
+    case XENT_COLLTYPE_NPC:
         ent->pflags |= 0x1;
         ent->move = NULL;
         ent->pflags |= 0x2;
         ent->chkby = XENT_COLLTYPE_PLYR;
         ent->penby = XENT_COLLTYPE_PLYR;
-    }
-    else if (ent->collType == XENT_COLLTYPE_PLYR)
-    {
+        break;
+    case XENT_COLLTYPE_PLYR:
         ent->pflags |= 0x1;
         ent->move = NULL;
         ent->frame = (xEntFrame*)xMemAllocSize(sizeof(xEntFrame));
-
         memset(ent->frame, 0, sizeof(xEntFrame));
-
         ent->pflags |= 0x2;
         ent->chkby = 0;
         ent->penby = 0;
-
         ent->collis = (xEntCollis*)xMemAllocSize(sizeof(xEntCollis));
         ent->collis->chk = 0x2F;
         ent->collis->pen = 0x2E;
-        ent->collis->post = 0;
-        ent->collis->depenq = 0;
+        ent->collis->post = NULL;
+        ent->collis->depenq = NULL;
+        break;
     }
 
     if ((ent->moreFlags & 0x20 || ent->flags & 0x2) && !ent->frame)
     {
         ent->frame = (xEntFrame*)xMemAllocSize(sizeof(xEntFrame));
-
         memset(ent->frame, 0, sizeof(xEntFrame));
     }
 
-    ent->baseFlags |= 0x20;
-
-    // non-matching: instruction order in epilogue :|
-    // no idea how to fix that
+    // A U16 flag constant like Heavy Iron's k_XBASE_IS_ENTITY; a plain int 0x20 swaps the
+    // epilogue's restores.
+    ent->baseFlags |= (U16)0x20;
 }
 
 namespace
 {
-    F32 get_lower_extent(const xBound& bound)
+    void stacked_owner_destroyed(zDestructible*, void* context)
+    {
+        drop_stacked_entity(*(xEnt*)context);
+    }
+
+    inline void drop_driven_stacked_entity(xEnt& ent)
+    {
+        if (ent.driven && ent.driven->driver)
+        {
+            ent.driven->driver->driving_count--;
+            ent.driven->driver = NULL;
+        }
+
+        if (ent.driven)
+        {
+            ent.driven->pflags = 0x4;
+
+            // Retail bug: this walks back down to the driver, which was just cleared,
+            // rather than up to the entity stacked on top of ent.driven.
+            if (ent.driven->driver)
+            {
+                drop_driven_stacked_entity(*ent.driven->driver);
+            }
+        }
+    }
+
+    void dismount_stacked_entity(xEnt& ent)
+    {
+        if (ent.driver)
+        {
+            zDestructible* durst = zDestructibleGetFromEntity(ent.driver);
+
+            if (durst)
+            {
+                durst->destroy_notify = NULL;
+                durst->notify_context = NULL;
+            }
+
+            if (ent.driver->driving_count)
+            {
+                ent.driver->driving_count--;
+            }
+
+            ent.driver = NULL;
+
+            drop_driven_stacked_entity(ent);
+        }
+    }
+
+    void drop_stacked_entity(xEnt& ent)
+    {
+        ent.pflags = 0x4;
+
+        dismount_stacked_entity(ent);
+    }
+
+    inline F32 get_lower_extent(const xBound& bound)
     {
         switch (bound.type)
         {
@@ -409,20 +436,19 @@ namespace
         }
     }
 
-    bool collide_downward(xVec3& loc, xEnt*& hit, xScene& s, xEnt& ent, F32 max_dist)
+    inline bool collide_downward(xVec3& loc, xEnt*& hit, xScene& s, xEnt& ent, F32 max_dist)
     {
+        F32 lower_bound_extent = get_lower_extent(ent.bound);
+        xVec3& center = *xBoundCenter(&ent.bound);
         xRay3 ray;
         U8 old_bound_type;
         F32 old_bound_radius;
         xCollis coll;
 
-        F32 f31 = get_lower_extent(ent.bound);
-        xVec3* r30 = xBoundCenter(&ent.bound);
-
-        ray.origin = *r30;
+        ray.origin = center;
         ray.dir.assign(0.0f, -1.0f, 0.0f);
         ray.min_t = 0.0f;
-        ray.max_t = max_dist + f31;
+        ray.max_t = max_dist + lower_bound_extent;
         ray.flags = 0xC00;
 
         old_bound_type = ent.bound.type;
@@ -431,7 +457,8 @@ namespace
         ent.bound.type = XBOUND_TYPE_SPHERE;
         ent.bound.sph.r = 0.0f;
 
-        r30->y = FLOAT_MAX;
+        // 1000, not FLOAT_MAX: retail and the PS2 demo both load 1000.0f here.
+        center.y = 1000.0f;
 
         coll.flags = 0x100;
 
@@ -440,99 +467,78 @@ namespace
         ent.bound.type = old_bound_type;
         ent.bound.sph.r = old_bound_radius;
 
-        r30->y = ray.origin.y;
+        center.y = ray.origin.y;
 
-        if (!(coll.flags & 0x1))
+        if (coll.flags & 0x1)
         {
-            return false;
+            loc = *(xVec3*)&ent.model->Mat->pos;
+            loc.y -= coll.dist - lower_bound_extent;
+
+            hit = (xEnt*)coll.optr;
+
+            return true;
         }
 
-        loc = *(xVec3*)&ent.model->Mat->pos;
-        loc.y -= coll.dist - f31;
-
-        hit = (xEnt*)coll.optr;
-
-        return true;
+        return false;
     }
 
-    void drop_stacked_entity(xEnt&);
-
-    void stacked_owner_destroyed(zEntDestructObj&, void* context)
+    inline void setup_stacked_entity(xEnt& ent)
     {
-        drop_stacked_entity(*(xEnt*)context);
+        ent.pflags = 0x4;
     }
 
-    void mount_stacked_entity(xEnt& ent, xEnt& driver)
-    {
-        if (driver.collType == XENT_COLLTYPE_DYN)
-        {
-            if (ent.driver)
-            {
-                ent.driver->driving_count--;
-            }
-
-            ent.driver = &driver;
-
-            driver.driving_count++;
-
-            if (driver.baseType == eBaseTypeDestructObj)
-            {
-                zEntDestructObj* d = (zEntDestructObj*)&driver;
-                d->destroy_notify = stacked_owner_destroyed;
-                d->notify_context = &ent;
-            }
-        }
-    }
-
-    void dismount_stacked_entity(xEnt& ent)
+    inline void mount_stacked_entity(xEnt& ent, xEnt& driver)
     {
         if (ent.driver)
         {
-            if (ent.driver->baseType == eBaseTypeDestructObj)
-            {
-                zEntDestructObj* d = (zEntDestructObj*)ent.driver;
-                d->destroy_notify = NULL;
-                d->notify_context = NULL;
-            }
+            ent.driver->driving_count--;
+        }
 
-            ent.driver = NULL;
+        ent.driver = &driver;
+        driver.driving_count++;
+        driver.driven = &ent;
+
+        if (driver.pflags & 0x4)
+        {
+            setup_stacked_entity(*driver.driven);
+        }
+
+        zDestructible* durst = zDestructibleGetFromEntity(&driver);
+
+        if (durst)
+        {
+            durst->destroy_notify = stacked_owner_destroyed;
+            durst->notify_context = &ent;
         }
     }
 
-    void setup_stacked_entity(xEnt& ent)
-    {
-        ent.pflags = 0x4;
-    }
-
-    void drop_stacked_entity(xEnt& ent)
-    {
-        ent.pflags = 0x4;
-
-        dismount_stacked_entity(ent);
-    }
-
-    void stop_stacked_entity(xEnt& ent)
+    inline void stop_stacked_entity(xEnt& ent)
     {
         ent.pflags = 0;
     }
 
-    void update_stacked_entity(xScene& sc, xEnt& ent, F32 dt)
+    void update_stacked_entity(xScene& s, xEnt& ent, F32 dt)
     {
-        xEntApplyPhysics(&ent, &sc, dt);
-        xEntMove(&ent, &sc, dt);
+        if (ent.driver && ent.driver->pflags & 0x4)
+        {
+            return;
+        }
+
+        xEntApplyPhysics(&ent, &s, dt);
+        xEntMove(&ent, &s, dt);
 
         F32 dist = ent.model->Mat->pos.y - ent.frame->mat.pos.y;
-        xVec3 loc;
-        xEnt* hit;
+        xVec3 hitloc;
+        xEnt* hitent;
 
-        if (!(dist <= 0.0f) && collide_downward(loc, hit, sc, ent, dist))
+        if (!(dist <= 0.0f) && collide_downward(hitloc, hitent, s, ent, dist))
         {
-            ent.frame->mat.pos.y = loc.y;
+            ent.frame->mat.pos.y = hitloc.y;
             stop_stacked_entity(ent);
 
-            if (hit)
+            if (hitent)
             {
-                mount_stacked_entity(ent, *hit);
+                mount_stacked_entity(ent, *hitent);
             }
         }
     }
@@ -548,7 +554,7 @@ void xEntSetup(xEnt* ent)
 
     xBaseSetup(ent);
 
-    ent->baseFlags |= 0x20;
+    ent->baseFlags |= (U16)0x20;
 
     if (ent->asset->surfaceID)
     {
@@ -579,6 +585,12 @@ void xEntSetup(xEnt* ent)
 
             if (dent)
             {
+                if (!dent->frame)
+                {
+                    dent->collType = XENT_COLLTYPE_DYN;
+                    xEntInitForType(dent);
+                }
+
                 ent->driver = dent;
                 ent->driveMode = (S32)la->param[0];
 
@@ -601,11 +613,12 @@ void xEntSetup(xEnt* ent)
     {
         if (ent->bound.type == XBOUND_TYPE_BOX)
         {
-            iBoxForModel(&ent->bound.box.box, (ent->collModel) ? ent->collModel : ent->model);
+            xBoxForModel(ent->bound.box.box, ent->collModel ? ent->collModel : ent->model, false);
         }
         else if (ent->bound.type == XBOUND_TYPE_OBB)
         {
-            iBoxForModelLocal(&ent->bound.box.box, (ent->collModel) ? ent->collModel : ent->model);
+            xBoxForModelLocal(ent->bound.box.box, ent->collModel ? ent->collModel : ent->model,
+                              false);
         }
     }
 
@@ -624,7 +637,7 @@ void xEntSave(xEnt* ent, xSerial* s)
 {
     xBaseSave(ent, s);
 
-    if (xEntIsVisible(ent))
+    if (ent->flags & 0x1)
     {
         s->Write_b1(1);
     }
@@ -657,10 +670,12 @@ void xEntReset(xEnt* ent)
 {
     xMat4x3 frame;
     xModelInstance* minst;
+    xBox* combinedAnimBound;
+    U16 old_flags;
 
     xBaseReset(ent, ent->asset);
 
-    ent->baseFlags |= 0x20;
+    ent->baseFlags |= (U16)0x20;
     ent->flags = ent->asset->flags;
     ent->miscflags = 0;
     ent->moreFlags = ent->asset->moreFlags;
@@ -686,6 +701,16 @@ void xEntReset(xEnt* ent)
             xModelSetFrame(ent->collModel, &frame);
         }
 
+        if (ent->bound.type == XBOUND_TYPE_BOX)
+        {
+            xBoxForModel(ent->bound.box.box, ent->collModel ? ent->collModel : ent->model, false);
+        }
+        else if (ent->bound.type == XBOUND_TYPE_OBB)
+        {
+            xBoxForModelLocal(ent->bound.box.box, ent->collModel ? ent->collModel : ent->model,
+                              false);
+        }
+
         if (ent->moreFlags & 0x20)
         {
             anim_coll::reset(*ent);
@@ -704,6 +729,21 @@ void xEntReset(xEnt* ent)
             minst->Scale.y = 0.0f;
             minst->Scale.z = 0.0f;
 
+            minst = minst->Next;
+        }
+
+        minst = ent->model;
+        combinedAnimBound = &minst->combinedAnimBound;
+        combinedAnimBound->upper.x = -1e38f;
+
+        while (minst)
+        {
+            old_flags = minst->Flags;
+            minst->Flags |= 0x1;
+
+            xModelEvalSingle(minst, combinedAnimBound);
+
+            minst->Flags = old_flags;
             minst = minst->Next;
         }
     }
@@ -730,19 +770,22 @@ void xEntReset(xEnt* ent)
         ent->bupdate(ent, (xVec3*)&ent->model->Mat->pos);
     }
 
-    ent->num_updates = xrand() & 127;
-
     if (ent->flags & 0x2)
     {
-        setup_stacked_entity(*ent);
+        ent->pflags = 0x4;
+    }
+
+    if (ent->baseType == eBaseTypeStatic && ent->visUpdate)
+    {
+        ent->visUpdate(ent);
     }
 }
 
-xModelInstance* xEntLoadModel(xEnt* ent, RpAtomic* imodel)
+xModelInstance* xEntLoadModel(xEnt* ent, RpAtomic* imodel, xModelInstance* reuse_instance)
 {
     xModelInstance* model;
 
-    model = xModelInstanceAlloc(imodel, ent, 0, 0, NULL);
+    model = xModelInstanceAllocReuse(imodel, ent, 0, 0, NULL, reuse_instance);
 
     while (imodel = iModelFile_RWMultiAtomic(imodel))
     {
@@ -757,9 +800,17 @@ xModelInstance* xEntLoadModel(xEnt* ent, RpAtomic* imodel)
     return model;
 }
 
-void xEntAddToPos(xEnt* ent, const xVec3* v)
+// Dead-stripped placeholder for six strings that retail's string pool keeps with no reference
+// (BfBB's xEnt.cpp has the same set). They belong to stripped model and animation loaders whose
+// bodies are unknown.
+static const char* __deadstripped_xEnt()
 {
-    xVec3AddTo(&ent->frame->mat.pos, v);
+    return "idle\0"
+           "anim-file\0"
+           "anim-table\0"
+           "%s.SKA\0"
+           "ent-table\0"
+           "%s.DFF";
 }
 
 void xEntSetupPipeline(xModelInstance* model)
@@ -767,86 +818,77 @@ void xEntSetupPipeline(xModelInstance* model)
     xEntSetupPipeline(model->Surf, model->Data);
 }
 
-static S32 setMaterialTextureRestore;
-S32 sSetPipeline;
-static RxPipeline* oldPipe;
+// No TSSM symbol (inlined); name from the Ratatouille GC DWARF. group_idx is read into a local
+// before the NULL test, as retail does.
+static inline RwTexture* LocateSurfTexture_TexAnim(zSurfaceProps* surfProp, S32 idx_pass)
+{
+    RwTexture* txtr = NULL;
+    U32 idx_grpItem = surfProp->texanim[idx_pass].group_idx;
+
+    if (surfProp->texanim[idx_pass].txtr_animList)
+    {
+        txtr = surfProp->texanim[idx_pass].txtr_animList[idx_grpItem];
+    }
+
+    return txtr;
+}
 
 void xEntSetupPipeline(xSurface* surf, RpAtomic* model)
 {
     setMaterialTextureRestore = 0;
-    sSetPipeline = 0;
 
-    if (surf)
+    S32 setPipeline = 0;
+    zSurfaceProps* pp = NULL;
+    RwTexture* texptr = NULL;
+
+    if (surf && surf->moprops)
     {
-        zSurfaceProps* pp = (zSurfaceProps*)surf->moprops;
+        pp = (zSurfaceProps*)surf->moprops;
 
-        if (pp)
+        if (pp->texanim_flags & 0x1)
         {
-            if (pp->texanim_flags & 0x1)
+            texptr = LocateSurfTexture_TexAnim(pp, 0);
+
+            if (texptr)
             {
-                xGroup* g = (xGroup*)zSceneFindObject(pp->texanim[0].group);
-
-                if (g)
-                {
-                    U32 texid = xGroupGetItem(g, pp->texanim[0].group_idx);
-                    RwTexture* texptr = (RwTexture*)xSTFindAsset(texid, NULL);
-
-                    if (texptr)
-                    {
-                        iModelSetMaterialTexture(model, texptr);
-                        setMaterialTextureRestore = 1;
-                    }
-                }
+                iModelSetMaterialTexture(model, texptr);
+                setMaterialTextureRestore = 1;
             }
+        }
 
-            if (pp->texanim_flags & 0x2)
-            {
-                xGroup* g = (xGroup*)zSceneFindObject(pp->texanim[1].group);
+        texptr = NULL;
 
-                if (g)
-                {
-                    U32 texid = xGroupGetItem(g, pp->texanim[1].group_idx);
-                    RwTexture* texptr = (RwTexture*)xSTFindAsset(texid, NULL);
+        if (pp->texanim_flags & 0x2)
+        {
+            texptr = LocateSurfTexture_TexAnim(pp, 1);
+        }
+        else if (pp->uvfx_flags & 0x2)
+        {
+            texptr = pp->txtr_matFXDualMap;
+        }
 
-                    if (texptr)
-                    {
-                        xFXanimUV2PSetTexture(texptr);
-                        sSetPipeline = 1;
-                    }
-                }
-            }
-            else if (pp->uvfx_flags & 0x2)
-            {
-                RwTexture* texptr = (RwTexture*)xSTFindAsset(pp->asset->matfx.dualmapID, NULL);
+        xFXanimUV2PSetTexture(texptr);
 
-                if (texptr)
-                {
-                    xFXanimUV2PSetTexture(texptr);
-                    sSetPipeline = 1;
-                }
-            }
-            else
-            {
-                xFXanimUV2PSetTexture(NULL);
-            }
+        if (texptr)
+        {
+            setPipeline = 1;
+        }
 
-            if (pp->uvfx_flags & 0x3)
-            {
-                sSetPipeline = 1;
+        if (pp->uvfx_flags & 0x3)
+        {
+            setPipeline = 1;
 
-                xFXanimUVSetTranslation(&pp->uvfx[0].trans);
-                xFXanimUV2PSetTranslation(&pp->uvfx[1].trans);
-                xFXanimUVSetScale(&pp->uvfx[0].scale);
-                xFXanimUV2PSetScale(&pp->uvfx[1].scale);
-                xFXanimUVSetAngle(RAD2DEG(PI * 0.9824379f / 100000) * pp->uvfx[0].rot);
-                xFXanimUV2PSetAngle(RAD2DEG(PI * 0.9824379f / 100000) * pp->uvfx[1].rot);
-            }
+            xFXanimUVSetTranslation(&pp->uvfx[0].trans);
+            xFXanimUV2PSetTranslation(&pp->uvfx[1].trans);
+            xFXanimUVSetScale(&pp->uvfx[0].scale);
+            xFXanimUV2PSetScale(&pp->uvfx[1].scale);
+            xFXanimUVSetAngle((PI / 180.0f) * pp->uvfx[0].rot);
+            xFXanimUV2PSetAngle((PI / 180.0f) * pp->uvfx[1].rot);
+        }
 
-            if (sSetPipeline)
-            {
-                oldPipe = model->pipeline;
-                xFXanimUVAtomicSetup(model);
-            }
+        if (setPipeline)
+        {
+            xFXanimUVAtomicSetup(model, (pp->uvfx_flags >> 1) & 1);
         }
     }
 }
@@ -863,64 +905,52 @@ void xEntRestorePipeline(xSurface*, RpAtomic* model)
         iModelResetMaterial(model);
         setMaterialTextureRestore = 0;
     }
-
-    if (sSetPipeline)
-    {
-        model->pipeline = oldPipe;
-        sSetPipeline = 0;
-    }
 }
 
 void xEntRender(xEnt* ent)
 {
     S32 shadowOutside;
-    xVec3 shadVec;
 
-    if (ent->model == NULL || !xEntIsVisible(ent) || ent->model->Flags & 0x400)
+    if (ent->model && xEntIsVisible(ent) && !(ent->model->Flags & 0x400))
     {
-        return;
-    }
+        ent->_isCulled = 0;
 
-    ent->isCulled = 0;
-
-    if (ent->baseType == eBaseTypePlayer || (ent->baseType == eBaseTypeNPC && !(ent->flags & 0x40)))
-    {
-        // non-matching: 10.0f is loaded too early
-
-        shadVec.x = ent->model->Mat->pos.x;
-        shadVec.y = ent->model->Mat->pos.y - 10.0f;
-        shadVec.z = ent->model->Mat->pos.z;
-
-        if (iModelCullPlusShadow(ent->model->Data, ent->model->Mat, &shadVec, &shadowOutside))
+        if (ent->baseType == eBaseTypePlayer ||
+            (ent->baseType == eBaseTypeNPC && !(ent->flags & 0x40)))
         {
-            if (shadowOutside)
+            if (xModelCullGroupPlusShadow(ent->model, 10.0f, &shadowOutside))
             {
-                ent->isCulled = 1;
+                if (shadowOutside)
+                {
+                    ent->_isCulled = 1;
+                    return;
+                }
+                else
+                {
+                    // goto as in BfBB; without it xModelRender needs two calls.
+                    goto postrender;
+                }
+            }
+        }
+        else
+        {
+            if (xModelCullGroup(ent->model))
+            {
+                ent->_isCulled = 1;
                 return;
             }
-            else
-            {
-                goto postrender;
-            }
         }
-    }
-    else
-    {
-        if (iModelCull(ent->model->Data, ent->model->Mat))
+
+        xModelRender(ent->model);
+
+    postrender:
+
+        if ((ent->baseType == eBaseTypeNPC && ent->entShadow && !(ent->flags & 0x40)) ||
+            ent->baseType == eBaseTypePlayer)
         {
-            ent->isCulled = 1;
-            return;
+            zLightAddLocal(ent);
+            xShadow_ListAdd(ent);
         }
-    }
-
-    xModelRender(ent->model);
-
-postrender:
-
-    if ((ent->baseType == eBaseTypeNPC && !(ent->flags & 0x40)) || ent->baseType == eBaseTypePlayer)
-    {
-        zLightAddLocal(ent);
-        xShadow_ListAdd(ent);
     }
 }
 
@@ -975,8 +1005,6 @@ void xEntBeginUpdate(xEnt* ent, xScene* sc, F32 dt)
 
 void xEntEndUpdate(xEnt* ent, xScene* sc, F32 dt)
 {
-    ent->num_updates++;
-
     if (ent->model)
     {
         if (ent->frame)
@@ -991,15 +1019,25 @@ void xEntEndUpdate(xEnt* ent, xScene* sc, F32 dt)
                 xVec3* mpos = (xVec3*)&ent->model->Mat->pos;
                 xVec3Copy(mpos, &ent->frame->mat.pos);
             }
+
+            if (ent->collModel && ent->collModel != ent->model)
+            {
+                xMat4x3Copy((xMat4x3*)ent->collModel->Mat, (xMat4x3*)ent->model->Mat);
+            }
+
+            if (ent->camcollModel && ent->camcollModel != ent->model)
+            {
+                xMat4x3Copy((xMat4x3*)ent->camcollModel->Mat, (xMat4x3*)ent->model->Mat);
+            }
         }
+
+        xModelEval(ent->model);
 
         if (ent->bupdate)
         {
             xVec3* upos = (xVec3*)&ent->model->Mat->pos;
             ent->bupdate(ent, upos);
         }
-
-        xModelEval(ent->model);
 
         if (ent->moreFlags & 0x20)
         {
@@ -1061,7 +1099,7 @@ void xEntDefaultTranslate(xEnt* ent, xVec3* dpos, xMat4x3* dmat)
     }
 }
 
-static void xEntRotationToMatrix(xEntFrame* frame)
+static inline void xEntRotationToMatrix(xEntFrame* frame)
 {
     if (frame->mode & 0x20)
     {
@@ -1076,6 +1114,8 @@ static void xEntRotationToMatrix(xEntFrame* frame)
 
             xMat3x3Rot(&frame->mat, &frame->rot.axis, frame->rot.angle);
         }
+
+        frame->drot.angle = 0.0f;
     }
 }
 
@@ -1094,6 +1134,7 @@ void xEntMotionToMatrix(xEnt* ent, xEntFrame* frame)
         }
 
         xEntAddToPos(ent, &frame->dpos);
+        xVec3Init(&ent->frame->dpos, 0.0f, 0.0f, 0.0f);
     }
 
     if (frame->mode & 0x8)
@@ -1104,6 +1145,7 @@ void xEntMotionToMatrix(xEnt* ent, xEntFrame* frame)
         }
 
         xVec3AddTo(&frame->vel, &frame->dvel);
+        xVec3Init(&ent->frame->dvel, 0.0f, 0.0f, 0.0f);
     }
 
     if (!(frame->mode & 0x1000))
@@ -1119,7 +1161,10 @@ void xEntMove(xEnt* ent, xScene* sc, F32 dt)
         anim_coll::pre_move(*ent);
     }
 
-    ent->move(ent, sc, dt, ent->frame);
+    if (ent->move)
+    {
+        ent->move(ent, sc, dt, ent->frame);
+    }
 
     xEntMotionToMatrix(ent, ent->frame);
 
@@ -1127,24 +1172,27 @@ void xEntMove(xEnt* ent, xScene* sc, F32 dt)
     {
         xEntFrame* dframe = ent->driver->frame;
 
-        if (ent->driveMode == 0)
+        if (dframe)
         {
-            xVec3 dpos;
-            xVec3Sub(&dpos, &dframe->mat.pos, &dframe->oldmat.pos);
+            if (ent->driveMode == 0)
+            {
+                xVec3 dpos;
+                xVec3Sub(&dpos, &dframe->mat.pos, &dframe->oldmat.pos);
 
-            ent->transl(ent, &dpos, NULL);
-        }
-        else if (ent->driveMode == 1)
-        {
-            RwMatrixUpdate((RwMatrix*)&dframe->oldmat);
+                ent->transl(ent, &dpos, NULL);
+            }
+            else if (ent->driveMode == 1)
+            {
+                RwMatrixUpdate((RwMatrix*)&dframe->oldmat);
 
-            xMat4x3 invOldmat;
-            RwMatrixInvert((RwMatrix*)&invOldmat, (RwMatrix*)&dframe->oldmat);
+                xMat4x3 invOldmat;
+                RwMatrixInvert((RwMatrix*)&invOldmat, (RwMatrix*)&dframe->oldmat);
 
-            xMat4x3 deltaMat;
-            xMat4x3Mul(&deltaMat, &invOldmat, &dframe->mat);
+                xMat4x3 deltaMat;
+                xMat4x3Mul(&deltaMat, &invOldmat, &dframe->mat);
 
-            ent->transl(ent, NULL, &deltaMat);
+                ent->transl(ent, NULL, &deltaMat);
+            }
         }
     }
 
@@ -1154,35 +1202,14 @@ void xEntMove(xEnt* ent, xScene* sc, F32 dt)
     }
 }
 
-namespace
-{
-    namespace anim_coll
-    {
-        void post_move(xEnt& ent)
-        {
-            xMat4x3& mat = *(xMat4x3*)ent.model->Mat;
-            xEnt::anim_coll_data& ac = *ent.anim_coll;
-
-            ac.old_mat = ent.frame->mat;
-
-            xMat4x3Mul(&mat, &ac.new_mat, &ac.old_mat);
-
-            ent.frame->mat = mat;
-        }
-
-        void pre_move(xEnt& ent)
-        {
-            xMat4x3& mat = *(xMat4x3*)ent.model->Mat;
-            xEnt::anim_coll_data& ac = *ent.anim_coll;
-
-            ent.frame->mat = mat = ac.old_mat;
-        }
-    } // namespace anim_coll
-} // namespace
-
+// The assert after the dposvel initialization is Ratatouille's, and the two placeholders stand
+// for its debug prints after the clipping scales. They make xEntUpdate and update_stacked_entity
+// call this out of line, as retail does.
 void xEntApplyPhysics(xEnt* ent, xScene* sc, F32 dt)
 {
     xVec3 dposvel = { 0, 0, 0 };
+
+    xASSERT(ent->frame);
 
     if (ent->pflags & 0x4 && sc->flags & 0x1)
     {
@@ -1214,15 +1241,74 @@ void xEntApplyPhysics(xEnt* ent, xScene* sc, F32 dt)
         {
             dposvel.x *= scaleXZ;
             dposvel.z *= scaleXZ;
+            xASSERT_PLACEHOLDER();
         }
 
         if (scaleY < 1.0f)
         {
             dposvel.y *= scaleY;
+            xASSERT_PLACEHOLDER();
         }
     }
 
     xEntAddToPos(ent, &dposvel);
+}
+
+static inline void xEntCollideCeiling(xEnt* p, xScene* sc, F32 dt)
+{
+    xCollis* coll = &p->collis->colls[1];
+    U8 idx;
+    xCollis* ml = coll;
+    F32 sbr;
+
+    if (p->bound.type == XBOUND_TYPE_SPHERE)
+    {
+        sbr = p->bound.sph.r;
+    }
+    else
+    {
+        sbr = 0.7f;
+    }
+
+    for (idx = 6; idx < p->collis->idx; idx++)
+    {
+        xCollis* mf = &p->collis->colls[idx];
+        xEnt* fent = (xEnt*)mf->optr;
+
+        if (fent)
+        {
+            if (!((p->collis->depenq) ?
+                      p->collis->depenq(p, fent, sc, dt, mf) :
+                      (fent->collType & p->collis->pen && fent->penby & p->collType)))
+            {
+                continue;
+            }
+        }
+        else if (!(p->collis->pen & 0x20))
+        {
+            continue;
+        }
+
+        if (mf->hdng.y > icos(0.78539819f) && mf->dist < ml->dist)
+        {
+            ml = mf;
+        }
+    }
+
+    if (ml != coll)
+    {
+        F32 ceil_dist = ml->dist * (F32)iabs(ml->hdng.y);
+
+        *coll = *ml;
+
+        ml->flags |= 0xA;
+
+        if (ceil_dist < sbr)
+        {
+            p->frame->mat.pos.y -= sbr - ceil_dist;
+            p->frame->vel.y = 0.0f;
+        }
+    }
 }
 
 void xEntCollide(xEnt* ent, xScene* sc, F32 dt)
@@ -1348,20 +1434,20 @@ void xEntCollCheckEnv(xEnt* p, xScene* sc)
     coll = &p->collis->colls[p->collis->idx];
     coll->flags = 0x1F00;
 
-    ncolls = 18 - p->collis->idx;
+    ncolls = xSphereHitsEnv3(&p->bound.sph, sc->env, coll, 18 - p->collis->idx, 0.78539819f);
 
-    p->collis->idx += (U8)iSphereHitsEnv3(&p->bound.sph, sc->env, coll, ncolls, 0.78539819f);
+    p->collis->idx = p->collis->idx + ncolls;
     p->collis->env_eidx = p->collis->idx;
 }
 
 static void xEntCollCheckOneGrid(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xScene*, void*),
                                  xGrid* grid)
 {
-    xVec3* r26 = xEntGetCenter(p);
+    xVec3* pcenter = xEntGetCenter(p);
     xGridIterator it;
     S32 px, pz;
 
-    xGridBound* cell = xGridIterFirstCell(grid, r26->x, r26->y, r26->z, px, pz, it);
+    xGridBound* cell = xGridIterFirstCell(grid, pcenter->x, pcenter->y, pcenter->z, px, pz, it);
 
     while (cell)
     {
@@ -1373,25 +1459,23 @@ static void xEntCollCheckOneGrid(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xSce
         cell = xGridIterNextCell(it);
     }
 
-    // non-matching: float scheduling
+    xBox clbox;
+    clbox.lower.x = grid->csizex * px;
+    clbox.lower.z = grid->csizez * pz;
+    clbox.lower.x += grid->minx;
+    clbox.lower.z += grid->minz;
 
-    F32 halfsizez = (grid->csizez * 0.5f);
-    F32 halfsizex = (grid->csizex * 0.5f);
+    F32 clcenterx = 0.5f * grid->csizex;
+    clcenterx += clbox.lower.x;
 
-    F32 clcenterx = grid->csizex * px;
-    F32 clcenterz = grid->csizez * pz;
-
-    clcenterx += grid->minx;
-    clcenterx += halfsizex;
-
-    clcenterz += halfsizez;
-    clcenterz += grid->minz;
+    F32 clcenterz = 0.5f * grid->csizez;
+    clcenterz += clbox.lower.z;
 
     static S32 k;
 
-    if (r26->x < clcenterx)
+    if (pcenter->x < clcenterx)
     {
-        if (r26->z < clcenterz)
+        if (pcenter->z < clcenterz)
         {
             k = 0;
         }
@@ -1402,7 +1486,7 @@ static void xEntCollCheckOneGrid(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xSce
     }
     else
     {
-        if (r26->z < clcenterz)
+        if (pcenter->z < clcenterz)
         {
             k = 3;
         }
@@ -1499,6 +1583,7 @@ void xEntCollCheckNPCs(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xScene*, void*
 }
 
 S32 xent_entent = 0;
+
 xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
 {
     xent_entent = 1;
@@ -1519,7 +1604,13 @@ xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
         return ent;
     }
 
-    if (ent->id == p->id && (ent == p || ent->baseType != eBaseTypeBoulder))
+    if (ent == p)
+    {
+        xent_entent = 0;
+        return ent;
+    }
+
+    if (ent->id == p->id && ent->baseType != eBaseTypeBoulder && ent->baseType != eBaseTypeProjBomb)
     {
         xent_entent = 0;
         return ent;
@@ -1548,8 +1639,8 @@ xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
         if (modl_coll)
         {
             xBound tmp;
-            xBound* bptr; // unused
-            U8 ncolls;
+            xBound* bptr;
+            U8 ncolls = 0;
             xVec3 *upper, *lower;
             U8 idx;
 
@@ -1557,36 +1648,32 @@ xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
 
             if (p->bound.type == XBOUND_TYPE_SPHERE)
             {
-                xModelInstance* r4 = (ent->collModel) ? ent->collModel : ent->model;
-                ncolls = 15 - p->collis->idx;
-                idx = iSphereHitsModel3(&p->bound.sph, r4, coll, ncolls, 0.78539819f);
+                ncolls =
+                    xSphereHitsModel3(&p->bound.sph, ent->collModel ? ent->collModel : ent->model,
+                                      coll, 15 - p->collis->idx, 0.78539819f);
             }
-            else if (p->bound.type == XBOUND_TYPE_BOX)
+            else if (p->bound.type == XBOUND_TYPE_BOX || p->bound.type == XBOUND_TYPE_OBB)
             {
                 upper = &p->bound.box.box.upper;
                 lower = &p->bound.box.box.lower;
 
                 tmp.type = XBOUND_TYPE_SPHERE;
-
                 xVec3Add(&tmp.sph.center, upper, lower);
                 xVec3SMulBy(&tmp.sph.center, 0.5f);
-
                 tmp.sph.r =
                     0.167f * (upper->x + upper->y + upper->z - lower->x - lower->y - lower->z);
+                // set but never read: retail still keeps tmp on the stack
+                bptr = &tmp;
 
-                // none of the code above is used for anything... maybe debug stuff
-
-                xModelInstance* r4 = (ent->collModel) ? ent->collModel : ent->model;
-                ncolls = 15 - p->collis->idx;
-                idx = iSphereHitsModel3(&p->bound.sph, r4, coll, ncolls, 0.78539819f);
+                ncolls =
+                    xSphereHitsModel3(&p->bound.sph, ent->collModel ? ent->collModel : ent->model,
+                                      coll, 15 - p->collis->idx, 0.78539819f);
             }
 
-            // idx might be undefined here...!
-
-            for (U8 i = 0; i < idx; i++)
+            for (idx = 0; idx < ncolls; idx++)
             {
-                coll[i].optr = ent;
-                coll[i].mptr = ent->model;
+                coll[idx].optr = ent;
+                coll[idx].mptr = ent->model;
 
                 p->collis->idx++;
             }
@@ -1731,67 +1818,11 @@ void xEntCollideFloor(xEnt* p, xScene* sc, F32 dt)
     }
 }
 
-void xEntCollideCeiling(xEnt* p, xScene* sc, F32 dt)
-{
-    xCollis* coll = &p->collis->colls[1];
-    U8 idx;
-    xCollis* ml = coll;
-    F32 sbr;
-
-    if (p->bound.type == XBOUND_TYPE_SPHERE)
-    {
-        sbr = p->bound.sph.r;
-    }
-    else
-    {
-        sbr = 0.7f;
-    }
-
-    for (idx = 6; idx < p->collis->idx; idx++)
-    {
-        xCollis* mf = &p->collis->colls[idx];
-        xEnt* fent = (xEnt*)mf->optr;
-
-        if (fent)
-        {
-            if (!((p->collis->depenq) ?
-                      p->collis->depenq(p, fent, sc, dt, mf) :
-                      (fent->collType & p->collis->pen && fent->penby & p->collType)))
-            {
-                continue;
-            }
-        }
-        else if (!(p->collis->pen & 0x20))
-        {
-            continue;
-        }
-
-        if (mf->hdng.y > icos(0.78539819f) && mf->dist < ml->dist)
-        {
-            ml = mf;
-        }
-    }
-
-    if (ml != coll)
-    {
-        F32 ceil_dist = ml->dist * (F32)iabs(ml->hdng.y);
-
-        *coll = *ml;
-
-        ml->flags |= 0xA;
-
-        if (ceil_dist < sbr)
-        {
-            p->frame->mat.pos.y -= sbr - ceil_dist;
-            p->frame->vel.y = 0.0f;
-        }
-    }
-}
-
 void xEntCollideWalls(xEnt* p, xScene* sc, F32 dt)
 {
     xCollis* coll;
     xEnt* cent;
+    // Not in the DWARF order (sidx, idx): that order changes the generated code.
     U8 idx, sidx;
     F32 sbr;
 
@@ -1908,62 +1939,45 @@ xBox* xEntGetAllEntsBox()
     return &all_ents_box;
 }
 
-void xEntAnimateCollision(xEnt& ent, bool on)
-{
-    if (on && !(ent.moreFlags & 0x20))
-    {
-        ent.moreFlags |= 0x20;
-
-        if (!ent.frame)
-        {
-            ent.frame = (xEntFrame*)xMemAllocSize(sizeof(xEntFrame));
-
-            memset(ent.frame, 0, sizeof(xEntFrame));
-        }
-
-        anim_coll::reset(ent);
-    }
-    else if (!on && ent.moreFlags & 0x20)
-    {
-        ent.moreFlags &= (U8)~0x20;
-    }
-}
-
 bool xEntValidType(U8 type)
 {
     return type == eBaseTypeTrigger || type == eBaseTypeVillain || type == eBaseTypePlayer ||
            type == eBaseTypePickup || type == eBaseTypePlatform || type == eBaseTypeDoor ||
            type == eBaseTypeSavePoint || type == eBaseTypeItem || type == eBaseTypeStatic ||
            type == eBaseTypeDynamic || type == eBaseTypeBubble || type == eBaseTypePendulum ||
-           type == eBaseTypeHangable || type == eBaseTypeButton || type == eBaseTypeProjectile ||
-           type == eBaseTypeDestructObj || type == eBaseTypeUI || type == eBaseTypeUIFont ||
-           type == eBaseTypeProjectileType || type == eBaseTypeEGenerator || type == eBaseTypeNPC ||
-           type == eBaseTypeBoulder || type == eBaseTypeTeleportBox || type == eBaseTypeZipLine;
+           type == eBaseTypeHangable || type == eBaseTypeButton || type == eBaseTypeProj ||
+           type == eBaseTypeProjBomb || type == eBaseTypeDestructObj || type == eBaseTypeUI ||
+           type == eBaseTypeUIFont || type == eBaseTypeProjectileType ||
+           type == eBaseTypeEGenerator || type == eBaseTypeNPC || type == eBaseTypeBoulder ||
+           type == eBaseTypeTeleportBox || type == eBaseTypeZipLine;
 }
 
-void xEntReposition(xEnt& ent, const xMat4x3& mat)
+void xEntOpacityInit(xEntOpacity* opacity, xEnt*)
 {
-    *(xMat4x3*)ent.model->Mat = mat;
+    opacity->delta_opacity_2 = opacity->delta_opacity = 0.0f;
+}
 
-    if (ent.collModel && ent.collModel != ent.model)
+void xEntOpacityUpdate(xEntOpacity* opacity, xEnt* ent, F32 dt)
+{
+    opacity->delta_opacity += opacity->delta_opacity_2 * dt;
+
+    if (ent->model)
     {
-        *(xMat4x3*)ent.collModel->Mat = mat;
+        ent->model->Alpha += opacity->delta_opacity * dt;
+        ent->model->Alpha = CLAMP(ent->model->Alpha, 0.0f, 1.0f);
+
+        if ((ent->model->Pipe.Flags & 0x30000) != 0x10000)
+        {
+            if (ent->model->Alpha != 1.0f && ent->model->Alpha != 0.0f)
+            {
+                ent->model->Pipe.Flags |= 0x20000;
+            }
+            else
+            {
+                ent->model->Pipe.Flags &= ~0x20000;
+            }
+        }
     }
-
-    if (ent.frame)
-    {
-        ent.frame->mat = mat;
-    }
-
-    if (ent.bound.mat)
-    {
-        *ent.bound.mat = mat;
-    }
-
-    ent.bound.sph.center = mat.pos;
-
-    xBoundUpdate(&ent.bound);
-    zGridUpdateEnt(&ent);
 }
 
 void xEntInitShadow(xEnt& ent, xEntShadow& shadow)
@@ -1976,4 +1990,8 @@ void xEntInitShadow(xEnt& ent, xEntShadow& shadow)
     shadow.dst_cast = -1.0f;
     shadow.radius[0] = -1.0f;
     shadow.radius[1] = -1.0f;
+}
+
+void xEntStoreCheckPoint()
+{
 }

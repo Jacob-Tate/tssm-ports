@@ -20,6 +20,6 @@ void zPortalInit(void* portal, void* passet);
 void zPortalInit(_zPortal* portal, xPortalAsset* passet);
 void zPortalSave(_zPortal* ent, xSerial* s);
 void zPortalLoad(_zPortal* ent, xSerial* s);
-S32 zPortalEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* b3);
+void zPortalEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* b3, U32);
 
 #endif

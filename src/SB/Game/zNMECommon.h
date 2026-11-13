@@ -1,6 +1,8 @@
 #ifndef ZNMECOMMON_H
 #define ZNMECOMMON_H
 
+#include "zNMECentral.h"
+#include "zNPCTypes.h"
 #include "xNPCBasic.h"
 #include "xDynAsset.h"
 #include "xListItem.h"
@@ -15,117 +17,11 @@
 #include "zNPCSndTable.h"
 #include "zMovePoint.h"
 #include "zShrapnel.h"
-
-// DIRECTLY PORTED FROM BFBB
-
-typedef struct NPCMsg;
-
-enum en_npcparm
-{
-    NPC_PARM_NONE,
-    NPC_PARM_MOVERATE,
-    NPC_PARM_TURNRATE,
-    NPC_PARM_ACCEL,
-    NPC_PARM_DRIFT,
-    NPC_PARM_MASS,
-    NPC_PARM_TOSSGRAV,
-    NPC_PARM_TOSSELASTIC,
-    NPC_PARM_BND_ISBOX,
-    NPC_PARM_BND_CENTER,
-    NPC_PARM_BND_EXTENT,
-    NPC_PARM_HITPOINTS,
-    NPC_PARM_MODELSCALE,
-    NPC_PARM_DETECT_RAD,
-    NPC_PARM_DETECT_HYT,
-    NPC_PARM_DETECT_OFF,
-    NPC_PARM_ATTACK_RAD,
-    NPC_PARM_ATTACK_FOV,
-    NPC_PARM_SND_RAD,
-    NPC_PARM_TIMEFIDGET,
-    NPC_PARM_TIMEATTACK,
-    NPC_PARM_TIMESTUN,
-    NPC_PARM_TIMEALERT,
-    NPC_PARM_VTX_ATTACKBASE,
-    NPC_PARM_VTX_ATTACK,
-    NPC_PARM_VTX_ATTACK1,
-    NPC_PARM_VTX_ATTACK2,
-    NPC_PARM_VTX_ATTACK3,
-    NPC_PARM_VTX_ATTACK4,
-    NPC_PARM_VTX_EYEBALL,
-    NPC_PARM_VTX_DMGSMOKEA,
-    NPC_PARM_VTX_DMGSMOKEB,
-    NPC_PARM_VTX_DMGSMOKEC,
-    NPC_PARM_VTX_DMGFLAMEA,
-    NPC_PARM_VTX_DMGFLAMEB,
-    NPC_PARM_VTX_DMGFLAMEC,
-    NPC_PARM_VTX_PROPEL,
-    NPC_PARM_VTX_EXHAUST,
-    NPC_PARM_VTX_GEN01,
-    NPC_PARM_VTX_GEN02,
-    NPC_PARM_VTX_GEN03,
-    NPC_PARM_VTX_GEN04,
-    NPC_PARM_VTX_GEN05,
-    NPC_PARM_ATK_SIZE01,
-    NPC_PARM_ATK_FRAMES01,
-    NPC_PARM_ATK_FRAMES01A,
-    NPC_PARM_ATK_FRAMES01B,
-    NPC_PARM_ATK_FRAMES02,
-    NPC_PARM_ATK_FRAMES02A,
-    NPC_PARM_ATK_FRAMES02B,
-    NPC_PARM_ATK_FRAMES03,
-    NPC_PARM_ATK_FRAMES03A,
-    NPC_PARM_ATK_FRAMES03B,
-    NPC_PARM_ESTEEM_A,
-    NPC_PARM_ESTEEM_B,
-    NPC_PARM_ESTEEM_C,
-    NPC_PARM_ESTEEM_D,
-    NPC_PARM_ESTEEM_E,
-    NPC_PARM_SHADOW_CASTDIST,
-    NPC_PARM_SHADOW_RADCACHE,
-    NPC_PARM_SHADOW_RADRASTER,
-    NPC_PARAM_TEST_COUNT,
-    NPC_PARM_ENDTAG_INI,
-    NPC_PARM_FIRSTMVPT,
-    NPC_PARM_ENDTAG_PROPS,
-    NPC_PARM_BOGUSSHARE,
-    NPC_PARM_ENDTAG_SHARE,
-    NPC_PARM_NOMORE,
-    NPC_PARM_FORCEINT = 0x7fffffff
-};
-
-enum en_NPC_GOAL_SPOT
-{
-    NPC_GSPOT_START = 0x20,
-    NPC_GSPOT_RESUME,
-    NPC_GSPOT_FINISH,
-    NPC_GSPOT_STARTALT,
-    NPC_GSPOT_ALTA,
-    NPC_GSPOT_ALTB,
-    NPC_GSPOT_PATROLPAUSE,
-    NPC_GSPOT_NOMORE,
-    NPC_GSPOT_FORCEINT = 0x7fffffff
-};
-
-enum en_NPC_CARRY_STATE
-{
-    zNPCCARRY_NONE,
-    zNPCCARRY_PICKUP,
-    zNPCCARRY_THROW,
-    zNPCCARRY_ATTEMPTPICKUP,
-    zNPCCARRY_FORCEINT = 0x7fffffff
-};
-
-enum en_npcvibe
-{
-    NPC_VIBE_SOFT,
-    NPC_VIBE_NORM,
-    NPC_VIBE_HARD,
-    NPC_VIBE_BUILD_A,
-    NPC_VIBE_BUILD_B,
-    NPC_VIBE_BUILD_C,
-    NPC_VIBE_NOMORE,
-    NPC_VIBE_FORCE = 0x7fffffff
-};
+#include "zNPC.h"
+#include "zEnt.h"
+#include "zNMENPCWrapper.h"
+#include "zGlobals.h"
+#include "zGame.h"
 
 struct xEntNPCAsset
 {
@@ -143,202 +39,12 @@ struct xEntNPCAsset
 //     U32 settings;
 // };
 
-enum en_npcbtyp
+// The asset named by xEntNPCAssetIN::settings: a parameter count followed by the parameter
+// list. Not in the PS2 DWARF; name and layout from the Ratatouille GC DWARF (zNPCCommon::init).
+struct xNPCSettingsIN2Asset
 {
-    NPCP_BASIS_NONE,
-    NPCP_BASIS_EVILROBOT,
-    NPCP_BASIS_FRIENDLYROBOT,
-    NPCP_BASIS_LOVINGCITIZEN,
-    NPCP_BASIS_GRUMPYCITIZEN,
-    NPCP_BASIS_NOMORE,
-    NPCP_BASIS_FORCE = 0x7fffffff
-};
-
-enum en_dupowavmod
-{
-    NPCP_DUPOWAVE_CONTINUOUS,
-    NPCP_DUPOWAVE_DISCREET,
-    NPCP_DUPOWAVE_NOMORE,
-    NPCP_DUPOWAVE_FORCE = 0x7fffffff
-};
-
-struct zNPCSettings : xDynAsset
-{
-    en_npcbtyp basisType;
-    S8 allowDetect;
-    U8 allowPatrol;
-    U8 allowWander;
-    U8 reduceCollide;
-    S8 useNavSplines;
-    S8 pad[3];
-    S8 allowChase;
-    S8 allowAttack;
-    S8 assumeLOS;
-    S8 assumeFOV;
-    en_dupowavmod duploWaveMode;
-    F32 duploSpawnDelay;
-    S32 duploSpawnLifeMax;
-};
-
-struct NPCConfig : xListItem<NPCConfig>
-{
-    U32 modelID;
-    S32 flg_config;
-    F32 spd_turnMax;
-    F32 spd_moveMax;
-    F32 fac_accelMax;
-    F32 fac_driftMax;
-    F32 fac_gravKnock;
-    F32 fac_elastic;
-    S32 pts_damage;
-    S32 useBoxBound;
-    xVec3 off_bound;
-    xVec3 dim_bound;
-    F32 npcMass;
-    F32 npcMassInv;
-    F32 rad_detect;
-    F32 hyt_detect;
-    F32 off_detect;
-    F32 rad_attack;
-    F32 fov_attack;
-    xVec3 scl_model;
-    F32 tym_attack;
-    F32 tym_fidget;
-    F32 tym_stun;
-    F32 tym_alert;
-    F32 dst_castShadow;
-    F32 rad_shadowCache;
-    F32 rad_shadowRaster;
-    F32 rad_dmgSize;
-    S32 flg_vert;
-    xModelTag tag_vert[20];
-    xVec3 animFrameRange[9];
-    S32 cnt_esteem[5];
-    F32 rad_sound;
-    NPCSndTrax* snd_trax; // 0x39C
-    NPCSndTrax* snd_traxShare; // 0x3A0
-    S32 test_count;
-    U8 talk_filter[4];
-    U8 talk_filter_size;
-};
-
-enum en_LASSO_STATUS
-{
-    LASS_STAT_DONE,
-    LASS_STAT_PENDING,
-    LASS_STAT_GRABBING,
-    LASS_STAT_TOSSING,
-    LASS_STAT_NOMORE,
-    LASS_STAT_UNK_5, // needed to match switch in zNPCCommon::LassoNotify, checks value of 5
-    LASS_STAT_FORCEINT = 0x7fffffff
-};
-
-enum en_mdlvert
-{
-    NPC_MDLVERT_ATTACKBASE,
-    NPC_MDLVERT_ATTACK,
-    NPC_MDLVERT_ATTACK1,
-    NPC_MDLVERT_ATTACK2,
-    NPC_MDLVERT_ATTACK3,
-    NPC_MDLVERT_ATTACK4,
-    NPC_MDLVERT_LOSEYEBALL,
-    NPC_MDLVERT_DMGSMOKE_A,
-    NPC_MDLVERT_DMGSMOKE_B,
-    NPC_MDLVERT_DMGSMOKE_C,
-    NPC_MDLVERT_DMGFLAME_A,
-    NPC_MDLVERT_DMGFLAME_B,
-    NPC_MDLVERT_DMGFLAME_C,
-    NPC_MDLVERT_PROPEL,
-    NPC_MDLVERT_EXHAUST,
-    NPC_MDLVERT_GEN01,
-    NPC_MDLVERT_GEN02,
-    NPC_MDLVERT_GEN03,
-    NPC_MDLVERT_GEN04,
-    NPC_MDLVERT_GEN05,
-    NPC_MDLVERT_NOMORE,
-    NPC_MDLVERT_FORCEINT = 0x7fffffff
-};
-
-enum en_LASSO_EVENT
-{
-    LASS_EVNT_BEGIN,
-    LASS_EVNT_ENDED,
-    LASS_EVNT_GRABSTART,
-    LASS_EVNT_GRABEND,
-    LASS_EVNT_YANK,
-    LASS_EVNT_ABORT,
-    LASS_EVNT_NOMORE,
-    LASS_EVNT_FORCEINT = 0x7fffffff
-};
-
-enum en_NPC_MSG_ID
-{
-    NPC_MID_NONE,
-    NPC_MID_SYSEVENT,
-    NPC_MID_RESPAWN,
-    NPC_MID_DAMAGE,
-    NPC_MID_EXPLOSION,
-    NPC_MID_BUNNYHOP,
-    NPC_MID_DTRON_NPCEMIT,
-    NPC_MID_DTRON_NPCAVAIL,
-    NPC_MID_DTRON_ISDEAD,
-    NPC_MID_CHAT_REQUEST,
-    NPC_MID_CHAT_DECLINE,
-    NPC_MID_CHAT_ACCEPT,
-    NPC_MID_CHAT_DONE,
-    NPC_MID_CHAT_ABORT,
-    NPC_MID_TALKSTART,
-    NPC_MID_TALKON,
-    NPC_MID_TALKOFF,
-    NPC_MID_SAWPLYR,
-    NPC_MID_NEEDMEDIC,
-    NPC_MID_UNDERATTACK,
-    NPC_MID_NPCDIED,
-    NPC_MID_PLYRSPATULA,
-    NPC_MID_BECOMESCARED,
-    NPC_MID_NOLONGERSCARED,
-    NPC_MID_CELEBRATE,
-    NPC_MID_STUN,
-    NPC_MID_SCRIPTBEGIN,
-    NPC_MID_SCRIPTEND,
-    NPC_MID_SCRIPTHALT,
-    NPC_MID_DEV_ANIMSPIN,
-    NPC_MID_DEV_ANIMCYCLE,
-    NPC_MID_DEV_HEROMODE,
-    NPC_MID_DEV_DONE,
-    NPC_MID_NOMORE,
-    NPC_MID_FORCE = 0x7fffffff
-};
-
-enum en_NPC_MSG_DATA
-{
-    NPC_MDAT_BLANK,
-    NPC_MDAT_SYSEVENT,
-    NPC_MDAT_BLAST,
-    NPC_MDAT_CHAT,
-    NPC_MDAT_SPAWN,
-    NPC_MDAT_TARGET,
-    NPC_MDAT_DAMAGE,
-    NPC_MDAT_STUN,
-    NPC_MDAT_SCRIPT,
-    NPC_MDAT_MOUNT,
-    NPC_MDAT_AREANOTIFY,
-    NPC_MDAT_NOMORE,
-    NPC_MDAT_FORCE = 0x7fffffff
-};
-
-enum en_SM_NOTICES
-{
-    SM_NOTE_NPCDIED,
-    SM_NOTE_NPCSTANDBY,
-    SM_NOTE_NPCALIVE,
-    SM_NOTE_DUPPAUSE,
-    SM_NOTE_DUPRESUME,
-    SM_NOTE_DUPSETDELAY,
-    SM_NOTE_DUPDEAD,
-    SM_NOTE_KILLKIDS,
-    SM_NOTE_NOMORE,
-    SM_NOTE_FORCE = 0x7fffffff
+    U32 count;
+    xModelAssetParam param;
 };
 
 enum en_allow
@@ -593,6 +299,21 @@ enum en_npcdmg
     DMGTYP_FORCEINT = 0x7fffffff
 };
 
+enum en_plyratak
+{
+    PLYR_ATAK_NONE,
+    PLYR_ATAK_SB_KARATE,
+    PLYR_ATAK_SB_BASH,
+    PLYR_ATAK_SB_BOWL,
+    PLYR_ATAK_SB_GUITAR,
+    PLYR_ATAK_PAT_BELLY,
+    PLYR_ATAK_PAT_CARTWHEEL,
+    PLYR_ATAK_PAT_FLOP,
+    PLYR_ATAK_PAT_THROW,
+    PLYR_ATAK_SLIDE,
+    PLYR_ATAK_NOMORE
+};
+
 enum en_plyrpup
 {
     ePowerupLevelDisabled,
@@ -665,281 +386,75 @@ enum en_msgdata
     NME_MDAT_FORCE = 0x7fffffff
 };
 
-struct zNPCLassoInfo
+enum en_nmevar
 {
-    en_LASSO_STATUS stage;
-    xEnt* lassoee;
-    xAnimState* holdGuideAnim;
-    xModelInstance* holdGuideModel;
-    xAnimState* grabGuideAnim;
-    xModelInstance* grabGuideModel;
+    NME_VAR_NONE,
+    NME_VAR_1,
+    NME_VAR_2,
+    NME_VAR_3,
+    NME_VAR_4,
+    NME_VAR_5,
+    NME_VAR_6,
+    NME_VAR_7,
+    NME_VAR_8,
+    NME_VAR_9,
+    NME_VAR_NOMORE,
+    NME_FORCE = 0x7fffffff
 };
 
-struct zNPCCommon : xNPCBasic //Size of zNPCCommon: 0x2A0
+// zNMETypeCommon.cpp
+en_nmevar NMEVariantIdx(en_npctyp ntyp);
+
+enum en_npcgspot
 {
-    xEntAsset* entass; // 0x1BC
-    xEntNPCAsset* npcass; // 0x1C0
-    zNPCSettings* npcsetass; // 0x1C4
-    S32 flg_vuln; // 0x1C8
-    S32 flg_move; // 0x1CC
-    S32 flg_misc; // 0x1D0
-    S32 flg_able; // 0x1D4
-    NPCConfig* cfg_npc; // 0x1D8
-    zNPCSettings npcset; // 0x1DC
-    zMovePoint* nav_past; // 0x208
-    zMovePoint* nav_curr; // 0x20C
-    zMovePoint* nav_dest; // 0x210
-    zMovePoint* nav_lead;
-    xSpline3* spl_mvptspline;
-    F32 len_mvptspline;
-    F32 dst_curspline;
-    xEntDrive* drv_data;
-    xPsyche* psy_instinct; // 0x228
-    zNPCCommon* npc_duplodude;
-    F32 spd_throttle; //0x230
-    S32 flg_xtrarend;
-    F32 tmr_fidget; //0x238
-    F32 tmr_invuln; // 0x23C
-    zShrapnelAsset* explosion; // 0x240
-    xModelAssetParam* parmdata; // 0x244
-    U32 pdatsize; //0x248
-    zNPCLassoInfo* lassdata; //0x24C
-    NPCSndQueue snd_queue[4]; //0x250
-
-    zNPCCommon(S32 myType);
-
-    F32 TurnToFace(F32 dt, const xVec3* dir_want, F32 useTurnRate);
-    F32 ThrottleApply(F32 dt, const xVec3* dir, S32 force3D);
-    F32 ThrottleAccel(F32 dt, S32 speedup, F32 pct_max);
-    F32 ThrottleAdjust(F32 dt, F32 spd_want, F32 accel);
-
-    F32 BoundAsRadius(int useCfg);
-    void VelStop();
-    static void ConfigSceneDone();
-    U32 LassoInit();
-    zNPCLassoInfo* GimmeLassInfo();
-    void AddDEVGoals(xPsyche*);
-    U32 DBG_Name(); // return type might be wrong
-    void DBG_AddTweakers();
-    void DBG_RptDataSize();
-    U32 DBG_InstName(); // return type might be wrong
-    xAnimTable* AnimGetTable();
-    F32 AnimTimeRemain(xAnimState* ast);
-    F32 AnimTimeCurrent();
-    F32 AnimDuration(xAnimState* ast);
-    bool IsMountableType(en_ZBASETYPE type);
-    void MvptReset(zMovePoint* nav_goto);
-    S32 MvptCycle();
-    S32 HaveLOSToPos(xVec3*, float, xScene*, xBase*, xCollis*);
-    void ModelScaleSet(F32 x, F32 y, F32 z);
-    void ModelScaleSet(F32 unk);
-    void ModelScaleSet(const xVec3* vec);
-    xModelInstance* ModelAtomicFind(int index, int idx_prev, xModelInstance* mdl_prev);
-    xModelInstance* ModelAtomicHide(int index, xModelInstance* mdl);
-    xModelInstance* ModelAtomicShow(int index, xModelInstance* mdl);
-    S32 AnimStart(U32 animID, S32 forceRestart);
-    xAnimState* AnimFindState(U32 animID);
-    xAnimState* AnimCurState();
-    xAnimSingle* AnimCurSingle();
-    U32 AnimCurStateID();
-    void GiveReward();
-    S32 SndPlayFromSFX(xSFX* sfx, U32* sid_played);
-    S32 SndPlayRandom(en_NPC_SOUND sndtype);
-    S32 SndChanIsBusy(S32 flg_chan);
-    S32 LassoUseGuides(S32 idx_grabmdl, S32 idx_holdmdl);
-    S32 GetVertPos(en_mdlvert vid, xVec3* pos);
-    void Vibrate(en_npcvibe vibe, F32 duration);
-    void AddScripting(xPsyche* psy, S32 (*eval_script)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_playanim)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_attack)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_move)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_follow)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_lead)(xGoal*, void*, en_trantype*, F32, void*),
-                      S32 (*eval_wait)(xGoal*, void*, en_trantype*, F32, void*));
-    void AddBaseline(xPsyche*, int (*)(xGoal*, void*, en_trantype*, float, void*),
-                     int (*)(xGoal*, void*, en_trantype*, float, void*),
-                     int (*)(xGoal*, void*, en_trantype*, float, void*),
-                     int (*)(xGoal*, void*, en_trantype*, float, void*),
-                     int (*)(xGoal*, void*, en_trantype*, float, void*));
-
-    // defined from zNPCGoalRobo.cpp
-    xVec3* Center();
-    xVec3* Pos();
-    RwMatrix* BoneMat(S32 unk) const;
-    RwV3d* BonePos(S32 unk) const;
-    void XZVecToPlayer(xVec3* unk1, F32* unk2);
-    F32 XZDstSqToPos(const xVec3* unk1, xVec3* unk2, F32* unk3);
-    void XZVecToPos(xVec3* unk1, const xVec3* unk2, F32* unk3);
-    void XYZVecToPos(xVec3* dest, xVec3* unk2)
-    {
-        xVec3Sub(dest, unk2, Pos());
-    }
-    F32 XYZDstSqToPlayer(xVec3* unk);
-    F32 XYZDstSqToPos(xVec3* unk1, xVec3* dest)
-    {
-        xVec3 dest_vec;
-        if (dest == NULL)
-        {
-            dest = &dest_vec;
-        }
-        XYZVecToPos(dest, unk1);
-        return xVec3Length2(dest);
-    }
-    void WonderOfTalking(S32 inprogress, xBase* owner);
-    // return type is probably wrong
-    S32 SomethingWonderful();
-    S32 SndIsAnyPlaying();
-
-    // vTable (xNPCBasic)
-
-    virtual void Init(xEntAsset* asset);
-    virtual void Reset();
-    virtual void Setup();
-    virtual void Process(xScene* xscn, F32 dt);
-    virtual void BUpdate(xVec3* pos);
-    virtual void NewTime(xScene* xscn, F32 dt);
-    virtual void Move(xScene* xscn, F32 dt, xEntFrame*);
-    virtual S32 SysEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
-                         xBase* toParamWidget, S32* handled);
-    virtual void CollideReview();
-    virtual void Destroy();
-
-    // vTable (zNPCCommon)
-    // Not going to be correct, needs complete update
-    virtual S32 NPCMessage(NPCMsg* mail);
-    virtual void RenderExtra();
-    virtual void RenderExtraPostParticles();
-    virtual void ParseINI();
-    virtual void ParseLinks();
-    virtual void ParseProps();
-    virtual void SelfSetup();
-    virtual void SelfDestroy();
-    virtual S32 IsHealthy();
-    virtual S32 IsAlive();
-    //virtual void Damage(en_npcdmg damtype, xBase* who, const xVec3* vec_hit);
-    virtual S32 Respawn(const xVec3* pos, zMovePoint* mvptFirst, zMovePoint* mvptSpawnRef);
-    virtual void DuploOwner(zNPCCommon* duper);
-    virtual void DuploNotice(en_SM_NOTICES, void*);
-    virtual S32 CanRope();
-    virtual void LassoNotify(en_LASSO_EVENT event);
-    virtual S32 SetCarryState(en_NPC_CARRY_STATE);
-    virtual void Stun(F32 stuntime);
-    virtual void SpeakBegin();
-    virtual void SpeakEnd();
-    virtual void SpeakStart(U32 sound, U32 param_2, S32 param_3);
-    virtual void SpeakStop();
-
-    virtual U32 AnimPick(S32 animID, en_NPC_GOAL_SPOT gspot, xGoal* goal)
-    {
-        return 0;
-    }
-
-    virtual void GetParm(en_npcparm pid, void* val);
-    virtual void GetParmDefault(en_npcparm pid, void* val);
-    virtual F32 GenShadCacheRad();
-    virtual xEntDrive* PRIV_GetDriverData();
-    virtual zNPCLassoInfo* PRIV_GetLassoData();
-    virtual S32 LassoSetup();
-
-protected:
-    // This prevents implicit destructors from being generated in subclasses of zNPCCommon
-    ~zNPCCommon();
+    NME_GSPOT_START = 0x20,
+    NME_GSPOT_RESUME,
+    NME_GSPOT_LOOP,
+    NME_GSPOT_FINISH,
+    NME_GSPOT_STARTALT,
+    NME_GSPOT_ALTA,
+    NME_GSPOT_ALTB,
+    NME_GSPOT_PATROLPAUSE,
+    NME_GSPOT_NEXT,
+    NME_GSPOT_NOMORE,
+    NME_GSPOT_FORCEINT = 0x7fffffff
 };
 
-struct NPCSysEvent
+enum en_vis
 {
-    S32 doLinkEvents;
-    S32 handled;
-    xBase* from;
-    xBase* to;
-    U32 toEvent;
-    F32 toParam[4];
-    xBase* toParamWidget;
+    VIS_PREPARE_TO_DIE,
+    VIS_HORROR_FLIK,
+    VIS_OH_DEAR_GAHD,
+    VIS_GET_BACK_HERE,
+    VIS_I_SEEE_YOUUU,
+    VIS_GREY_AND_FOGGY,
+    VIS_LIKE_A_BIRDIE,
+    VIS_EARTHWORM_JIM,
+    VIS_NOBODY_AROUND,
+    VIS_NOMORE
 };
 
-struct NPCBlastInfo
+enum en_defcon
 {
-    xVec3 pos_blast;
-    F32 rad_blast;
-    F32 spd_expand;
+    NME_DEFCON_NORMAL,
+    NME_DEFCON_AWARE,
+    NME_DEFCON_BATTLE,
+    NME_DEFCON_NOMORE
 };
 
-struct NPCChatInfo
+enum en_smnote
 {
-    xVec3 pos_chat;
-    F32 tym_chat;
-};
-
-struct NPCSpawnInfo
-{
-    xVec3 pos_spawn;
-    zMovePoint* nav_firstMovepoint;
-    zMovePoint* nav_spawnReference;
-    S32 spawnSuccess;
-};
-
-struct NPCTargetInfo
-{
-    xBase* bas_tgt;
-    xVec3 pos_tgt;
-};
-
-struct NPCDamageInfo
-{
-    // This struct shouldnt exist, only here to keep building
-    // Needs removed as soon as the NMECommon revamp is done
-
-    //en_NPC_DAMAGE_TYPE dmg_type;
-    xBase* dmg_from;
-    xVec3 vec_dmghit;
-};
-
-struct NPCStunInfo
-{
-    F32 tym_stuntime;
-    en_NPC_CARRY_STATE carrystate;
-    S32 allowStun;
-};
-
-struct NPCScriptInfo
-{
-    U32 aid_playanim;
-};
-
-struct NPCMountInfo
-{
-    xEnt* ent_toMount;
-    xCollis* col_forMount;
-};
-
-struct NPCAreaInfo
-{
-    zNPCCommon* npc_origin;
-    xVec3 pos_origin;
-};
-
-struct NPCMsg
-{
-    en_NPC_MSG_ID msgid;
-    U32 sendto;
-    U32 from;
-    en_NPC_MSG_DATA infotype; // 0xC
-    union
-    {
-        NPCSysEvent sysevent;
-        NPCBlastInfo blastarea;
-        NPCChatInfo chatter;
-        NPCSpawnInfo spawning;
-        NPCTargetInfo target;
-        NPCDamageInfo dmgdata; // 0x10
-        NPCStunInfo stundata;
-        NPCScriptInfo scriptdata;
-        NPCMountInfo mountdata;
-        NPCAreaInfo areadata;
-    };
-    void* attached; // 0x38
-    NPCMsg* next;
-    F32 tmr_delay; // 0x40
+    SM_NOTE_NMEDIED,
+    SM_NOTE_NMESTANDBY,
+    SM_NOTE_NMEALIVE,
+    SM_NOTE_NMELIVINGINSIN,
+    SM_NOTE_DUPPAUSE,
+    SM_NOTE_DUPRESUME,
+    SM_NOTE_DUPSETDELAY,
+    SM_NOTE_DUPDEAD,
+    SM_NOTE_KILLKIDS,
+    SM_NOTE_NOMORE,
+    SM_NOTE_FORCE = 0x7fffffff
 };
 
 struct zNMEAsset : xDynAsset
@@ -947,9 +462,19 @@ struct zNMEAsset : xDynAsset
     xEntAsset ent_asset;
 };
 
-struct Damage_1
+// TSSM's counterpart of BfBB's zNPCSettings (PS2 DWARF: 0x1C, no basis type or duplo fields).
+struct zNMESettings : xDynAsset
 {
-    F32 tym_invuln;
+    char allowDetect;
+    char allowPatrol;
+    char allowWander;
+    char reduceCollide;
+    char useNavSplines;
+    char pad[3];
+    char allowChase;
+    char allowAttack;
+    char assumeLOS;
+    char assumeFOV;
 };
 
 struct Physics
@@ -958,19 +483,20 @@ struct Physics
     F32 spd_maxFall;
 };
 
-struct Movement_1
-{
-    F32 spd_move;
-    F32 acc_move;
-    F32 dst_deviant;
-    F32 spd_turnrate;
-};
-
 struct NMECfgCommon
 {
-    Damage_1 damage;
+    struct Damage
+    {
+        F32 tym_invuln;
+    } damage;
     Physics physics;
-    Movement_1 movement;
+    struct Movement
+    {
+        F32 spd_move;
+        F32 acc_move;
+        F32 dst_deviant;
+        F32 spd_turnrate;
+    } movement;
 };
 
 struct SimpShadParm
@@ -1071,8 +597,28 @@ struct zNMEDriver
         S32 flg_unused : 30;
     };
 
+    void VroomVroom(F32 dt, xMat4x3* mat_owner);
     void WheelTurnsYou_C(xMat4x3* mat_owner);
-    void ReviewCollide(xEntCollis* npccol);
+    void ReviewCollide(const xEntCollis* npccol);
+
+    // No GC symbol (always inlined into ReviewCollide); BfBB's zNPCCommon::IsMountableType.
+    S32 IsMountableType(en_ZBASETYPE type)
+    {
+        switch (type)
+        {
+        case eBaseTypePlatform:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+
+    // No GC symbol (always inlined into zNMECommon::Common_Reset); the name is not known.
+    void Reset()
+    {
+        ent_driver = NULL;
+        tym_mount = -1.0f;
+    }
 };
 
 struct zNMECommon;
@@ -1089,90 +635,8 @@ struct zNMENavNet
     zNMECommon* nme_owner;
 
     S32 MvptCycle();
-};
-
-struct xEntNPCAssetIN;
-
-struct base : xEnt, xFactoryInst
-{
-    S16 bound_bone;
-    U16 sound_id_offset;
-    U16 global_parameters_size;
-    U16 local_parameters_size;
-    U32 type;
-    xModelAssetParam* global_parameters;
-    xModelAssetParam* local_parameters;
-    union
-    {
-        xMovePoint* movepoint;
-        U32 movepoint_asset_id;
-    };
-    xEntNPCAssetIN* npc_asset;
-    xModelAssetInfo* model_asset;
-    F32 shadow_strength;
-    F32 shadow_cache_fudge_factor;
-    xVec3 bound_offset;
-};
-
-struct zNMENPCWrapper : base
-{
-    void (*fun_setup)(xEnt*);
-    void (*fun_reset)(xEnt*);
-    S32 colFreq;
-    U8 flg_colCheck;
-    U8 flg_penCheck;
-    U16 flg_unusedCollFlags;
-    struct
-    {
-        S32 aflg_basenme : 8;
-        S32 flg_upward : 8;
-        S32 flg_xtrarend : 1;
-        S32 flg_inUpdate : 1;
-        S32 flg_newtime : 1;
-        S32 flg_postproc : 1;
-        S32 flg_profProc : 1;
-        S32 flg_hudrend : 1;
-        S32 flg_moreUnusedSpace : 10;
-    };
-
-    void InitFromNPCMgr(xEntAsset* asset);
-    void Init(xEntAsset* asset);
-    void PostInit();
-    void PostSetup();
-    void Load();
-    void NewTime();
-    void RenderExtra();
-    void RenderHud();
-    void Move();
-    S32 ColFreqReset();
-    void init(xEntAsset* asset);
-    void SelfSetup();
-    void setup();
-    void Reset();
-    void Setup();
-    void reset();
-    void update_npc(F32 dt);
-    void Process();
-    void update_bound();
-    void change_bounds();
-    U8 system_event();
-    void render_npc();
-    void Render();
-    void debug_render();
-    void render_extra();
-    void damage();
-    void destroy();
-    void Destroy();
-    void scene_setup();
-    void add_states();
-    void add_transitions();
-    S32 SysEvent();
-    void BUpdate();
-    void UpdateWrapper(F32 dt);
-    void NMEWrap_Init(xEntAsset* asset);
-    xAnimTable* CreateAnimTable();
-    void SelfDestroy();
-    void CollideReview();
+    // No GC symbol (always inlined); BfBB's zNPCCommon::MvptReset. Defined in zWadNME.h.
+    inline void MvptReset(zMovePoint* nav_goto);
 };
 
 struct zNMEArena
@@ -1184,8 +648,72 @@ struct zNMEArena
     zMovePoint* nav_refer_dest;
     zMovePoint* nav_refer_curr;
 
-    zMovePoint* NextBestNav(zMovePoint* nav_from);
+    zMovePoint* NextBestNav(zNMECommon* npc, zMovePoint* nav_from);
     S32 Cycle(zNMECommon* npc, S32 peek);
+
+    // No GC symbol (always inlined into Cycle); BfBB's NPCArena::SyncHomeFromNav.
+    void SyncHomeFromNav()
+    {
+        flg_arena = 0;
+
+        if (nav_arena != NULL)
+        {
+            xVec3Copy(&pos_arena, nav_arena->PosGet());
+            rad_arena = nav_arena->RadiusArena();
+        }
+        else
+        {
+            xVec3Copy(&pos_arena, &g_O3);
+            rad_arena = -1.0f;
+        }
+    }
+
+    // No GC symbols (always inlined into the *_SeePlyr callbacks); BfBB's NPCArena has the
+    // same helpers. IncludesNPC and NeedToCycle are defined after zNMECommon below.
+    S32 IsReady()
+    {
+        return rad_arena > 0.0f;
+    }
+    // No GC symbol (always inlined into zNMEGoalFogBattle::CalcEvadePos); BfBB's
+    // NPCArena::Radius.
+    F32 Radius(F32 rat)
+    {
+        return rat * rad_arena;
+    }
+    // No GC symbol (always inlined into zNMEGoalFogBattle::SubStateUpdate); BfBB's
+    // NPCArena::PctFromHome: squared XZ distance from home over the squared radius.
+    F32 PctFromHome(const xVec3* pos)
+    {
+        if (!IsReady())
+        {
+            return -1.0f;
+        }
+
+        xVec3 dif = *pos - pos_arena;
+        dif.y = 0.0f;
+        return xVec3Length2(&dif) / SQR(rad_arena);
+    }
+    // No GC symbol (always inlined); BfBB's NPCArena::IncludesPos. The squared distance is held in
+    // a local (HI's usual 'dsq'), which gives zNMEGoalSpinBattle::Process retail's float registers.
+    S32 IncludesPos(xVec3* pos, F32 rad_thresh, xVec3* vec)
+    {
+        if (!IsReady())
+        {
+            return 0;
+        }
+
+        xVec3 delt = *pos - pos_arena;
+        if (vec != NULL)
+        {
+            *vec = delt;
+        }
+
+        delt.y = 0.0f;
+        F32 dsq = xVec3Length2(&delt);
+        return dsq <= SQR(rad_arena + rad_thresh);
+    }
+    inline S32 IncludesNPC(zNMECommon* npc, F32 rad_thresh, xVec3* vec);
+    inline S32 NeedToCycle(zNMECommon* npc);
 };
 
 struct NMESysEvent
@@ -1299,122 +827,650 @@ struct NMEMsg
     F32 tmr_delay;
 };
 
+struct zMODEnemy : zModule
+{
+    st_XORDEREDARRAY nmelist;
+    struct
+    {
+        S32 flg_doBackdoor : 1;
+        S32 flg_firstTimestep : 1;
+        S32 flg_available : 30;
+    };
+    F32 tmr_doBeDifferent;
+
+    void ModulePrepUse();
+    void ScenePrepare();
+    void SceneFinish();
+    void ScenePostInit();
+    void SceneSetup();
+    void ScenePostSetup();
+    void SceneReset();
+    void Timestep(F32 dt);
+    void PostTimestep(F32 dt);
+    void RenderToBuckets();
+    void PostRender();
+    void HudRender();
+    // No GC symbol: inlined into its only caller, Timestep (its unused copy is dead-stripped).
+    void SomethingWonderfulUpdate() const;
+
+    // No GC symbol (always inlined into Timestep); the name is ours. Runs one fixed-length
+    // (PAL/NTSC frame) update of every enemy except Mindy.
+    void DoBackdoor()
+    {
+        S32 num_nme = nmelist.cnt;
+
+        for (S32 i = 0; i < num_nme; i++)
+        {
+            zNMENPCWrapper* npc = (zNMENPCWrapper*)nmelist.list[i];
+            en_npctyp nt = npc->SelfType();
+
+            if (nt == NME_TYPE_MINDY)
+            {
+                continue;
+            }
+
+            if (nt >= NME_TYPE_TIKI && nt <= NME_TYPE_TIKI_STONE)
+            {
+                npc->Process(gVidMode == eGameVidModePAL ? 0.02f : (1.0f / 60.0f));
+            }
+            else
+            {
+                npc->UpdateWrapper(gVidMode == eGameVidModePAL ? 0.02f : (1.0f / 60.0f));
+            }
+        }
+    }
+
+    // No GC symbol (always inlined: ScenePostInit, Timestep); the name is ours.
+    void SetLightKit(xLightKit* lkit)
+    {
+        S32 num_nme = nmelist.cnt;
+
+        for (S32 i = 0; i < num_nme; i++)
+        {
+            xModelSetLightKit(((xEnt*)nmelist.list[i])->model, lkit);
+        }
+    }
+};
+
+// No GC symbol (always inlined); defined in zNMECommon.cpp (it needs the file-static
+// g_mod_enemy), declared here for zMODSwimmer::ScenePostInit, which comes earlier in zWadNME.
+inline S32 zNMECommon_TypeInScene(en_npctyp ntyp);
+
+S32 NMEC_DmgAmtForAttack(en_npcdmg dmgtyp, en_plyrpup* pup_level);
+S32 DmgAmtForPlayerAttack(en_plyratak plyratak, en_plyrpup pup);
+void NMEC_BuildStandardAnimTran(xAnimTable* table, char** names, S32* anims, S32 flags,
+                                F32 blendTime);
+
+// Virtual order must match __vt__10zNMECommon (new virtuals follow the zNMENPCWrapper ones).
 struct zNMECommon : zNMENPCWrapper
 {
-    zNMEAsset* nmeass;
-    S32 siz_nmeass; // 0x12c
-    xPsyche* psy_self; //0x130
-    NMECfgCommon* cfg_common;
+    zNMECommon()
+    {
+    }
+    zNMEAsset* nmeass; // 0x130
+    S32 siz_nmeass;
+    xPsyche* psy_self; // 0x138
+    const NMECfgCommon* cfg_common;
     NMEShadParms* cfg_shadparm;
-    S32 flg_vuln; // 0x13c
+    S32 flg_vuln; // 0x144
     S32 flg_move;
     S32 flg_misc;
-    S32 flg_able; // 0x148
+    S32 flg_able;
     F32 spd_throttle;
-    NMERuntime runtimeData;
-    zNMEDriver* drv_data;
+    NMERuntime runtimeData; // 0x158
+    zNMEDriver* drv_data; // 0x178
     zNMENavNet* navnet;
+    // The PS2 DWARF dump lists tmr_scary and tmr_lastAlert after this union, but its type
+    // table puts them at 0x184/0x188, inside tmr_common (DuploOwner stores npc_duplodude at
+    // 0x18C; DfltSysEventMail sets tmr_scary at 0x184).
     union
     {
-        F32 tmr_common[3];
-        F32 tmr_invuln;
+        F32 tmr_common[3]; // 0x180
+        struct
+        {
+            F32 tmr_invuln;
+            F32 tmr_scary;
+            F32 tmr_lastAlert;
+        };
     };
-    F32 tmr_scary;
-    F32 tmr_lastAlert;
-    zNMECommon* npc_duplodude;
-    zNMESoundTable* snd_table;
-    iSndHandle sndID[10];
-    zShrapnelAsset* shrapnelAsset;
+    zNMECommon* npc_duplodude; // 0x18C
+    zNMESoundTable* snd_table; // 0x190
+    iSndHandle sndID[10]; // 0x194
+    zShrapnelAsset* shrapnelAsset; // 0x1BC
 
-    void Destroy();
-    void Render();
-    void SelfDestroy();
-    void ProcessInvis();
-    void PostProcess();
-    S32 IsAlive();
-    S32 IsHealthy();
-    S32 IsPresent();
-    en_nmesimp SimpleStatus();
-    F32 HealthRatio();
-    void Boo();
-    void DuploOwner(zNMECommon* duper);
-    void SpeakBegin();
-    void SpeakEnd();
-    void SpeakStart();
-    void SpeakStop();
-    S32 CanRope();
-    void CollideReview();
-    zMovePoint* MvptFirstFollow();
-    zMovePoint* MvptFirstTarget();
-    xEntFrame* Gimme_xEntFrame();
-    zNMEDriver* Gimme_DriveData();
-    xEntShadow* Gimme_ShadowData();
-    zNMENavNet* Gimme_NavNet();
-    zNMEArena* Gimme_NMEArena();
-    xShadowSimpleCache* Gimme_SimpShadowCache();
-    void Reset();
-    void PoofOfBubbles();
-    S32 LaunchProjectile(en_haztyp haztyp, F32 spd_proj, F32 dst_minRange, xVec3* pos_launch,
-                         F32 tym_predictMax, F32 hyt_offset, F32 rad_min, F32 rad_max);
-    void GiveReward();
-    void DeathFXKick();
-    void DieTheGoodDeath();
-    F32 ThrottleAdjust(F32 dt, F32 spd_want, F32 accel);
+    // zNMENPCWrapper overrides
     xAnimTable* CreateAnimTable(xAnimTable* table);
-    xAnimTransition* AnimMakeSmackTran(U32 animID);
+    void Init(xEntAsset* entasset)
+    {
+        zNMENPCWrapper::Init(entasset);
+        Common_Init(entasset);
+    }
+    // No GC symbol; the name is ours. The PS2 line table puts all six stores on one line of
+    // Common_Init, so they were one inline call, and it keeps Common_Init under GC/2.6's
+    // 30-statement limit, which makes retail call the Init functions out of line.
+    void CollisionDefaults()
+    {
+        collType = XENT_COLLTYPE_NPC;
+        collLev = 4;
+        bound.type = XBOUND_TYPE_SPHERE;
+        moreFlags |= 0x10;
+        collis = NULL;
+        colFreq = -1;
+    }
+    // No GC symbol; inlined into zNMETurBarrel::Init (and, per the PS2 demo, zNMEStandard::Init).
+    // The name is ours: sets the default runtime flags and saves them as the originals that
+    // Common_Reset restores.
+    void RuntimeDefaults()
+    {
+        runtimeData.flg_enableWander = 1;
+        runtimeData.flg_enablePatrol = 1;
+        runtimeData.flg_enableDetect = 1;
+        runtimeData.flg_activeOn = 1;
+        runtimeData.flg_takeNoDamage = 0;
+        runtimeData.overrideDetect = ALLOW_NORMAL;
+        runtimeData.overrideAttack = ALLOW_NORMAL;
+        runtimeData.flg_unused = 0;
+
+        runtimeData.orig.flg_enableWander = runtimeData.flg_enableWander;
+        runtimeData.orig.flg_enablePatrol = runtimeData.flg_enablePatrol;
+        runtimeData.orig.flg_enableDetect = runtimeData.flg_enableDetect;
+        runtimeData.orig.flg_activeOn = runtimeData.flg_activeOn;
+        runtimeData.orig.flg_takeNoDamage = runtimeData.flg_takeNoDamage;
+        runtimeData.orig.overrideDetect = runtimeData.overrideDetect;
+        runtimeData.orig.overrideAttack = runtimeData.overrideAttack;
+    }
+    void Setup();
+    // Weak in the target (inline). Common_Reset is defined in zWadNME.h (it needs zNMEGoalDead).
+    void Reset()
+    {
+        zNMENPCWrapper::Reset();
+        Common_Reset();
+    }
+    void BUpdate(xVec3* pos)
+    {
+        xEntDefaultBoundUpdate(this, pos);
+    }
+    S32 SysEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget,
+                 U32 toParamWidgetID, S32* handled);
+    void Process(F32 dt)
+    {
+        for (S32 i = 0; i < 3; i++)
+        {
+            tmr_common[i] = MAX(-1.0f, tmr_common[i] - dt);
+        }
+    }
+    // Weak in the target (GC only; called by zNMEFrogfish::Process). Same body as Process.
+    void Common_TimerUpd(F32 dt)
+    {
+        for (S32 i = 0; i < 3; i++)
+        {
+            tmr_common[i] = MAX(-1.0f, tmr_common[i] - dt);
+        }
+    }
+    void Destroy()
+    {
+        SelfDestroy();
+    }
+    void Render()
+    {
+        xEntRender(this);
+    }
+    void SelfDestroy()
+    {
+        xBehaveMgr* bmgr = xBehaveMgr_GetSelf();
+        if (psy_self)
+        {
+            bmgr->UnSubscribe(psy_self);
+        }
+        psy_self = NULL;
+    }
+
+    // new virtuals
+    virtual void CreateConfig(const char* name);
+    virtual void ProcessInvis(F32 dt)
+    {
+    }
+    virtual void PostProcess(F32 dt)
+    {
+    }
+    virtual S32 TypeHandleMail(NMEMsg* mail)
+    {
+        return 0;
+    }
+    virtual U32 AnimPick(S32 gid, en_npcgspot gspot, xGoal* goal)
+    {
+        return 0;
+    }
+    virtual S32 GoalPick(xGoal* goal, S32& nextgoal, en_trantype& trantype)
+    {
+        return 0;
+    }
+    virtual S32 IsAlive()
+    {
+        return 1;
+    }
+    virtual S32 IsHealthy()
+    {
+        return IsAlive();
+    }
+    virtual S32 IsPresent()
+    {
+        return runtimeData.flg_activeOn && xEntIsVisible(this) && IsAlive();
+    }
+    virtual en_nmesimp SimpleStatus()
+    {
+        return Common_SimpStat();
+    }
+    virtual F32 HealthRatio()
+    {
+        en_nmesimp simp = SimpleStatus();
+        return (simp == NME_SIMP_DEAD) ? 0.0f : 1.0f;
+    }
+    virtual void Boo(const zNMECommon* npc)
+    {
+    }
+    virtual void Damage(en_npcdmg dmgtype, const xBase* who, const xVec3* vec_hit,
+                        S32 amt_dmgCaller, en_plyrpup pup_fromCaller);
+    virtual en_vis VisionTarget(xEnt* ent, en_defcon defcon, S32 flags) const
+    {
+        return VIS_NOBODY_AROUND;
+    }
+    virtual void DuploOwner(zNMECommon* duper)
+    {
+        npc_duplodude = duper;
+    }
+    virtual void DuploNotice(en_smnote note, void* data)
+    {
+    }
+    virtual void DieTheGoodDeath();
+    virtual void DeathFXKick();
+    virtual void GiveReward() const;
+    virtual void SpeakBegin()
+    {
+    }
+    virtual void SpeakEnd()
+    {
+    }
+    virtual void SpeakStart(U32 sound, U32 param_2, S32 param_3)
+    {
+    }
+    virtual void SpeakStop()
+    {
+    }
+    virtual S32 CanRope()
+    {
+        return flg_vuln & 0x1000000;
+    }
+    virtual S32 SetCarryState(en_carystat state)
+    {
+        return 0;
+    }
+    // zNMENPCWrapper override declared among the new virtuals (an override keeps its base slot):
+    // retail emits this weak copy between SetCarryState and MvptFirstFollow.
+    void CollideReview()
+    {
+    }
+    virtual zMovePoint* MvptFirstFollow()
+    {
+        return NULL;
+    }
+    virtual zMovePoint* MvptFirstTarget()
+    {
+        return NULL;
+    }
+    virtual xEntFrame* Gimme_xEntFrame()
+    {
+        return NULL;
+    }
+    virtual zNMEDriver* Gimme_DriveData()
+    {
+        return NULL;
+    }
+    virtual xEntShadow* Gimme_ShadowData()
+    {
+        return NULL;
+    }
+    virtual zNMENavNet* Gimme_NavNet()
+    {
+        return NULL;
+    }
+    virtual zNMEArena* Gimme_NMEArena()
+    {
+        return NULL;
+    }
+    virtual xShadowSimpleCache* Gimme_SimpShadowCache()
+    {
+        return NULL;
+    }
+    virtual S32 WannaPoolShadow()
+    {
+        return 0;
+    }
+
+    // No GC symbol (always inlined into many callers; the name is ours). Plays entry idx of
+    // snd_table and returns its handle (-1 when nothing was played). Defined in zWadNME.h (it
+    // needs globals).
+    inline iSndHandle SndPlayFromTable(S32 idx);
+    void PoofOfBubbles() const;
+    S32 LaunchProjectile(en_haztyp haztyp, F32 spd_proj, F32 dst_minRange, const xVec3* pos_launch,
+                         F32 tym_predictMax, F32 hyt_offset, F32 rad_min, F32 rad_max);
+    F32 ThrottleAdjust(F32 dt, F32 spd_want, F32 accel);
+    // No GC symbol and no PS2 DWARF entry (always inlined, e.g. into zNMEGoalPatrol::Process);
+    // named after BfBB's zNPCCommon::ThrottleAccel, whose shape the callers match (acc and spd_top
+    // are computed before the throttle is updated).
+    F32 ThrottleAccel(F32 dt, S32 speedup, F32 pct_max)
+    {
+        F32 acc = dt * cfg_common->movement.acc_move;
+        F32 spd_top = pct_max * cfg_common->movement.spd_move;
+
+        if (speedup)
+        {
+            spd_throttle += acc;
+        }
+        else
+        {
+            spd_throttle -= acc;
+        }
+
+        spd_throttle = CLAMP(spd_throttle, 0.0f, spd_top);
+
+        return spd_throttle;
+    }
+    xAnimTransition* AnimMakeSmackTran(U32 animID) const;
     S32 AnimStart(U32 animID, S32 forceRestart);
-    S32 MatMoveToPos(xVec3* pos_tobe, F32 dt, F32 spd, S32 doTurn, F32 spd_turnrate);
-    F32 MatQRotTowards(F32 dt, xVec3* dir_face, F32 spd_turnrate);
-    xModelInstance* ModelAtomicFind(S32 index, S32 idx_prev, xModelInstance* mdl_prev);
+    // Weak in the target. The tikis have no animation.
+    xAnimSingle* AnimCurSingle() const
+    {
+        if (model->Anim == NULL && itemType >= NME_TYPE_TIKI && itemType <= NME_TYPE_TIKI_STONE)
+        {
+            return NULL;
+        }
+        return model->Anim->Single;
+    }
+    // No GC symbols (always inlined); BfBB's zNPCCommon::AnimCurState/AnimCurStateID.
+    xAnimState* AnimCurState() const
+    {
+        if (model->Anim == NULL && itemType >= NME_TYPE_TIKI && itemType <= NME_TYPE_TIKI_STONE)
+        {
+            return NULL;
+        }
+        return model->Anim->Single->State;
+    }
+    // No GC symbol (always inlined); body as BfBB's zNPCCommon::AnimCurStateID (if/else form; a
+    // ?: return colours callers' registers differently, e.g. zNMEGoalSpinBattle::PursueAndDestroy).
+    U32 AnimCurStateID() const
+    {
+        xAnimState* state = AnimCurState();
+        if (state != NULL)
+        {
+            return state->ID;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::AnimTimeCurrent.
+    F32 AnimTimeCurrent() const
+    {
+        return model->Anim->Single->Time;
+    }
+    // Weak in the target; BfBB's zNPCCommon::AnimDuration, but TSSM returns early for a given
+    // state (retail returns ast->Data->Duration twice; no PS2 DWARF entry).
+    F32 AnimDuration(xAnimState* ast) const
+    {
+        if (ast != NULL)
+        {
+            return ast->Data->Duration;
+        }
+        ast = AnimCurState();
+        return (ast != NULL) ? ast->Data->Duration : 0.0f;
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::AnimTimeRemain.
+    F32 AnimTimeRemain(xAnimState* ast) const
+    {
+        return AnimDuration(ast) - AnimTimeCurrent();
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::AnimFindState.
+    xAnimState* AnimFindState(U32 animID)
+    {
+        return xAnimTableGetStateID(model->Anim->Table, animID);
+    }
+    // No symbol in TSSM or the PS2 DWARF (always inlined); BfBB's zNPCCommon::Pos.
+    xVec3* Pos()
+    {
+        return (xVec3*)&model->Mat->pos;
+    }
+    // No symbol in TSSM or the PS2 DWARF (always inlined); BfBB's zNPCCommon::BonePos.
+    RwV3d* BonePos(S32 bone) const
+    {
+        return &model->Mat[bone].pos;
+    }
+    // No symbol in TSSM or the PS2 DWARF (always inlined; one PS2 source line in each caller, and
+    // retail keeps the source pointer across the component stores while reloading model). Name
+    // from BfBB's zNPCCommon::MatPosSet, which also NULL-checks pos; TSSM's callers have no check.
+    void MatPosSet(const xVec3* pos)
+    {
+        model->Mat->pos.x = pos->x;
+        model->Mat->pos.y = pos->y;
+        model->Mat->pos.z = pos->z;
+    }
+    // Weak in the target (GC only, no PS2 symbol; called by zNMEFrogfish::Process). The name is
+    // the GC symbol's, the parameter name is ours.
+    void MatSet(xMat3x3* mat)
+    {
+        *(xMat3x3*)model->Mat = *mat;
+    }
+    S32 MatMoveToPos(const xVec3* pos_tobe, F32 dt, F32 spd, S32 doTurn, F32 spd_turnrate);
+    F32 MatQRotTowards(F32 dt, const xVec3* dir_face, F32 spd_turnrate);
+    F32 MatTurnTowardPos(const xVec3* pos, F32 dt, F32 spd_turnrate, S32 flags);
+    F32 MatTurnAntiPos(const xVec3* pos, F32 dt, F32 spd_turnrate, S32 flags);
+    // Weak in the target; XZDstSqToPlayer is defined in zWadNME.h (it needs xglobals). The
+    // direct model->Mat access (not xEntGetPos) lets zNMEGoalFogBattle::SubStateUpdate reuse its
+    // model load in the inlined CheckSpot, as retail does.
+    void XZVecToPos(xVec3* vec, const xVec3* pos, F32* dy) const
+    {
+        xVec3Sub(vec, pos, (xVec3*)&model->Mat->pos);
+        if (dy != NULL)
+        {
+            *dy = vec->y;
+        }
+        vec->y = 0.0f;
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::XYZVecToPos. Retail reuses the caller's
+    // model load here, which only happens with a direct model->Mat access (not xEntGetPos).
+    void XYZVecToPos(xVec3* vec, const xVec3* pos)
+    {
+        xVec3Sub(vec, pos, (xVec3*)&model->Mat->pos);
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::XYZDstSqToPos.
+    F32 XYZDstSqToPos(const xVec3* pos, xVec3* vec)
+    {
+        xVec3 dir;
+
+        if (vec == NULL)
+        {
+            vec = &dir;
+        }
+
+        XYZVecToPos(vec, pos);
+        return xVec3Length2(vec);
+    }
+    // No symbol in TSSM or the PS2 DWARF (always inlined); name unknown. The spline movers evaluate
+    // the position once before testing flg_move, which needs this test one inline level deeper than
+    // the caller.
+    F32 DstSqToPos(const xVec3* pos)
+    {
+        return (flg_move & 0x2) ? XZDstSqToPos(pos, NULL, NULL) : XYZDstSqToPos(pos, NULL);
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::XZDstSqToPos.
+    F32 XZDstSqToPos(const xVec3* pos, xVec3* vec, F32* dy) const
+    {
+        xVec3 dir;
+
+        if (vec == NULL)
+        {
+            vec = &dir;
+        }
+
+        XZVecToPos(vec, pos, dy);
+        return xVec3Length2(vec);
+    }
+    inline F32 XZDstSqToPlayer(xVec3* vec, F32* dy) const;
+    // No GC symbol (always inlined); BfBB's zNPCCommon::XYZVecToPos / XYZDstSqToPos (the
+    // turret barrel's dust test stores the delta to a stack vector and sums unfused squares).
+    void XYZVecToPos(xVec3* vec, const xVec3* pos) const
+    {
+        xVec3Sub(vec, pos, xEntGetPos(this));
+    }
+    F32 XYZDstSqToPos(const xVec3* pos, xVec3* vec) const
+    {
+        xVec3 dir;
+
+        if (vec == NULL)
+        {
+            vec = &dir;
+        }
+
+        XYZVecToPos(vec, pos);
+        return xVec3Length2(vec);
+    }
+    inline F32 XYZDstSqToPlayer(xVec3* vec) const;
+    // Weak in the target (zNMETypeCommon.h section).
+    void MatFacePlayer(F32 dt, F32 spd_turnrate, S32 flags)
+    {
+        MatTurnTowardPos(xEntGetPos(xglobals->___player_ent_dont_use_directly), dt, spd_turnrate,
+                         flags);
+    }
+    void MatFaceAntiPlayer(F32 dt, F32 spd_turnrate, S32 flags)
+    {
+        MatTurnAntiPos(xEntGetPos(xglobals->___player_ent_dont_use_directly), dt, spd_turnrate,
+                       flags);
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::ModelAtomicFind.
+    xModelInstance* ModelAtomicFind(S32 index, S32 idx_prev, xModelInstance* mdl_prev)
+    {
+        xModelInstance* da_atomic = NULL;
+        xModelInstance* minst = mdl_prev;
+        S32 midx = 0;
+
+        if (minst != NULL && idx_prev >= 0)
+        {
+            midx = idx_prev;
+        }
+        else
+        {
+            minst = model;
+        }
+
+        while (minst != NULL)
+        {
+            if (midx == index)
+            {
+                da_atomic = minst;
+                break;
+            }
+            minst = minst->Next;
+            midx++;
+        }
+
+        return da_atomic;
+    }
+    // No GC symbol (always inlined); BfBB's zNPCCommon::ModelAtomicShow.
+    xModelInstance* ModelAtomicShow(S32 index, xModelInstance* mdl)
+    {
+        xModelInstance* minst = mdl ? mdl : ModelAtomicFind(index, -1, NULL);
+        if (!minst)
+        {
+            return minst;
+        }
+
+        minst->Flags |= 0x2;
+        minst->Flags |= 0x1;
+
+        return minst;
+    }
     S32 HaveLOSToPos(xVec3* pos, F32 dist, xScene* xscn, xBase* tgt, xCollis* colCallers);
-    S32 ReviewCollBounce(xEntCollis* npccol, xVec3* vel, F32 fac_elastic);
-    S32 ReviewCollSurfs(xEntCollis* npccol, zNMECommon* npc);
+    S32 ReviewCollBounce(const xEntCollis* npccol, xVec3* vel, F32 fac_elastic);
+    S32 ReviewCollSurfs(const xEntCollis* npccol, zNMECommon* npc);
     void RunCollision(F32 dt);
+    void Common_Collide();
     en_nmesimp Common_SimpStat();
     void ApplyGlowDamp();
     void ShadStufUpdate();
+    void ShadStufIAmDead();
+    void ShadChkStatus();
     void FullShadAcquire();
-    void ShadowPrep();
-    S32 WannaPoolShadow();
-    void TellMeVisOnOff(xEnt* ent);
-    S32 Respawn(xVec3* pos, zMovePoint* mvptFirst, zMovePoint* mvptSpawnRef);
-    void Damage(en_npcdmg dmgtype, xBase* who, xVec3* vec_hit, S32 amt_dmgCaller,
-                en_plyrpup pup_fromCaller);
+    inline void ShadowPrep();
+    static void TellMeVisOnOff(xEnt* ent);
+    S32 Respawn(const xVec3* pos, zMovePoint* mvptFirst, zMovePoint* mvptSpawnRef);
     void ConvertHitEvent(NMESysEvent* sysmail);
     S32 DfltSysEventMail(NMESysEvent* sysmail);
-    S32 SysEvent(xBase* from, xBase* to, U32 toEvent, F32* toParam, xBase* toParamWidget,
-                 U32 toParamWidgetID, S32* handled);
-    S32 NMEMessage(NMEMsg* mail);
-    S32 TypeHandleMail();
-    void CreateConfig();
-    void Setup();
-    void Common_Init();
-    void Process(F32 dt);
-    void BUpdate(xVec3* pos);
-    void Init(xEntAsset* entasset);
+    // Weak in the target (GC only; the PS2 build has no such function).
+    S32 DfltHandleMail(NMEMsg* mail)
+    {
+        if (mail->msgid == NME_MID_SYSEVENT)
+        {
+            return DfltSysEventMail(&mail->sysevent);
+        }
+        return 0;
+    }
+    // No GC symbol (always inlined); defined in zWadNME.h (it needs zNMEGoalCommon).
+    inline S32 NMEMessage(NMEMsg* mail);
+    void Common_Init(xEntAsset* entasset);
+    // No GC symbol (always inlined into Reset); defined in zWadNME.h.
+    inline void Common_Reset();
 };
 
-xFactoryInst* ZNPC_Create_Common(S32 who, RyzMemGrow* grow, void*);
-void ZNPC_Destroy_Common(xFactoryInst* inst);
-void zNPCCommon_ScenePrepare();
-void zNPCCommon_ScenePostInit();
-void zNPCCommon_SceneFinish();
-void zNPCPlyrSnd_Reset();
-void zNPCPlyrSnd_Update(F32 dt);
-void zNPCCommon_SceneReset();
-void ZNPC_Destroy_Common(xFactoryInst* inst);
-void zNPCSettings_MakeDummy();
-void ZNPC_Common_Startup();
-void zNPCCommon_WonderReset();
-void ZNPC_Common_Shutdown();
-void NPCC_BuildStandardAnimTran(xAnimTable* table, char** namelist, S32* ourAnims, S32 idx_dflt,
-                                F32 blend);
-void zNPCCommon_Timestep(xScene* xscn, F32 dt);
-
-xAnimTable* ZNPC_AnimTable_Common();
-xAnimTable* ZNPC_AnimTable_LassoGuide();
-S32 NPCC_NPCIsConversing();
-void zNPCCommon_EjectPhlemOnPawz();
+// zEntPlayer.cpp
+void VillainNoticesPlayer(zNMECommon* nme);
+S32 zNMECommon_MaxShadowNeededLater();
+U8 zNMECommon_IsConversation();
 U32 xSndIsPlaying(U32 assetID, U32 parid);
+
+en_plyrpup zEntPlayer_PowerupLevel(en_plyratak forThisAttack);
+
+void ZNME_Common_Startup();
+
+inline F32 zNMECommon::XZDstSqToPlayer(xVec3* vec, F32* dy) const
+{
+    return XZDstSqToPos(xEntGetPos(xglobals->___player_ent_dont_use_directly), vec, dy);
+}
+
+inline F32 zNMECommon::XYZDstSqToPlayer(xVec3* vec) const
+{
+    return XYZDstSqToPos(xEntGetPos(xglobals->___player_ent_dont_use_directly), vec);
+}
+
+inline S32 zNMEArena::IncludesNPC(zNMECommon* npc, F32 rad_thresh, xVec3* vec)
+{
+    return IncludesPos(xEntGetPos(npc), rad_thresh, vec);
+}
+
+inline S32 zNMEArena::NeedToCycle(zNMECommon* npc)
+{
+    S32 rc;
+
+    if (IsReady() && !IncludesNPC(npc, 0.0f, NULL) && !(flg_arena & 0x4))
+    {
+        return 2;
+    }
+
+    if (npc->navnet->nav_dest != nav_refer_dest || npc->navnet->nav_curr != nav_refer_curr)
+    {
+        return 1;
+    }
+
+    if (!IsReady() && !(flg_arena & 0x4))
+    {
+        rc = 2;
+    }
+    else
+    {
+        rc = 0;
+    }
+
+    return rc;
+}
 
 #endif

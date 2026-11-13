@@ -4,7 +4,9 @@
 #include <types.h>
 
 #include "xMath3.h"
+#include "xBound.h"
 
+struct xBound;
 struct xEnt;
 struct xQCData;
 struct xGrid;
@@ -58,15 +60,14 @@ struct xGridIterator
 
 typedef S32 (*GridEntCallback)(xEnt*, void*);
 
-extern volatile S32 gGridIterActive;
-
-void xGridBoundInit(xGridBound* gridb, void* data);
+void xGridInit(xGrid* grid, const xBox* bounds, U16 nx, U16 nz, U8 ingrid_id);
 void xGridKill(xGrid* grid);
 void xGridEmpty(xGrid* grid);
+void xGridUpdate(xGrid* grid, xEnt* ent);
 S32 xGridRemove(xGridBound* gridb);
 xGridBound** xGridGetCell(xGrid* grid, const xEnt* ent, S32& grx, S32& grz);
 void xGridGetCell(xGrid* grid, F32 posx, F32 posy, F32 posz, S32& grx, S32& grz);
-xGridBound* xGridIterFirstCell(xGrid* grid, S32 grx, S32 grz, xGridIterator& iter);
+xGridBound* xGridIterFirstCell(xGrid* grid, S32 grx, S32 grz, xGridIterator& it);
 xGridBound* xGridIterFirstCell(xGrid* grid, F32 posx, F32, F32 posz, S32& grx, S32& grz,
                                xGridIterator& it);
 xGridBound* xGridIterFirstCell(xGridBound** head, xGridIterator& it);
@@ -75,38 +76,19 @@ void xGridIterClose(xGridIterator& it);
 void xGridCheckPosition(xGrid* grid, xVec3* pos, xQCData* qcd, GridEntCallback hitCB, void* cbdata);
 S32 xGridEntIsTooBig(xGrid* grid, const xEnt* ent);
 S32 xGridAdd(xGrid* grid, xEnt* ent);
+void xGridCheckBoundSetup(xBox& box, S32& minx, S32& minz, S32& maxx, S32& maxz, xGrid& grid,
+                          const xBound& bound);
 
-xGridBound* xGridIterFirstCell(xGridBound** head, xGridIterator& it)
+inline void xGridBoundInit(xGridBound* gridb, void* data)
 {
-    xGridBound* cell = *head;
-
-    if (!cell)
-    {
-        return NULL;
-    }
-
-    it.delfound = 0;
-    it.listhead = head;
-    it.curcell = cell;
-
-    gGridIterActive++;
-
-    return cell;
-}
-
-xGridBound* xGridIterFirstCell(xGrid* grid, S32 grx, S32 grz, xGridIterator& iter)
-{
-    if (grx < 0 || grx >= grid->nx)
-    {
-        return NULL;
-    }
-
-    if (grz < 0 || grz >= grid->nz)
-    {
-        return NULL;
-    }
-
-    return xGridIterFirstCell(grid->cells + grz * grid->nx + grx, iter);
+    gridb->data = data;
+    gridb->gx = -1;
+    gridb->gz = -1;
+    gridb->grid = NULL;
+    gridb->oversize = 0;
+    gridb->head = NULL;
+    gridb->next = NULL;
+    gridb->gpad = 0xea;
 }
 
 inline xGridBound* xGridIterNextCell(xGridIterator& it)
@@ -129,6 +111,51 @@ inline xGridBound* xGridIterNextCell(xGridIterator& it)
 
     xGridIterClose(it);
     return NULL;
+}
+
+// Calls cb(ent) for every grid entry whose quick-cull data intersects qcd, first in the
+// oversize list and then in the cells overlapped by bound; stops as soon as cb returns false.
+template <class T> void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T& cb)
+{
+    xGridIterator it;
+    xBox box;
+    S32 lower_x;
+    S32 lower_z;
+    S32 upper_x;
+    S32 upper_z;
+
+    xGridCheckBoundSetup(box, lower_x, lower_z, upper_x, upper_z, grid, bound);
+
+    xGridBound* cell = xGridIterFirstCell(&grid.other, it);
+    S32 gx = lower_x;
+    S32 gz = lower_z;
+
+    while (true)
+    {
+        while (cell)
+        {
+            if (xQuickCullIsects(&qcd, &((xBound*)(cell + 1))->qcd) && !cb(*(xEnt*)cell->data))
+            {
+                xGridIterClose(it);
+                return;
+            }
+
+            cell = xGridIterNextCell(it);
+        }
+
+        if (gx > upper_x)
+        {
+            break;
+        }
+
+        cell = xGridIterFirstCell(&grid, gx, gz, it);
+
+        if (++gz > upper_z)
+        {
+            gz = lower_z;
+            gx++;
+        }
+    }
 }
 
 #endif

@@ -5,6 +5,13 @@
 #include "xMovePoint.h"
 #include "xColor.h"
 
+#define XENTMOTION_TYPE_ER 0 // Extend / Retract
+#define XENTMOTION_TYPE_ORB 1 // Orbital
+#define XENTMOTION_TYPE_SPL 2 // Spline
+#define XENTMOTION_TYPE_MP 3 // Movepoint
+#define XENTMOTION_TYPE_MECH 4 // Mechanism
+#define XENTMOTION_TYPE_PEN 5 // Pendulum
+
 struct xEntMotionERData
 {
     xVec3 ret_pos;
@@ -25,7 +32,9 @@ struct xEntMotionOrbitData
 
 struct xEntMotionSplineData
 {
-    S32 unknown;
+    U32 spline_id;
+    F32 speed;
+    F32 lean_modifier;
 };
 
 struct xEntMotionMPData
@@ -41,6 +50,7 @@ struct xEntMotionMechData
     U8 flags;
     U8 sld_axis;
     U8 rot_axis;
+    U8 scale_axis;
     F32 sld_dist;
     F32 sld_tm;
     F32 sld_acc_tm;
@@ -51,6 +61,8 @@ struct xEntMotionMechData
     F32 rot_dec_tm;
     F32 ret_delay;
     F32 post_ret_delay;
+    F32 scale_amount;
+    F32 scale_duration;
 };
 
 struct xEntMotionPenData
@@ -68,7 +80,7 @@ struct xEntMotionAsset
 {
     U8 type;
     U8 use_banking;
-    U16 flags;
+    U16 ent_motion_flags;
     union
     {
         xEntMotionERData er;
@@ -105,15 +117,33 @@ struct xEntOrbitData
     F32 w;
 };
 
+namespace x
+{
+    struct NURBS;
+}
+
+struct xEntSpeedData
+{
+    F32 speed;
+    F32 acceleration;
+    F32 dest_speed;
+};
+
 struct xEntSplineData
 {
-    S32 unknown;
+    xEntSpeedData speed_data;
+    x::NURBS* spline;
+    F32 u;
+    U8 arrived;
+    F32 position_blend_v;
+    F32 orient_blend_v;
+    xQuat current_orient;
 };
 
 struct xEntMPData
 {
+    xEntSpeedData speed_data;
     F32 curdist;
-    F32 speed;
     xMovePoint* dest;
     xMovePoint* src;
     xSpline3* spl;
@@ -125,19 +155,22 @@ struct xEntMPData
 
 struct xEntMechData
 {
-    xVec3 apos;
-    xVec3 bpos;
-    xVec3 dir;
-    F32 arot;
-    F32 brot;
-    F32 ss;
-    F32 sr;
+    xBound original_bound;
+    xVec3 original_position;
+    xVec3 destination_position;
+    xVec3 direction;
+    F32 original_rotation;
+    F32 destination_rotation;
+    F32 sliding_speed;
+    F32 rotation_speed;
     S32 state;
-    F32 tsfd;
-    F32 trfd;
-    F32 tsbd;
-    F32 trbd;
-    F32* rotptr;
+    F32 sliding_forth_decel_time;
+    F32 rotation_forth_decel_time;
+    F32 sliding_back_decel_time;
+    F32 rotating_back_decel_time;
+    F32 scale_speed;
+    F32 current_scale;
+    F32* entity_rotation_angle;
 };
 
 struct xEntPenData
@@ -147,12 +180,12 @@ struct xEntPenData
     xMat4x3 omat;
 };
 
-struct xEntMotion // Size: 0x70
+struct xEntMotion // Size: 0xD0
 {
     xEntMotionAsset* asset;
     U8 type;
     U8 pad;
-    U16 flags;
+    U16 ent_motion_flags;
     F32 t;
     F32 tmr;
     F32 d;
@@ -171,13 +204,131 @@ struct xEntMotion // Size: 0x70
 
 void xEntMotionInit(xEntMotion* motion, xEnt*, xEntMotionAsset* asset);
 void xEntMotionReset(xEntMotion* motion, xScene* sc);
+void xEntMotionSetup(xEntMotion* motion, xScene* sc);
 void xEntMotionMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame);
 void xEntMotionTranslate(xEntMotion* motion, const xVec3* dpos, xMat4x3* dmat);
 void xEntMotionDebugInit(U16 num_xems);
 void xEntMotionDebugAdd(xEntMotion*);
 void xEntMotionDebugExit();
-void xEntMotionStop(xEntMotion* motion);
-void xEntMotionRun(xEntMotion* motion);
-U32 xEntMotionIsStopped(const xEntMotion* motion);
+void xEntMechForward(xEntMotion* motion);
+void xEntMechReverse(xEntMotion* motion);
+
+enum
+{
+    k_XENTMOTION_STOPPED = (1 << 2)
+};
+
+inline U32 xEntMotionIsStopped(const xEntMotion* motion)
+{
+    return motion->ent_motion_flags & k_XENTMOTION_STOPPED;
+}
+
+inline void xEntMotionStop(xEntMotion* motion)
+{
+    motion->ent_motion_flags |= k_XENTMOTION_STOPPED;
+}
+
+inline void xEntMotionRun(xEntMotion* motion)
+{
+    motion->ent_motion_flags &= (U16)~k_XENTMOTION_STOPPED;
+}
+
+inline void xEntMPSetSpeed(xEntMotion* motion, F32 speed)
+{
+    motion->mp.speed_data.speed = MAX(0.0f, speed);
+}
+
+// No GC symbols (always inlined); names and signatures from the Ratatouille GC DWARF.
+inline void xEntMPAccelerate(xEntMotion* motion, F32 new_speed, F32 time)
+{
+    motion->mp.speed_data.dest_speed = MAX(0.0f, new_speed);
+    motion->mp.speed_data.acceleration = (new_speed - motion->mp.speed_data.speed) / time;
+}
+
+inline F32 xEntSplineGetSpeed(const xEntMotion* motion)
+{
+    return motion->spl.speed_data.speed;
+}
+
+inline F32 xEntMPGetSpeed(const xEntMotion* motion)
+{
+    return motion->mp.speed_data.speed;
+}
+
+inline void xEntSplineSetSpeed(xEntMotion* motion, F32 speed)
+{
+    if (speed * motion->spl.speed_data.speed < 0.0f)
+    {
+        motion->spl.arrived = 0;
+    }
+    motion->spl.speed_data.speed = speed;
+}
+
+inline void xEntSplineReverse(xEntMotion* motion)
+{
+    motion->spl.speed_data.speed = -motion->spl.speed_data.speed;
+    motion->spl.arrived = 0;
+}
+
+// No GC symbols (always inlined); names and signatures from the Ratatouille GC DWARF.
+inline F32 xEntMotionGetSpeed(const xEntMotion* motion)
+{
+    if (motion->type == XENTMOTION_TYPE_MP)
+    {
+        return xEntMPGetSpeed(motion);
+    }
+    return xEntSplineGetSpeed(motion);
+}
+
+inline void xEntMotionSetSpeed(xEntMotion* motion, F32 speed)
+{
+    if (motion->type == XENTMOTION_TYPE_MP)
+    {
+        xEntMPSetSpeed(motion, speed);
+    }
+    else
+    {
+        xEntSplineSetSpeed(motion, speed);
+    }
+}
+
+inline void xEntMotionReverse(xEntMotion* motion)
+{
+    if (motion->type == XENTMOTION_TYPE_MECH)
+    {
+        xEntMechReverse(motion);
+    }
+    else
+    {
+        xEntSplineReverse(motion);
+    }
+}
+
+// No GC symbol (always inlined); signature and local from the Ratatouille GC DWARF.
+inline U8 xEntMPAtEnd(xEntMotion* motion)
+{
+    xEntMPData* mp = &motion->mp;
+    return mp->dest == mp->src || mp->dest == NULL;
+}
+
+inline U32 xEntERIsExtending(const xEntMotion* motion)
+{
+    return motion->t < motion->er.et;
+}
+
+inline U32 xEntERIsExtended(const xEntMotion* motion)
+{
+    return motion->t >= motion->er.et && motion->t < motion->er.brt;
+}
+
+inline U32 xEntERIsRetracting(const xEntMotion* motion)
+{
+    return motion->t >= motion->er.brt && motion->t < motion->er.ert;
+}
+
+inline U32 xEntERIsRetracted(const xEntMotion* motion)
+{
+    return motion->t >= motion->er.ert;
+}
 
 #endif

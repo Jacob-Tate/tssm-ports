@@ -3,7 +3,15 @@
 
 #include "xMath3.h"
 
+// Opaque raw animation data (an incomplete type in the PS2 DWARF too).
+struct iAnimFile;
+
+// Bone limit of an animation pose: a pose in the work buffer is IANIM_MAXBONES quats followed by
+// IANIM_MAXBONES translations (at quats + 0x410).
+#define IANIM_MAXBONES 65
+
 extern U8* giAnimScratch;
+extern U8* g_iAnim_workBuffer;
 
 void iAnimInit();
 F32 iAnimDuration(void* RawData);

@@ -4,26 +4,28 @@
 #include <types.h>
 #include <bink.h>
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\size_t.h>
+#include <dolphin/dvd.h>
+#include <rwcore.h>
+#include "xFMV.h"
 
-struct _GXRenderModeObj;
+struct PKRAssetTOCInfo;
 
-struct iFMV
+// GameCube layout (size 0x48). The movie's byte offset inside its HIP file is passed to the Bink
+// file IO in file.cb.userData (BinkOpen with BINKFILEHANDLE copies the DVDFileInfo).
+struct MOVIE
 {
-    static void* mXFBs[2];
-    static void* mCurrentFrameBuffer;
-    static _GXRenderModeObj* mRenderMode;
-    static U8 mFirstFrame;
-
-    static void InitDisplay(_GXRenderModeObj*);
-    static void InitGX();
-    static void InitVI();
-    static void Suspend();
-    static void Resume();
+    HBINK hBink;
+    DVDFileInfo file;
+    RwRaster* pBinkRaster;
+    RwTexture* pBinkTexture;
 };
 
-void* iFMVmalloc(size_t size);
-void iFMVfree(void* mem);
-U32 iFMVPlay(char* filename, U32 buttons, F32 time, bool skippable, bool lockController);
-static void Setup_surface_array();
-void Decompress_frame(HBINK bnk, HRAD3DIMAGE rad_image, long flags);
+MOVIE* iFMVOpen(PKRAssetTOCInfo& rAssetInfo);
+void iFMVSuspend();
+void iFMVResume();
+void iFMVResetCallback();
+void iFMVKill();
+void iFMVClose(MOVIE*& pMovie);
+U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, bool skippable,
+             bool lockController);
 #endif

@@ -2,6 +2,9 @@
 #define XCAMERA_H
 
 #include "iCamera.h"
+// No xDebugTweak.h here: retail xCamera.cpp, iWad, zDust, zSmoke, zSplash and other units that
+// include this header (directly or through xGlobals.h) have none of the tweak_callback templates.
+#include "xDebug.h"
 
 #include "xBase.h"
 #include "xMath3.h"
@@ -12,8 +15,13 @@
 #include <rwcore.h>
 
 #include "xPad.h"
+#include "xMemMgr.h"
+
+#include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new>
 
 struct xScene;
+struct xQCData;
+struct xEnt;
 
 enum _tagTransType
 {
@@ -30,24 +38,7 @@ enum _tagTransType
     eTransType_Total
 };
 
-enum xCamCoordType
-{
-    XCAM_COORD_CART,
-    XCAM_COORD_CYLINDER,
-    XCAM_COORD_SPHERE,
-    XCAM_COORD_MAX,
-    XCAM_COORD_INVALID = 0xffffffff,
-};
-
-enum xCamOrientType
-{
-    XCAM_ORIENT_QUAT,
-    XCAM_ORIENT_EULER,
-    XCAM_ORIENT_MAX,
-    XCAM_ORIENT_INVALID = 0xffffffff,
-};
-
-struct _tagxCamFollowAsset
+struct xCamFollowAsset
 {
     F32 rotation;
     F32 distance;
@@ -99,7 +90,7 @@ struct xCamAsset : xBaseAsset
     F32 fade_down;
     union
     {
-        _tagxCamFollowAsset cam_follow;
+        xCamFollowAsset cam_follow;
         _tagxCamShoulderAsset cam_shoulder;
         _tagp2CamStaticAsset cam_static;
         _tagxCamPathAsset cam_path;
@@ -230,88 +221,10 @@ struct xBinaryCamera
     void update(F32 dt);
     void add_tweaks(char const*);
     void set_targets(xVec3 const& par_1, xVec3 const& par_2, F32 par_3);
-    void render_debug();
-};
-
-struct xCamConfigCommon
-{
-    U8 priority;
-    U8 pad1;
-    U8 pad2;
-    U8 pad3;
-    F32 blend_time;
-};
-
-struct xCamBlend;
-struct xCam;
-
-struct xCamGroup
-{
-    xMat4x3 mat;
-    xVec3 vel;
-    F32 fov;
-    F32 fov_default;
-    S32 flags;
-    xCam* primary;
-    analog_data analog;
-    xCam* owned[32];
-    S32 size;
-    S32 primary_index;
-    S32 child_flags;
-    S32 child_flags_mask;
-    xCamBlend* blend_cam[4];
-};
-
-struct xCam
-{
-    struct _class_0
+    // No symbol (BfBB: weak, empty).
+    void render_debug()
     {
-        union
-        {
-            //xVec3 cart;
-            //xCamCoordCylinder cylinder;
-            //xCamCoordSphere sphere;
-        };
-    };
-
-    struct _class_1
-    {
-        union
-        {
-            //xQuat quat;
-            //xCamOrientEuler euler;
-        };
-    };
-
-    xMat4x3 mat;
-    F32 fov;
-    S32 flags;
-    U32 owner;
-    xCamGroup* group;
-    analog_data analog;
-    F32 motion_factor;
-    xCamCoordType coord_type;
-    xCamOrientType orient_type;
-    _class_0 coord;
-    _class_1 orient;
-    U8 _padding[0x2c]; // until the anonymous union structs above are done
-    xCamConfigCommon cfg_common;
-    S32 group_index;
-    S32 group_flags;
-    xCamBlend* blender;
-};
-
-struct xCamBlend : xCam
-{
-    xCam* src;
-    xCam* dst;
-    F32 time;
-};
-
-struct xCamScreen
-{
-    RwCamera* icam;
-    F32 fov;
+    }
 };
 
 F32 xVec3Length(const xVec3* vec);
@@ -323,16 +236,111 @@ void xCameraUpdate(xCamera* cam, F32 dt);
 void xCameraBegin(xCamera* cam, S32);
 void xCameraEnd(xCamera* cam, F32 seconds, S32 update_scrn_fx);
 void xCameraShowRaster(xCamera* cam);
-F32 xCameraGetFOV(const xCamera* cam);
-void xCameraSetFOV(xCamera* cam, F32 fov);
+// No GC symbol (BfBB: weak, an inline accessor).
+inline F32 xCameraGetFOV(const xCamera* cam)
+{
+    return cam->fov;
+}
+// No GC symbol (always inlined): unlike BfBB it only stores the field.
+inline void xCameraSetFOV(xCamera* cam, F32 fov)
+{
+    cam->fov = fov;
+}
 void xCameraMove(xCamera* cam, U32 flags, F32 dgoal, F32 hgoal, F32 pgoal, F32 tm, F32 tm_acc,
                  F32 tm_dec);
 void xCameraMove(xCamera* cam, const xVec3& loc);
+void xCameraMove(xCamera* cam, const xVec3& loc, F32 maxSpeed);
+void xCameraFOV(xCamera* cam, F32 fov, F32 maxSpeed, F32 dt);
 void xCameraRotate(xCamera* cam, const xMat3x3& m, F32 time, F32 accel, F32 decl);
-F32 xCameraGetFOV(const xCamera* cam);
+void xCameraRotate(xCamera* cam, const xVec3& v, F32 roll, F32 time, F32 accel, F32 decl);
+void xCameraLook(xCamera* cam, U32 flags, const xQuat* orn_goal, F32 tm, F32 tm_acc, F32 tm_dec);
+void xCameraLookYPR(xCamera* cam, U32 flags, F32 yaw, F32 pitch, F32 roll, F32 tm, F32 tm_acc,
+                    F32 tm_dec);
 void xCameraDoCollisions(S32 do_collis, S32 owner);
+void SweptSphereHitsCameraEnt(xScene*, xRay3* ray, xQCData* qcd, xEnt* ent, void* data);
 void xCameraSetTargetMatrix(xCamera* cam, xMat4x3* mat);
-void xCameraFXShake(F32 maxTime, F32 magnitude, F32 cycleMax, F32 rotate_magnitude, F32 radius,
-                    xVec3* epicenter, xVec3* player);
+void xCameraSetTargetOMatrix(xCamera* cam, xMat4x3* mat);
+struct cameraFXShake
+{
+    F32 magnitude;
+    xVec3 dir;
+    F32 cycleTime;
+    F32 cycleMax;
+    F32 dampen;
+    F32 dampenRate;
+    F32 rotate_magnitude;
+    F32 radius;
+    const xVec3* epicenterP;
+    xVec3 epicenter;
+    const xVec3* player;
+};
+
+struct cameraFXZoom
+{
+    F32 holdTime;
+    F32 vel;
+    F32 accel;
+    F32 distance;
+    U32 mode;
+    F32 velCur;
+    F32 distanceCur;
+    F32 holdTimeCur;
+};
+
+#define CAMERAFX_ZOOM_MODE_0 0
+#define CAMERAFX_ZOOM_MODE_1 1
+#define CAMERAFX_ZOOM_MODE_2 2
+#define CAMERAFX_ZOOM_MODE_3 3
+
+struct cameraFX
+{
+    S32 type;
+    S32 flags;
+    F32 elapsedTime;
+    F32 maxTime;
+    union
+    {
+        cameraFXShake shake;
+        cameraFXZoom zoom;
+    };
+};
+
+#define CAMERAFX_TYPE_NONE 0
+#define CAMERAFX_TYPE_ZOOM 1
+#define CAMERAFX_TYPE_SHAKE 2
+
+struct cameraFXTableEntry
+{
+    S32 type;
+    void (*func)(cameraFX*, F32, const xMat4x3*, xMat4x3*);
+    void (*funcKill)(cameraFX*);
+};
+
+cameraFX* xCameraFXShake(F32 maxTime, F32 magnitude, F32 cycleMax, F32 rotate_magnitude, F32 radius,
+                         const xVec3* epicenter, const xVec3* player, bool shakeY);
+void xCameraFXShakeEnd(cameraFX* fx, F32 fadeOutTime);
+cameraFX* xCameraFXShakeForever(F32 magnitude, F32 cycleMax, F32 rotate_magnitude, F32 radius,
+                                const xVec3* epicenter, const xVec3* player, bool shakeY);
+void xCameraFXBegin(const xMat4x3& mat);
+void xCameraFXUpdate(xMat4x3& mat, RwCamera* icam, F32 dt);
+void xCameraFXEnd(xMat4x3& mat, RwCamera* icam);
+void xCameraFXKill();
+
+// The screen camera (methods in xCam.cpp). Declared here, not in xCam.h: units that only reach it
+// through xglobals->screen have none of xCam.h's .rodata templates in retail.
+struct xCamScreen
+{
+    RwCamera* icam;
+    F32 fov;
+
+    void create(S32 w, S32 h);
+    void destroy();
+    void set_scene(xScene& scene);
+    void prepare_render();
+    void begin_render(bool clear);
+    void end_render();
+    void set_world_matrix(const xMat4x3& mat);
+    void set_fov(F32 fov);
+};
 
 #endif

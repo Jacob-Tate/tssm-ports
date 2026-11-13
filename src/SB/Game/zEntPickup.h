@@ -12,22 +12,13 @@
 
 struct zEntPickup : zEnt
 {
-    xShadowSimpleCache simpShadow_embedded;
-    U32 state; // 0x16C
     zAssetPickup* p;
     void* anim;
     F32 animTime;
-    F32 timer; // 0x17C
-    F32 shake_timer;
-    xVec3 shake_pos;
-    S32 snackGateInfoDisplayed;
-    F32 fx_timer;
-    xPar* fx_par;
-    zParEmitter* fx_emit;
+    F32 timer;
     F32 fx_scale;
     xVec3 grab_pos;
-    U32 flyflags;
-    S32 flg_opts;
+    F32 reward_timer;
     xVec3 vel;
     xVec3 droppos;
     xBase* followTarget;
@@ -35,7 +26,12 @@ struct zEntPickup : zEnt
     xBase* dropParent;
     xEnt* useThisEntPos;
     xEntDrive drv;
-    U16 pickupFlags; // 0x264
+    xShadowSimpleCache simpShadow_embedded;
+    U32 state; // 0x294
+    U32 updateIndex;
+    U8 pickupFlags;
+    U8 flyflags;
+    U8 flg_opts;
 };
 
 struct xEntPickupAsset
@@ -61,11 +57,12 @@ void zEntPickupInit(void* ent, void* asset);
 void zEntPickupInit(zEntPickup* ent, xEntAsset* asset);
 void zEntPickup_Setup(zEntPickup* p);
 void zEntPickup_Setup();
-S32 zEntPickupEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam,
-                        xBase* toParamWidget);
+void zEntPickup_SetState(zEntPickup* ent, U32 state);
+void zEntPickupEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget,
+                       U32);
 void zEntPickup_FlyToInterface(zEntPickup*, F32);
 void zEntPickup_CheckAllPickupsAgainstPlayer(xScene* sc, F32 dt);
-void zEntPickup_DoPickup(zEntPickup* ent);
+void zEntPickup_DoPickup(zEntPickup* ent, bool instant);
 void zEntPickup_GivePickup(zEntPickup* ent);
 void zEntPickup_GiveAllRewardsNow();
 void zEntPickup_Update(zEntPickup* ent, xScene* sc, F32 dt);
@@ -80,8 +77,12 @@ void zEntPickup_RenderOne(xEnt* ent);
 void zEntPickup_RenderList(zEntPickup* plist, U32 pcount);
 void zEntPickup_UpdateFlyToInterface(zEntPickup* ent, U32 pcount, F32 dt);
 void zEntPickup_SceneEnter();
+void zEntPickupSceneInit(U32 sceneID);
 void zEntPickup_SceneReset();
+void zEntPickup_UpdateInit(zEntPickup* plist, U32 pcount);
+void zEntPickup_UpdateReset();
 void zEntPickup_SceneUpdate(F32 dt);
+void zEntPickup_UpdateAll(F32 dt);
 void zEntPickup_SpawnNRewards(U32* pickups, U32 num, xVec3* ppos);
 void zEntPickup_SpawnNRewards(U32* pickups, U32 num, xVec3 pos);
 void zEntPickup_RewardPostSetup();

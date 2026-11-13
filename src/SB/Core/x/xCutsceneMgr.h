@@ -9,6 +9,7 @@ struct xCutsceneMgrAsset : xBaseAsset
     U32 cutsceneAssetID;
     U32 flags;
     F32 interpSpeed;
+    U32 uSubtitlesID;
     F32 startTime[15];
     F32 endTime[15];
     U32 emitID[15];
@@ -33,7 +34,6 @@ struct xCutsceneMgr : xBase
     xCutsceneMgrAsset* tasset;
     xCutscene* csn; // 0x14
     U32 stop; // 0x18
-    xCutsceneZbufferHack* zhack;
     F32 oldfov;
 };
 

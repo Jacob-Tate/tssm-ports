@@ -11,8 +11,10 @@
 #include "xParEmitter.h"
 #include "xModelBlur.h"
 #include "xCounter.h"
+#include "xRumbleEmitter.h"
 #include "zStreamedSound.h"
 #include "zEntPlayerCar.h"
+#include "zGlobals.h"
 
 // Remember:
 // U8 is commonly a bool
@@ -24,14 +26,6 @@ enum eDamage
     eDamage2,
     eDamage3,
     eDamageMax
-};
-
-enum eCollisionType
-{
-    eCollisionTypeHeadOn,
-    eCollisionTypeSideKnock,
-    eCollisionTypeJumpLand,
-    eCollisionTypeDamage
 };
 
 enum zDrivingSurf
@@ -61,6 +55,18 @@ enum zDrivingSurf
     ezDRIVINGSURF_MaxTypes
 };
 
+enum eCarOneLiner
+{
+    eCarOneLinerDestroyCrate,
+    eCarOneLinerStartJump,
+    eCarOneLinerStartBoost,
+    eCarOneLinerStartReverse,
+    eCarOneLinerDetectedSlipperySurface,
+    eCarOneLinerTakeDamage,
+    eCarOneLinerGetHealth,
+    eCarOneLinerNumSounds
+};
+
 enum animState
 {
     eANIMSTATE_Idle,
@@ -78,34 +84,6 @@ enum animState
     eANIMSTATE_Death
 };
 
-struct effectAsset : xDynAsset
-{
-    F32 time;
-    F32 intensity;
-    U32 id;
-    U8 priority;
-    U8 type;
-    U8 rumbleInPause;
-    U8 pad;
-    F32 param1;
-    F32 param2;
-    F32 shakeMagnitude;
-    F32 shakeCycleMax;
-    F32 shakeRotationalMagnitude;
-    U8 shakeY;
-};
-
-struct emitterBase : xBase
-{
-    effectAsset* pEffectAsset;
-
-    void SetIntensity(F32 intensity);
-};
-
-struct effect : emitterBase
-{
-};
-
 struct driveSurfaceDescriptor
 {
     F32 staticTraction;
@@ -117,10 +95,17 @@ struct driveSurfaceDescriptor
     iSndGroupHandle soundGroupSkid;
 };
 
-// Im thinking that this struct is fucked because of
-// the mismatching offsets
 struct zCar
 {
+    // Nested in zCar, as in the PS2 symbol of SoundPlayCollision
+    enum eCollisionType
+    {
+        eCollisionTypeHeadOn,
+        eCollisionTypeSideKnock,
+        eCollisionTypeJumpLand,
+        eCollisionTypeDamage
+    };
+
     xEnt* pEnt;
     xMat4x3 lastMat;
     xMat4x3 mat;
@@ -132,7 +117,8 @@ struct zCar
     iSndHandle soundBoostStartHandle;
     F32 modelYaw;
     xVec3 velocity;
-    U8 inGroundContact;
+    // bool: SphereCollision takes its address as a bool*
+    bool inGroundContact;
     F32 timeOffGround;
     F32 shockExtension;
     F32 steeringPosition;
@@ -145,7 +131,7 @@ struct zCar
     xCollis collisions[12];
     U32 collisionUserFlags[12];
     xBound bound;
-    char collisionTypes[22];
+    U8 collisionTypes[22];
     S32 numNitros;
     F32 boostTimeRemaining;
     xModelBlur nitroBlur;
@@ -190,88 +176,127 @@ struct zCar
     _xCounter* nitroUsedCounter;
     U8 oilOneLinerPlayed;
     zStreamedSoundList carOneLiners;
-    effect* mpRumbleCollision;
-    effect* mpRumbleDamage;
-    effect* mpRumbleBoostStart;
-    effect* mpRumbleBoost;
+    xRumble::effect* mpRumbleCollision;
+    xRumble::effect* mpRumbleDamage;
+    xRumble::effect* mpRumbleBoostStart;
+    xRumble::effect* mpRumbleBoost;
 
-    void SoundInitAssetTable();
-    xAnimTable* CreateAnimTable();
-    U32 JumpEndedCB(xAnimTransition*, xAnimSingle* anim, void*);
-    U32 JumpStartedCB();
-    U32 AnimDefaultCB(xAnimTransition*, xAnimSingle* anim, void*);
-    U32 DamageSpinCompleteCB(xAnimSingle* anim);
-    U32 DeathCheck();
-    U32 FailedCheck();
-    U32 SuccessCheck();
-    U32 SpinRightCheck();
-    U32 SpinLeftCheck();
-    U32 CrashCheck();
-    U32 JumpEndCheck();
-    U32 JumpCheck();
-    U32 ReverseCheck();
-    U32 StartBoostingCheck();
-    U32 StartDrivingSlippyCheck();
-    U32 StartDrivingCheck();
-    U32 IdleCheck();
-    void PreventPoppingThroughWorld(xVec3* pStartPosition, xVec3* pEndPosition, xVec3* pVelocity);
+    static iSndGroupHandle sSoundAsset[33];
+    static zStreamedSound carOneLinersData[eCarOneLinerNumSounds + 1];
+
+    void SoundUpdate();
+    void SoundPlayCollision(eCollisionType type, F32 strength);
+    void SoundPlayHorn();
+    static void SoundInitAssetTable();
+    void ModelSwap(eDamage newDamageLevel, bool swapEffects);
+    void StreakFX(xEnt* ent, F32 dt);
+    void DriveSurfaceFXInternal(const xModelInstance* pModel, F32 dt, zDrivingSurf collisionType);
+    void DriveSurfaceFX(const xModelInstance* pModel, F32 dt);
+    void RenderBrakeLights(const xModelInstance* pModel);
+    void UpdatePropellor(xModelInstance* pModel);
+    void UpdateEffects(F32 dt);
+    void UpdateVirtualBunTop(F32 dt);
+    static xAnimTable* CreateAnimTable();
+    static U32 JumpEndedCB(xAnimTransition*, xAnimSingle*, void*);
+    static U32 JumpStartedCB(xAnimTransition*, xAnimSingle*, void*);
+    static U32 AnimDefaultCB(xAnimTransition*, xAnimSingle* anim, void*);
+    static U32 DamageSpinCompleteCB(xAnimTransition*, xAnimSingle* anim, void*);
+    static U32 DeathCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 FailedCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 SuccessCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 SpinRightCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 SpinLeftCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 CrashCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 JumpEndCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 JumpCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 ReverseCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 StartBoostingCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 StartDrivingSlippyCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 StartDrivingCheck(xAnimTransition*, xAnimSingle*, void*);
+    static U32 IdleCheck(xAnimTransition*, xAnimSingle*, void*);
+    void UpdateAnimState(xEnt* pEnt);
+    void ApplyCollisionRebounds(xVec3* pVelocity);
+    // The unnamed F32 is in the PS2 symbol: CarUpdate passes boundRadius, the body never reads it.
+    void DepenetrateCollisionList(xVec3* pPosition, F32);
+    // Static: the PS2 DWARF gives it no 'this'
+    static void PreventPoppingThroughWorld(const xVec3* pStartPosition, xVec3* pEndPosition,
+                                           xVec3* pVelocity);
+    void SphereCollision(const xVec3* pNewCarPosition, const xVec3* pVelocity,
+                         bool* pInGroundContact, F32* pShockExtension, xVec3* pGroundNormal);
+    bool operator()(xEnt& ent);
+    void UpdateGroundCharacteristics();
+    void CalculateIdealOrientation(F32 yaw, xMat3x3* pIdealOrientation, xVec3* pGroundNormal);
+    void CarUpdate(F32 dt, F32 steer, bool accelOn, bool brakeOn, bool boostOn);
+    void StartBoost();
+    U32* GetVarNitros() const;
+    U8 CanPickupNitros() const;
+    void AddNitros(S32 nitros);
+    xMat4x3* GetMatrix();
+    void SetMatrix(xMat4x3* pSource);
+    // Remaining hit points (0 when the car is wrecked); unsigned, as retail reads it
+    U32 GetHealth() const
+    {
+        return eDamage3 - damageLevel;
+    }
+    // No symbol on GC or PS2 (always inlined); name unknown. True once the car is wrecked or the
+    // level's success/failure animation has started: driving input is ignored from then on.
+    bool IsDisabled() const
+    {
+        return damageLevel == eDamage3 || animSuccessMode || animFailedMode;
+    }
+    // No symbol on GC or PS2 (always inlined); name unknown. The car's speed, negative when it
+    // moves backwards.
+    F32 GetSignedSpeed()
+    {
+        F32 forwardSpeed = xVec3Dot(&mat.at, &velocity);
+        F32 speed = xVec3Length(&velocity);
+        if (forwardSpeed < 0.0f)
+        {
+            speed *= -1.0f;
+        }
+        return speed;
+    }
+    // No symbol on GC or PS2 (always inlined); name unknown. Ends the nitro boost: the
+    // counterpart of StartBoost's sounds and rumble.
+    void StopBoost()
+    {
+        xSndMgrStop(soundBoostStartHandle);
+        soundBoostStartHandle = (iSndHandle)-1;
+        xSndMgrPlay(sSoundAsset[14], 2, NULL, NULL, pEnt, NULL, NULL);
+        xSndMgrStop(soundBoostLoopHandle);
+        soundBoostLoopHandle = (iSndHandle)-1;
+
+        if (mpRumbleBoost != NULL)
+        {
+            zEntEvent(mpRumbleBoost, eEventStopRumbleEffect, globals.currentActivePad, 0.0f, 0.0f,
+                      0.0f);
+        }
+    }
+    // No symbol on GC or PS2 (always inlined; the Xbox build has both). The collision sphere's
+    // center lies boundYShift along the car's up axis from the matrix origin. GetCenter is
+    // Ratatouille's name; GetPositionFromCenter's is invented.
+    void GetCenter(xVec3* pOutput)
+    {
+        *pOutput = mat.pos + mat.up * boundYShift;
+    }
+    void GetPositionFromCenter(xVec3* pOutput, const xVec3* pCenter)
+    {
+        *pOutput = *pCenter + mat.up * -boundYShift;
+    }
+    void GiveHealth(S32 health);
+    void SetFullHealth();
+    void TakeDamage(bool spinClockwise);
+    void HandleEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget,
+                     U32 UNUSEDtoParamWidgetID);
     void Exit();
+    void Reset(xEnt* pCarEnt, F32 initialYaw, xVec3* pPosition);
+    void Initialize(xEnt* pCarEnt);
+    void SceneInit();
 };
 
-void SoundUpdate();
-void SoundPlayCollision(eCollisionType type, F32 strength);
-void SoundPlayHorn();
-void SoundInitAssetTable();
-void ModelSwap(eDamage newDamageLevel, U8 swapEffects);
-void StreakFX(xEnt* ent, F32 dt);
-void DriveSurfaceFXInternal(xModelInstance* pModel, F32 dt, zDrivingSurf collisionType);
-void RenderBrakeLights(xModelInstance* pModel);
-void zCarRenderOneBrakeLight(xMat4x3* pMat);
-void UpdateEffects(F32 dt);
-void UpdateVirtualBunTop(F32 dt);
-xAnimTable* CreateAnimTable();
-U32 JumpEndedCB();
-U32 JumpStartedCB();
-U32 AnimDefaultCB(xAnimSingle* anim);
-U32 DamageSpinCompleteCB(xAnimSingle* anim);
-U32 DeathCheck();
-U32 FailedCheck();
-U32 SuccessCheck();
-U32 SpinRightCheck();
-U32 SpinLeftCheck();
-U32 CrashCheck();
-U32 JumpEndCheck();
-U32 JumpCheck();
-U32 ReverseCheck();
-U32 StartBoostingCheck();
-U32 StartDrivingSlippyCheck();
-U32 StartDrivingCheck();
-U32 IdleCheck();
-void UpdateAnimState(xEnt* pEnt);
-void ApplyCollisionRebounds(xVec3* pVelocity);
-void DepenetrateCollisionList(xVec3* pPosition);
-void PreventPoppingThroughWorld(xVec3* pStartPosition, xVec3* pEndPosition, xVec3* pVelocity);
-void SphereCollision(xVec3* pNewCarPosition, xVec3* pVelocity, U8* pInGroundContact,
-                     F32* pShockExtension, xVec3* pGroundNormal);
-U8 __cl(xEnt& ent);
-void UpdateGroundCharacteristics();
-void CalculateIdealOrientation(F32 yaw, xMat3x3* pIdealOrientation, xVec3* pGroundNormal);
-void CarUpdate(F32 dt, F32 steer, U8 accelOn, U8 brakeOn, U8 boostOn);
-void StartBoost();
-U32* GetVarNitros();
-U8 CanPickupNitros();
-void AddNitros(S32 nitros);
-xMat4x3* GetMatrix();
-void SetMatrix(xMat4x3* pSource);
-void GiveHealth(S32 health);
-void SetFullHealth();
-void TakeDamage(U8 spinClockwise);
-void HandleEvent(xBase* from, xBase* to, U32 toEvent, F32* toParam, xBase* toParamWidget,
-                 U32 UNUSEDtoParamWidgetID);
-void Exit();
-void Reset(xEnt* pCarEnt, F32 initialYaw, xVec3* pPosition);
-void Initialize(xEnt* pCarEnt);
-void SceneInit();
+extern S32 MAX_NITROS;
+extern F32 BOOST_DURATION;
+
 zCar* zEntPlayerCarGetCar();
 
 #endif

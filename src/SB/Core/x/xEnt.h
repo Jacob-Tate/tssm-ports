@@ -109,6 +109,13 @@ struct xEnt : xBase
 {
     struct anim_coll_data
     {
+        U32 flags;
+        U32 bones;
+        xMat4x3 old_mat;
+        xMat4x3 new_mat;
+        U32 verts_size;
+        xVec3* verts;
+        xVec3* normals;
     };
 
     xEntAsset* asset;
@@ -153,13 +160,52 @@ struct xEnt : xBase
     void* user_data;
 };
 
-// collision types
-#define XENT_COLLTYPE_NONE 0x0
-#define XENT_COLLTYPE_TRIG 0x1 // trigger (TRIG)
-#define XENT_COLLTYPE_STAT 0x2 // static (SIMP)
-#define XENT_COLLTYPE_DYN 0x4 // dynamic (PLAT)
-#define XENT_COLLTYPE_NPC 0x8 // npc/enemy (VIL)
-#define XENT_COLLTYPE_PLYR 0x10 // player (PLYR)
+struct xEntOpacity
+{
+    F32 delta_opacity;
+    F32 delta_opacity_2;
+};
+
+void xEntOpacityInit(xEntOpacity* opacity, xEnt* ent);
+void xEntOpacityUpdate(xEntOpacity* opacity, xEnt* ent, F32 dt);
+
+inline U32 xEntIsVisible(const xEnt* ent)
+{
+    return (ent->flags & 0x85) == 0x1;
+}
+
+// Entity flags (xEnt::flags), as in BfBB upstream's xEnt.h
+#define XENT_IS_VISIBLE ((U8)(1 << 0))
+#define XENT_IS_STACKED ((U8)(1 << 1))
+
+// More flags (xEnt::moreFlags), as in BfBB upstream's xEnt.h (these shift an int)
+#define XENT_MORE_FLAGS_0x8 ((U8)1 << 3)
+#define XENT_MORE_FLAGS_HITTABLE ((U8)1 << 4)
+#define XENT_MORE_FLAGS_ANIM_COLL ((U8)1 << 5)
+
+// Physics flags (xEnt::pflags). U8-typed like BfBB upstream's xEnt.h: OR-ing a U8-typed
+// constant into a U8 field schedules differently from a plain int literal (zEntButton_Init).
+#define XENT_PFLAGS_IS_MOVING ((U8)(1 << 0))
+#define XENT_PFLAGS_HAS_VELOCITY ((U8)(1 << 1))
+#define XENT_PFLAGS_HAS_GRAVITY ((U8)(1 << 2))
+#define XENT_PFLAGS_HAS_DRAG ((U8)(1 << 3))
+#define XENT_PFLAGS_HAS_FRICTION ((U8)(1 << 4))
+
+// Collision types (xEnt::collType, chkby, penby), U8-typed like BfBB upstream's xEnt.h
+#define XENT_COLLTYPE_NONE ((U8)0)
+#define XENT_COLLTYPE_TRIG ((U8)(1 << 0)) // trigger (TRIG)
+#define XENT_COLLTYPE_STAT ((U8)(1 << 1)) // static (SIMP)
+#define XENT_COLLTYPE_DYN ((U8)(1 << 2)) // dynamic (PLAT)
+#define XENT_COLLTYPE_NPC ((U8)(1 << 3)) // npc/enemy (VIL)
+#define XENT_COLLTYPE_PLYR ((U8)(1 << 4)) // player (PLYR)
+#define XENT_COLLTYPE_ENV ((U8)(1 << 5)) // environment (ENV)
+
+// Named after the weak xEntMoves(const xEnt&) of the Ratatouille GC builds (xEnt.h).
+inline bool xEntMoves(const xEnt& ent)
+{
+    return (ent.pflags & 0x1) ||
+           (ent.collType & (XENT_COLLTYPE_DYN | XENT_COLLTYPE_NPC | XENT_COLLTYPE_PLYR));
+}
 
 // Size: 0x40
 struct xEntShadow
@@ -176,15 +222,20 @@ struct xEntShadow
     RpAtomic* shadowModel;
     F32 dst_cast;
     F32 radius[2];
+    struct
+    {
+        S32 flg_castOnOneDFF : 1;
+        S32 flg_castOnAllDFF : 1;
+        S32 flg_disableEnvCast : 1;
+        S32 flg_shadowUnused : 29;
+    };
 };
 
 extern S32 xent_entent;
 
-xMat4x3* xEntGetFrame(const xEnt* ent);
 void xEntEnable(xEnt* ent);
 xVec3* xEntGetCenter(const xEnt* ent);
 xVec3* xEntGetPos(const xEnt* ent);
-inline U32 xEntIsVisible(const xEnt* ent);
 void xEntHide(xEnt* ent);
 void xEntShow(xEnt* ent);
 void xEntInitShadow(xEnt& ent, xEntShadow& shadow);
@@ -194,7 +245,6 @@ void xEntAnimateCollision(xEnt& ent, bool on);
 xBox* xEntGetAllEntsBox();
 void xEntSetNostepNormAngle(F32 angle);
 void xEntCollideWalls(xEnt* p, xScene* sc, F32 dt);
-void xEntCollideCeiling(xEnt* p, xScene* sc, F32 dt);
 void xEntCollideFloor(xEnt* p, xScene* sc, F32 dt);
 xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data);
 void xEntCollCheckNPCs(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xScene*, void*));
@@ -219,8 +269,13 @@ void xEntRestorePipeline(xSurface*, RpAtomic* model);
 void xEntRestorePipeline(xModelInstance* model);
 void xEntSetupPipeline(xSurface* surf, RpAtomic* model);
 void xEntSetupPipeline(xModelInstance* model);
-void xEntAddToPos(xEnt* ent, const xVec3* v);
-xModelInstance* xEntLoadModel(xEnt* ent, RpAtomic* imodel);
+
+inline void xEntAddToPos(xEnt* ent, const xVec3* v)
+{
+    xVec3AddTo(&ent->frame->mat.pos, v);
+}
+
+xModelInstance* xEntLoadModel(xEnt* ent, RpAtomic* imodel, xModelInstance* reuse_instance);
 void xEntReset(xEnt* ent);
 void xEntLoad(xEnt* ent, xSerial* s);
 void xEntSave(xEnt* ent, xSerial* s);
@@ -230,18 +285,54 @@ void xEntInit(xEnt* ent, xEntAsset* asset);
 void xEntAddHittableFlag(xEnt* ent);
 void xEntSceneExit();
 void xEntSceneInit();
+void xEntGrowGlobalBoundingBox(const xVec3* pos);
+void xEntStoreCheckPoint();
 void xEntSetTimePassed(F32 sec);
 
 // Needs to be [gw] but not inline?
-void xEntHide(xEnt* ent)
+inline void xEntHide(xEnt* ent)
 {
     ent->flags &= ~0x1;
+
+    if (ent->visUpdate)
+    {
+        ent->visUpdate(ent);
+    }
 }
 
-// Needs to be [gw] but not inline?
-void xEntShow(xEnt* ent)
+inline void xEntShow(xEnt* ent)
 {
     ent->flags |= 0x1;
+
+    if (ent->visUpdate)
+    {
+        ent->visUpdate(ent);
+    }
+}
+
+inline void xEntVisibilityCullOn(xEnt* ent)
+{
+    ent->flags |= 0x4;
+
+    if (ent->visUpdate)
+    {
+        ent->visUpdate(ent);
+    }
+}
+
+inline void xEntVisibilityCullOff(xEnt* ent)
+{
+    ent->flags &= (U8)~0x4;
+
+    if (ent->visUpdate)
+    {
+        ent->visUpdate(ent);
+    }
+}
+
+inline xMat4x3* xEntGetFrame(const xEnt* ent)
+{
+    return xModelGetFrame(ent->model);
 }
 
 inline xVec3* xEntGetPos(const xEnt* ent)

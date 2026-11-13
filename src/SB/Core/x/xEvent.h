@@ -812,18 +812,50 @@ enum en_xEventTags
 };
 
 // Oddly, all the zEntEvent functions are in xEvent, not zEvent
-void zEntEvent(char* to, U32 toEvent);
-void zEntEvent(U32 toID, U32 toEvent);
+enum ForceEvent
+{
+    FE_YES,
+    FE_NO
+};
+
+void zEntEvent(xBase* from, U32 fromEvent, xBase* to, U32 toEvent, const F32* toParam,
+               xBase* toParamWidget, U32 toParamWidgetID, ForceEvent forceEvent);
 void zEntEvent(U32 toID, U32 toEvent, F32 toParam0, F32 toParam1, F32 toParam2, F32 toParam3);
-void zEntEvent(xBase* to, U32 toEvent);
-void zEntEvent(xBase* to, U32 toEvent, F32 toParam0, F32 toParam1, F32 toParam2, F32 toParam3);
-void zEntEvent(xBase* to, U32 toEvent, const F32* toParam);
-void zEntEvent(xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget);
-void zEntEvent(xBase* from, xBase* to, U32 toEvent);
-void zEntEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam);
-void zEntEvent(xBase* from, U32 fromEvent, xBase* to, U32 toEvent, const F32* toParam,
-               xBase* toParamWidget, S32 forceEvent);
-void zEntEvent(xBase* from, U32 fromEvent, xBase* to, U32 toEvent, const F32* toParam,
-               xBase* toParamWidget, U32 unknown, S32 forceEvent);
+void zEntEvent(U32 toID, U32 toEvent);
+void zEntEvent(char* to, U32 toEvent);
+
+inline void zEntEvent(xBase* to, U32 toEvent)
+{
+    zEntEvent(NULL, 0, to, toEvent, NULL, NULL, 0, FE_NO);
+}
+
+inline void zEntEvent(xBase* to, U32 toEvent, const F32* toParam)
+{
+    zEntEvent(NULL, 0, to, toEvent, toParam, NULL, 0, FE_NO);
+}
+
+inline void zEntEvent(xBase* to, U32 toEvent, F32 toParam0, F32 toParam1, F32 toParam2,
+                      F32 toParam3)
+{
+    F32 toParam[4];
+
+    toParam[0] = toParam0;
+    toParam[1] = toParam1;
+    toParam[2] = toParam2;
+    toParam[3] = toParam3;
+
+    zEntEvent(to, toEvent, toParam);
+}
+
+inline void zEntEvent(xBase* from, xBase* to, U32 toEvent)
+{
+    zEntEvent(from, 0, to, toEvent, NULL, NULL, 0, FE_NO);
+}
+
+inline void zEntEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget,
+                      U32 toParamWidgetID)
+{
+    zEntEvent(from, 0, to, toEvent, toParam, toParamWidget, toParamWidgetID, FE_NO);
+}
 
 #endif

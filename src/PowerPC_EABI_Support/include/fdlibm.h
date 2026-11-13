@@ -77,7 +77,10 @@ struct exception {
 	double retval;
 };
 
+/* Heavy Iron's xMath.h defines HUGE as 1e38f; keep theirs if it came first. */
+#ifndef HUGE
 #define HUGE MAXFLOAT
+#endif
 
 /*
  * set X_TLOSS = pi*2**52, which is possibly defined in <values.h>

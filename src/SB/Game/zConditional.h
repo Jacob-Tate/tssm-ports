@@ -18,12 +18,14 @@ struct zCondAsset : xBaseAsset
     U32 value_asset;
 };
 
+struct zVarEntry;
+
 struct _zConditional : xBase
 {
     zCondAsset* asset;
+    zVarEntry* varEntry;
 };
 
-void zConditionalInit(xBase* base, zCondAsset* asset);
 void zConditionalInit(void* b, void* asset);
 void zConditionalLoad(_zConditional* ent, xSerial* s);
 void zConditionalSave(_zConditional* ent, xSerial* s);

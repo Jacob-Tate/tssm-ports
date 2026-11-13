@@ -314,6 +314,10 @@ enum RwPluginVendor
     rwPLUGINVENDORFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
 };
 
+#define MAKECHUNKID(vendorID, chunkID) (((vendorID & 0xFFFFFF) << 8) | (chunkID & 0xFF))
+#define GETOBJECTID(chunkID) (chunkID & 0xFF)
+#define GETVENDORID(chunkID) ((chunkID >> 8) & 0xFFFFFF)
+
 enum RwCorePluginID
 {
     rwID_NAOBJECT = 0x00,
@@ -484,17 +488,17 @@ struct RwStringFunctions
     vecSscanfFunc vecSscanf;
 };
 
-#define RwMalloc(_s) ((RWSRCGLOBAL(memoryFuncs).rwmalloc)((_s)))
+#define RwMalloc(_s, _h) ((RWSRCGLOBAL(memoryFuncs).rwmalloc)((_s), (_h)))
 #define RwFree(_p) ((RWSRCGLOBAL(memoryFuncs).rwfree)((_p)))
-#define RwCalloc(_n, _s) ((RWSRCGLOBAL(memoryFuncs).rwcalloc)((_n), (_s)))
-#define RwRealloc(_p, _s) ((RWSRCGLOBAL(memoryFuncs).rwrealloc)((_p), (_s)))
+#define RwCalloc(_n, _s, _h) ((RWSRCGLOBAL(memoryFuncs).rwcalloc)((_n), (_s), (_h)))
+#define RwRealloc(_p, _s, _h) ((RWSRCGLOBAL(memoryFuncs).rwrealloc)((_p), (_s), (_h)))
 
 struct RwMemoryFunctions
 {
-    void* (*rwmalloc)(size_t size);
+    void* (*rwmalloc)(size_t size, RwUInt32 hint);
     void (*rwfree)(void* mem);
-    void* (*rwrealloc)(void* mem, size_t newSize);
-    void* (*rwcalloc)(size_t numObj, size_t sizeObj);
+    void* (*rwrealloc)(void* mem, size_t newSize, RwUInt32 hint);
+    void* (*rwcalloc)(size_t numObj, size_t sizeObj, RwUInt32 hint);
 };
 
 struct RwFreeList
@@ -529,6 +533,12 @@ enum RwStreamAccessType
     rwSTREAMWRITE,
     rwSTREAMAPPEND,
     rwSTREAMACCESSTYPEFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+
+struct RwMemory
+{
+    RwUInt8* start;
+    RwUInt32 length;
 };
 
 struct RwStreamMemory
@@ -781,6 +791,18 @@ struct RwRGBA
 
 #define RwRGBAAssign(_target, _source) (*(_target) = *(_source))
 
+enum RwDebugType
+{
+    rwNADEBUGTYPE = 0,
+    rwDEBUGASSERT,
+    rwDEBUGERROR,
+    rwDEBUGMESSAGE,
+    rwDEBUGTRACE,
+    rwDEBUGTYPEFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+
+typedef void (*RwDebugHandler)(RwDebugType type, const RwChar* string);
+
 struct rwGameCube2DVertex
 {
     RwReal x;
@@ -789,6 +811,25 @@ struct rwGameCube2DVertex
     RwRGBA emissiveColor;
     RwReal u;
     RwReal v;
+
+#ifdef __cplusplus
+    rwGameCube2DVertex& operator=(const rwGameCube2DVertex& rhs)
+    {
+        this->x = rhs.x;
+        this->y = rhs.y;
+        this->z = rhs.z;
+
+        this->emissiveColor.red = rhs.emissiveColor.red;
+        this->emissiveColor.green = rhs.emissiveColor.green;
+        this->emissiveColor.blue = rhs.emissiveColor.blue;
+        this->emissiveColor.alpha = rhs.emissiveColor.alpha;
+
+        this->u = rhs.u;
+        this->v = rhs.v;
+
+        return *this;
+    }
+#endif
 };
 
 typedef rwGameCube2DVertex RwIm2DVertex;
@@ -841,6 +882,12 @@ typedef RxVertexIndex RwImVertexIndex;
 #define RwIm2DVertexGetAlpha(vert) ((vert)->emissiveColor.alpha)
 
 #define RwIm2DVertexCopyRGBA(dst, src) ((dst)->emissiveColor = (src)->emissiveColor)
+
+#define RwRealMin2(a, b) ((RwReal)(((a) <= (b)) ? (a) : (b)))
+#define RwRealMax2(a, b) ((RwReal)(((a) >= (b)) ? (a) : (b)))
+
+/* vect is a RwV3d, y is the component */
+#define GETCOORD(vect, y) (*(RwReal*)(((RwUInt8*)(&((vect).x))) + (RwInt32)(y)))
 
 #if (!defined(RwV3dAssignMacro))
 #define RwV3dAssignMacro(_target, _source) (*(_target) = *(_source))
@@ -1054,6 +1101,20 @@ enum RwStencilFunction
     rwSTENCILFUNCTIONFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
 };
 
+enum RwAlphaTestFunction
+{
+    rwALPHATESTFUNCTIONNAALPHATESTFUNCTION = 0,
+    rwALPHATESTFUNCTIONNEVER,
+    rwALPHATESTFUNCTIONLESS,
+    rwALPHATESTFUNCTIONEQUAL,
+    rwALPHATESTFUNCTIONLESSEQUAL,
+    rwALPHATESTFUNCTIONGREATER,
+    rwALPHATESTFUNCTIONNOTEQUAL,
+    rwALPHATESTFUNCTIONGREATEREQUAL,
+    rwALPHATESTFUNCTIONALWAYS,
+    rwALPHATESTFUNCTIONFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+
 enum RwCullMode
 {
     rwCULLMODENACULLMODE = 0,
@@ -1082,9 +1143,13 @@ struct RwEngineOpenParams
     void* displayID;
 };
 
+/* GameCube driver device config (passed as RwEngineOpenParams::displayID); members from the
+ * Ratatouille GC DWARF. */
 struct RwGameCubeDeviceConfig
 {
-    /* unknown */
+    void* renderMode;
+    RwInt32 pixFmt;
+    RwUInt32 fifoSize;
 };
 
 typedef RwBool (*RwSystemFunc)(RwInt32 nOption, void* pOut, void* pInOut, RwInt32 nIn);
@@ -1186,7 +1251,7 @@ struct RwGlobals
     RwUInt16 lightFrame;
     RwUInt16 pad[2];
     RwDevice dOpenDevice;
-    RwStandardFunc stdFunc[29];
+    RwStandardFunc stdFunc[18];
     RwLinkList dirtyFrameList;
     RwFileFunctions fileFuncs;
     RwStringFunctions stringFuncs;
@@ -1272,17 +1337,37 @@ extern RwError* RwErrorSet(RwError* code);
 extern RwError* RwErrorGet(RwError* code);
 extern RwInt32 _rwerror(RwInt32 code, ...);
 extern RwFileFunctions* RwOsGetFileInterface(void);
-extern RwReal RwIm2DGetNearScreenZ(void);
-extern RwReal RwIm2DGetFarScreenZ(void);
-extern RwBool RwRenderStateSet(RwRenderState state, void* value);
-extern RwBool RwRenderStateGet(RwRenderState state, void* value);
-extern RwBool RwIm2DRenderLine(RwIm2DVertex* vertices, RwInt32 numVertices, RwInt32 vert1,
-                               RwInt32 vert2);
-extern RwBool RwIm2DRenderPrimitive(RwPrimitiveType primType, RwIm2DVertex* vertices,
-                                    RwInt32 numVertices);
-extern RwBool RwIm2DRenderIndexedPrimitive(RwPrimitiveType primType, RwIm2DVertex* vertices,
-                                           RwInt32 numVertices, RwImVertexIndex* indices,
-                                           RwInt32 numIndices);
+// The GameCube RenderWare build used by this game has no out-of-line versions of these
+// (no symbols in the target), so the non-debug SDK macro forms are used.
+#define RwIm2DGetNearScreenZMacro() (RWSRCGLOBAL(dOpenDevice).zBufferNear)
+#define RwIm2DGetFarScreenZMacro() (RWSRCGLOBAL(dOpenDevice).zBufferFar)
+#define RwRenderStateGetMacro(_state, _value)                                                      \
+    (RWSRCGLOBAL(dOpenDevice).fpRenderStateGet(_state, _value))
+#define RwRenderStateSetMacro(_state, _value)                                                      \
+    (RWSRCGLOBAL(dOpenDevice).fpRenderStateSet(_state, _value))
+#define RwIm2DRenderLineMacro(_vertices, _numVertices, _vert1, _vert2)                             \
+    (RWSRCGLOBAL(dOpenDevice).fpIm2DRenderLine(_vertices, _numVertices, _vert1, _vert2))
+#define RwIm2DRenderTriangleMacro(_vertices, _numVertices, _vert1, _vert2, _vert3)                 \
+    (RWSRCGLOBAL(dOpenDevice).fpIm2DRenderTriangle(_vertices, _numVertices, _vert1, _vert2, _vert3))
+#define RwIm2DRenderPrimitiveMacro(_primType, _vertices, _numVertices)                             \
+    (RWSRCGLOBAL(dOpenDevice).fpIm2DRenderPrimitive(_primType, _vertices, _numVertices))
+#define RwIm2DRenderIndexedPrimitiveMacro(_primType, _vertices, _numVertices, _indices,            \
+                                          _numIndices)                                             \
+    (RWSRCGLOBAL(dOpenDevice)                                                                      \
+         .fpIm2DRenderIndexedPrimitive(_primType, _vertices, _numVertices, _indices, _numIndices))
+
+#define RwIm2DGetNearScreenZ() RwIm2DGetNearScreenZMacro()
+#define RwIm2DGetFarScreenZ() RwIm2DGetFarScreenZMacro()
+#define RwRenderStateGet(_state, _value) RwRenderStateGetMacro(_state, _value)
+#define RwRenderStateSet(_state, _value) RwRenderStateSetMacro(_state, _value)
+#define RwIm2DRenderLine(_vertices, _numVertices, _vert1, _vert2)                                  \
+    RwIm2DRenderLineMacro(_vertices, _numVertices, _vert1, _vert2)
+#define RwIm2DRenderTriangle(_vertices, _numVertices, _vert1, _vert2, _vert3)                      \
+    RwIm2DRenderTriangleMacro(_vertices, _numVertices, _vert1, _vert2, _vert3)
+#define RwIm2DRenderPrimitive(_primType, _vertices, _numVertices)                                  \
+    RwIm2DRenderPrimitiveMacro(_primType, _vertices, _numVertices)
+#define RwIm2DRenderIndexedPrimitive(_primType, _vertices, _numVertices, _indices, _numIndices)    \
+    RwIm2DRenderIndexedPrimitiveMacro(_primType, _vertices, _numVertices, _indices, _numIndices)
 extern RwReal _rwMatrixDeterminant(const RwMatrix* matrix);
 extern RwReal _rwMatrixOrthogonalError(const RwMatrix* matrix);
 extern RwReal _rwMatrixNormalError(const RwMatrix* matrix);
@@ -1316,6 +1401,7 @@ extern void _rwResourcesPurge(void);
 extern RwResEntry* RwResourcesAllocateResEntry(void* owner, RwResEntry** ownerRef, RwInt32 size,
                                                RwResEntryDestroyNotify destroyNotify);
 extern RwBool RwResourcesSetArenaSize(RwUInt32 size);
+extern RwInt32 RwResourcesGetArenaSize(void);
 extern RwBool RwResourcesEmptyArena(void);
 extern RwUInt32 RwStreamRead(RwStream* stream, void* buffer, RwUInt32 length);
 extern RwStream* RwStreamWrite(RwStream* stream, const void* buffer, RwUInt32 length);
@@ -1376,6 +1462,26 @@ extern void RwGameCubeSetAlphaCompare(RwInt32 comp0, RwUInt8 ref0, RwInt32 op, R
                                       RwUInt8 ref1);
 
 extern void _rwDlRenderStateSetZCompLoc(RwBool zBeforeTex);
+
+// GameCube driver raster plugin data (dlraster.c; layout from the Ratatouille GC DWARF).
+struct RwGameCubeRasterExtension
+{
+    RwUInt32 tlutObj[3];
+    RwUInt32 format; // GXTexFmt
+    RwUInt32 tlutFmt;
+    RwUInt32 flags;
+    RwUInt8* memory;
+    RwUInt8* pixels;
+    RwUInt8* palette;
+    RwUInt8* lockedPixels;
+    RwUInt8* lockedBuffer;
+    void* region;
+    RwUInt16 token;
+    RwUInt8 maxLOD;
+    RwUInt8 lockedMipLevel;
+};
+
+extern RwInt32 _RwGameCubeRasterExtOffset;
 
 #ifdef __cplusplus
 }

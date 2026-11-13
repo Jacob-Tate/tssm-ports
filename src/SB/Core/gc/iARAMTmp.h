@@ -3,11 +3,13 @@
 
 #include <types.h>
 
-bool iARAMTmpEnd(bool);
-void* iARAMTmpInARAMTemp(void*);
-void* iARAMTmpFree(void*);
-U32 iARAMTmpMalloc(unsigned int);
-U32 iARAMTmpBegin(unsigned int, unsigned int);
-U64 transferDoneCB(unsigned long);
+// Returned by iARAMTmpMalloc when no ARAM-temp block has room.
+#define IARAMTMP_NO_MEMORY ((void*)0xBEEEEEEF)
+
+void iARAMTmpEnd(bool wait);
+S32 iARAMTmpInARAMTemp(void* ptr);
+void iARAMTmpFree(void* ptr);
+void* iARAMTmpMalloc(U32 size);
+U32 iARAMTmpBegin(U32 type, U32 maxSize);
 
 #endif

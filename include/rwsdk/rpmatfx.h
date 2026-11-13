@@ -56,6 +56,9 @@ extern RwTexture* RpMatFXMaterialGetEnvMapTexture(const RpMaterial* material);
 extern RwFrame* RpMatFXMaterialGetEnvMapFrame(const RpMaterial* material);
 extern RwBool RpMatFXMaterialGetEnvMapFrameBufferAlpha(const RpMaterial* material);
 extern RwReal RpMatFXMaterialGetEnvMapCoefficient(const RpMaterial* material);
+extern RpMaterial* RpMatFXMaterialSetupDualTexture(RpMaterial* material, RwTexture* texture,
+                                                   RwBlendFunction srcBlendMode,
+                                                   RwBlendFunction dstBlendMode);
 extern RpMaterial* RpMatFXMaterialSetDualTexture(RpMaterial* material, RwTexture* texture);
 extern RpMaterial* RpMatFXMaterialSetDualBlendModes(RpMaterial* material,
                                                     RwBlendFunction srcBlendMode,

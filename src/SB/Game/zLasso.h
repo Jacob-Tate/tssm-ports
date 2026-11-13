@@ -3,6 +3,7 @@
 
 #include "xMath3.h"
 #include "xModel.h"
+#include "xSpline.h"
 #include "xString.h"
 #include "zEnt.h"
 
@@ -30,9 +31,17 @@ struct zLasso
     F32 lastDist;
     xVec3 lastRefs[5];
     U8 reindex[5];
+    U8 pad[3];
     xVec3 anchor;
     xModelTag tag;
     xModelInstance* model;
+    U32 patTongue;
+    RpAtomic* tipModel;
+    xMat4x3* tipMatrix;
+    F32 tipDelay;
+    F32 tipLerp;
+    xSpline3* spl;
+    U32 spldata[59];
 };
 
 struct zLassoGuide
@@ -49,11 +58,16 @@ struct zLassoGuideList // Size: 0xE0
     zLassoGuide guide[3];
 };
 
+void zLasso_Init(zLasso* lasso, xModelInstance* model, F32 x, F32 y, F32 z);
 void zLasso_scenePrepare();
+void zLasso_Render(zLasso* lasso);
 void zLasso_InitTimer(zLasso* lasso, F32 interpTime);
 void zLasso_ResetTimer(zLasso* lasso, F32 interpTime);
+void zLasso_Update(zLasso* lasso, xEnt* ent, F32 dt);
 void zLasso_AddGuide(xEnt* ent, xAnimState* lassoAnim, xModelInstance modelInst);
 void zLasso_SetGuide(xEnt* ent, xAnimState* lassoAnim);
 void zLasso_InterpToGuide(zLasso* lasso);
+void zPatTongue_Init(zLasso* lasso, xModelInstance* patmodel);
+void zPatTongue_PopOff();
 
 #endif

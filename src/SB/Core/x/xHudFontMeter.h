@@ -15,8 +15,8 @@ namespace xhud
         F32 space;
         F32 drop_x;
         F32 drop_y;
-        color32u c;
-        color32u drop_c;
+        xColor_tag c;
+        xColor_tag drop_c;
     };
 
     struct font_meter_widget : meter_widget
@@ -24,7 +24,6 @@ namespace xhud
         font_context font;
         font_context start_font;
         S32 precision;
-        xVec2 offset;
         char buffer[12];
         S32 last_value;
         xfont xf;

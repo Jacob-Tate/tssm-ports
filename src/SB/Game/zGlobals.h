@@ -4,6 +4,7 @@
 #include "xGlobals.h"
 #include "xShadowSimple.h"
 #include "xEntDrive.h"
+#include "xSnd.h"
 
 #include "zEnt.h"
 #include "zEntPlayer.h"
@@ -121,6 +122,8 @@ struct zCheckPoint
     xVec3 pos;
     F32 rot;
     U32 initCamID;
+    U8* jsp_active;
+    xSndEffect currentEffect;
 };
 
 #define LEVEL_COUNT 15
@@ -273,7 +276,7 @@ struct zPlayerGlobals
     F32 SlideTrackDecay;
     F32 SlideTrackLean;
     F32 SlideTrackLand;
-    char* sb_model_indices;
+    U8* sb_model_indices;
     xModelInstance* sb_models[11];
     U32 currentPlayer;
     xVec3 PredictRotate;

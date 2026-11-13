@@ -1,6 +1,8 @@
 #include "zTaskBox.h"
 
 #include "xEvent.h"
+#include "xGroup.h"
+#include "xTextAsset.h"
 #include "xstransvc.h"
 
 #include "zBase.h"
@@ -9,39 +11,69 @@
 
 #include <types.h>
 
-// CODE PORTED DIRECTLY FROM BFBB
+ztaskbox::talk_callback* ztaskbox::tcb;
 
 namespace
 {
-    ztaskbox* shared;
-}
+    struct
+    {
+        ztaskbox* active;
+    } shared;
+} // namespace
+
+struct ztaskbox::talk_callback : ztalkbox::callback
+{
+    ztaskbox* task;
+    ztalkbox::answer_enum answer;
+
+    void reset(ztaskbox& task)
+    {
+        this->task = &task;
+        this->answer = ztalkbox::ANSWER_CONTINUE;
+    }
+
+    void on_start()
+    {
+        task->on_talk_start();
+    }
+
+    void on_stop()
+    {
+        task->on_talk_stop(answer);
+    }
+
+    void on_answer(ztalkbox::answer_enum answer)
+    {
+        this->answer = answer;
+    }
+};
 
 void ztaskbox::load(const asset_type& a)
 {
-    xBaseInit((xBase*)this, &(xBaseAsset)a);
+    xBaseInit(this, &a);
     this->baseType = eBaseTypeTaskBox;
-    // FIXME: can't force const to non-const?
-    // this->asset = &a;
-
-    // FIXME: Define cb_dispatch
-    // this->eventFunc = cb_dispatch;
+    this->asset = &a;
+    this->eventFunc = cb_dispatch;
     if (this->linkCount != 0)
     {
         this->link = (xLinkAsset*)(&a + 1);
     }
-    bool enabled = a.enable;
+
     this->state = STATE_INVALID;
-    if (!enabled)
-    {
-        this->flag.enabled = false;
-        this->current = NULL;
-    }
-    else
+    if (a.enable)
     {
         this->flag.enabled = true;
         this->set_state(STATE_BEGIN);
         this->current = this;
     }
+    else
+    {
+        this->flag.enabled = false;
+        this->current = NULL;
+    }
+
+    this->flag.running = false;
+
     if (a.persistent)
     {
         this->baseFlags |= 2;
@@ -50,10 +82,9 @@ void ztaskbox::load(const asset_type& a)
 
 void ztaskbox::read(xSerial& s)
 {
-    U8 data[4];
-    data[0] = (U8)this->state;
-    s.Read(data);
-    set_state((ztaskbox::state_enum)data[0]);
+    U8 state = this->state;
+    s.Read(&state);
+    set_state((state_enum)state);
 }
 
 void ztaskbox::write(xSerial& s)
@@ -61,47 +92,17 @@ void ztaskbox::write(xSerial& s)
     s.Write((U8)this->state);
 }
 
-// WIP.
-void ztaskbox::start_talk(zNPCCommon* npc)
+void ztaskbox::start_talk(zNPC::base* npc)
 {
-    ztaskbox* curr = this->current;
-    if (curr != NULL)
-    {
-        if (curr == this)
-        {
-            if (this->flag.enabled && this->state != STATE_INVALID)
-            {
-                //TODO!!!
-            }
-        }
-        else
-        {
-            curr->set_callback(this->cb);
-            this->current->start_talk(NULL);
-        }
-    }
-}
-
-void ztaskbox::talk_callback::reset(ztaskbox& task)
-{
-    this->task = &task;
-    this->answer = ANSWER_CONTINUE;
-}
-
-// Most functions in this file need `-inline off` to match, except for this one,
-// but `-inline auto` has a depth of 4, and this matches best with a depth of 5.
-void ztaskbox::stop_talk()
-{
-    ztaskbox* curr = this->current;
-
-    if (curr == NULL)
+    if (this->current == NULL)
     {
         return;
     }
 
-    if (curr != this)
+    if (this->current != this)
     {
-        curr->stop_talk();
+        this->current->set_callback(this->cb);
+        this->current->start_talk(NULL);
         return;
     }
 
@@ -110,18 +111,59 @@ void ztaskbox::stop_talk()
         return;
     }
 
-    if (shared != this)
+    if (shared.active != NULL && shared.active != this)
+    {
+        shared.active->stop_talk();
+    }
+
+    ztalkbox* talk = (ztalkbox*)zSceneFindObject(this->asset->talk_box);
+    if (talk == NULL)
     {
         return;
     }
 
-    ztalkbox* other = (ztalkbox*)zSceneFindObject(this->asset->talk_box);
-
-    if (other)
+    const char* text = get_text(this->asset->stages[this->state]);
+    if (text == NULL)
     {
-        other->stop_talk();
-        shared = NULL;
+        return;
     }
+
+    shared.active = this;
+    tcb->reset(*this);
+    talk->start_talk(text, tcb, npc);
+}
+
+void ztaskbox::stop_talk()
+{
+    if (this->current == NULL)
+    {
+        return;
+    }
+
+    if (this->current != this)
+    {
+        this->current->stop_talk();
+        return;
+    }
+
+    if (this->flag.enabled == false || this->state == STATE_INVALID)
+    {
+        return;
+    }
+
+    if (shared.active != this)
+    {
+        return;
+    }
+
+    ztalkbox* talk = (ztalkbox*)zSceneFindObject(this->asset->talk_box);
+    if (talk == NULL)
+    {
+        return;
+    }
+
+    talk->stop_talk();
+    shared.active = NULL;
 }
 
 void ztaskbox::enable()
@@ -182,10 +224,8 @@ void ztaskbox::complete()
     {
         this->state = STATE_INVALID;
         this->flag.enabled = false;
-        zEntEvent(this, 0, this, eEventTaskBox_OnComplete, 0, NULL, 0, 1);
+        zEntEvent(this, 0, this, eEventTaskBox_OnComplete, NULL, NULL, 0, FE_NO);
         this->current = (ztaskbox*)zSceneFindObject(this->asset->next_task);
-
-        // Bruh
         if (this->current != NULL)
         {
             return;
@@ -198,11 +238,12 @@ void ztaskbox::set_callback(callback* cb)
     this->cb = cb;
 }
 
-// WIP.
 void ztaskbox::init()
 {
-    shared = NULL;
-    // STUFF.
+    shared.active = NULL;
+
+    static talk_callback tcb;
+    ztaskbox::tcb = &tcb;
 }
 
 void ztaskbox::load(xBase& data, xDynAsset& asset, size_t num)
@@ -210,66 +251,152 @@ void ztaskbox::load(xBase& data, xDynAsset& asset, size_t num)
     ((ztaskbox&)data).load((asset_type&)asset);
 }
 
-bool ztaskbox::exists(state_enum stage)
+bool ztaskbox::exists(state_enum state)
 {
-    U32 state = this->asset->stages[stage];
-    return state != STATE_BEGIN && xSTFindAsset(state, NULL);
+    U32 id = this->asset->stages[state];
+    return id != 0 && xSTFindAsset(id, NULL) != NULL;
 }
 
-void ztaskbox::set_state(state_enum stage)
+void ztaskbox::set_state(state_enum state)
 {
-    this->state = stage;
+    this->state = state;
     this->current = this;
 
-    // todo
+    switch (state)
+    {
+    case STATE_BEGIN:
+        if (!exists(state))
+        {
+            set_state(STATE_DESCRIPTION);
+        }
+        break;
+    case STATE_DESCRIPTION:
+        if (!exists(state))
+        {
+            set_state(STATE_REMINDER);
+        }
+        break;
+    case STATE_REMINDER:
+    case STATE_SUCCESS:
+    case STATE_FAILURE:
+        if (!exists(state))
+        {
+            set_state(STATE_END);
+        }
+        break;
+    case STATE_END:
+        if (!exists(state))
+        {
+            set_state(STATE_INVALID);
+        }
+        break;
+    default:
+        complete();
+        break;
+    }
 }
 
-void ztaskbox::cb_dispatch(xBase*, xBase* to, U32 event, F32*, xBase*, U32)
+U8 ztaskbox::is_running() const
 {
-    ztaskbox& taskbox = *(ztaskbox*)to;
+    if (shared.active != NULL)
+    {
+        return shared.active->flag.running;
+    }
+    return false;
+}
+
+void ztaskbox::on_talk_stop(ztalkbox::answer_enum answer)
+{
+    this->flag.running = false;
+
+    switch (this->state)
+    {
+    case STATE_DESCRIPTION:
+        set_state(STATE_REMINDER);
+        break;
+    case STATE_SUCCESS:
+        set_state(STATE_END);
+        break;
+    case STATE_FAILURE:
+        if (this->asset->retry)
+        {
+            set_state(STATE_DESCRIPTION);
+        }
+        else
+        {
+            set_state(STATE_END);
+        }
+        break;
+    case STATE_BEGIN:
+    case STATE_REMINDER:
+    case STATE_END:
+        break;
+    default:
+        if (this->asset->loop)
+        {
+            set_state(STATE_BEGIN);
+        }
+        break;
+    }
+
+    if (this->cb != NULL)
+    {
+        this->cb->on_talk_stop();
+    }
+}
+
+const char* ztaskbox::get_text(U32 id)
+{
+    xBase* b = zSceneFindObject(id);
+    if (b != NULL)
+    {
+        if (b->baseType != eBaseTypeGroup)
+        {
+            return NULL;
+        }
+        id = ((xGroup*)b)->get_any();
+    }
+
+    if (id == 0)
+    {
+        return NULL;
+    }
+
+    const char* text = xTextFindString(id, NULL);
+    if (text == NULL)
+    {
+        return NULL;
+    }
+    return text;
+}
+
+void ztaskbox::cb_dispatch(xBase*, xBase* to, U32 event, const F32*, xBase*, U32)
+{
+    ztaskbox& e = *(ztaskbox*)to;
 
     switch (event)
     {
     case eEventReset:
-        taskbox.reset();
+        e.reset();
         break;
     case eEventStartConversation:
-        taskbox.start_talk(NULL);
+        e.start_talk(NULL);
         break;
     case eEventEndConversation:
-        taskbox.stop_talk();
+        e.stop_talk();
         break;
     case eEventTaskBox_Initiate:
-        taskbox.initiate();
+        e.initiate();
         break;
     case eEventTaskBox_SetSuccess:
-        taskbox.succeed();
+        e.succeed();
         break;
     case eEventTaskBox_SetFailure:
-        taskbox.fail();
+        e.fail();
         break;
     case eEventTaskBox_OnAccept:
     case eEventTaskBox_OnDecline:
     case eEventTaskBox_OnComplete:
         break;
     }
-}
-
-void ztaskbox::talk_callback::on_start()
-{
-    this->task->flag.unk_11 = 1;
-    if (this->task->cb != nullptr)
-    {
-        this->task->cb->on_talk_start();
-    }
-}
-
-void ztaskbox::talk_callback::on_stop()
-{
-    this->task->on_talk_stop(answer);
-}
-
-void ztaskbox::talk_callback::on_answer(answer_enum answer)
-{
-    this->answer = answer;
 }

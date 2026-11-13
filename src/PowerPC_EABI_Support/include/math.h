@@ -60,6 +60,7 @@ double sqrt(double);
 
 double pow(double, double);
 
+double exp(double);
 double log(double);
 double log10(double);
 

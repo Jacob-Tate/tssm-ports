@@ -4,6 +4,7 @@
 #include "xDynAsset.h"
 #include "xFont.h"
 #include "xScene.h"
+#include "xTextAsset.h"
 
 #include <rwcore.h>
 
@@ -68,6 +69,12 @@ struct ztextbox : xBase
         } xjustify;
         enum
         {
+            YJ_TOP,
+            YJ_CENTER,
+            YJ_BOTTOM
+        } yjustify;
+        enum
+        {
             EX_UP,
             EX_CENTER,
             EX_DOWN,
@@ -79,6 +86,10 @@ struct ztextbox : xBase
             U32 type;
             color_type color;
             U32 texture;
+            F32 borderU;
+            F32 borderV;
+            F32 borderWidth;
+            F32 borderHeight;
         } backdrop;
         color_type shadowColor;
         F32 shadowOffsetX;
@@ -106,7 +117,9 @@ struct ztextbox : xBase
     static void render_all();
 
     void load(const asset_type& a);
-    void update(xScene&, F32);
+    void update(xScene&, F32)
+    {
+    }
     void reset();
     void render();
     void render_backdrop();
@@ -115,7 +128,15 @@ struct ztextbox : xBase
     void set_text(const char* s);
     void set_text(U32 id);
     void add_text(const char* s);
-    void add_text(U32 id);
+    void add_text(U32 id)
+    {
+        if (!id)
+        {
+            return;
+        }
+
+        add_text(xTextFindString(id, NULL));
+    }
     void clear_text();
     void refresh();
     void get_text(char* buffer, size_t buffer_size) const;

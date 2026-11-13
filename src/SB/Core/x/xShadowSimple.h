@@ -9,7 +9,7 @@ struct xShadowSimplePoly
     xVec3 norm;
 };
 
-// Size: 0x66
+// Size: 0xA4
 struct xShadowSimpleCache
 {
     U16 flags;
@@ -22,24 +22,53 @@ struct xShadowSimpleCache
     xVec3 at;
 
     // Offset: 0x20
+    F32 tol_movement;
+    F32 radiusOptional;
     xEnt* castOnEnt;
     xShadowSimplePoly poly;
     F32 envHeight;
     F32 shadowHeight;
-    U32 raster;
-
-    // Offset: 0x40
+    union
+    {
+        U32 raster;
+        RwRaster* ptr_raster;
+    };
     F32 dydx;
     F32 dydz;
     xVec3 corner[4];
+    void* collSkipsItem;
+};
+
+struct zSimpleShadowTableHeader
+{
+    U32 num;
+};
+
+// 'num' entries follow the header in a SHDW asset
+struct zSimpleShadow
+{
+    U32 modelID;
+    U32 shadowID;
+    U32 flags;
+};
+
+struct xShadowSimpleQueue
+{
+    xShadowSimpleCache* cache;
+    U32 priority;
+    xMat4x3* modelMatrix;
+    F32 radius;
+    F32 height;
+    F32 ecc;
 };
 
 void xShadowSimple_Render();
 void xShadowSimple_Add(xShadowSimpleCache* cache, xEnt* ent, F32 radius, F32 ecc);
+void xShadowSimple_Add_Expert(xShadowSimpleCache* cache, const xMat4x3* mat_owner, U8 alpha,
+                              F32 radius, F32 height, F32 ecc);
 void xShadowSimple_CacheInit(xShadowSimpleCache* cache, xEnt* ent, U8 alpha);
+void xShadowSimple_CacheInit_Expert(xShadowSimpleCache* cache, RwRaster* rast, U8 alpha);
+void xShadowSimple_Reset();
 void xShadowSimple_Init();
-void xShadowSimple_AddVerts(xShadowSimpleCache* cache);
-void xShadowSimple_CalcCorners(xShadowSimpleCache* cache, xEnt* ent, F32 radius, F32 ecc);
-void xShadowSimple_SceneCollide(xShadowSimpleCache* cache, xVec3* pos, F32 depth);
 
 #endif

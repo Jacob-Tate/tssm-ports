@@ -5,6 +5,13 @@
 
 #include <rwcore.h>
 
+struct tagiRenderArrays
+{
+    U16 m_index[960];
+    RxObjSpace3DVertex m_vertex[480];
+    F32 m_vertexTZ[480];
+};
+
 struct tagiRenderInput
 {
     U16* m_index;
@@ -19,6 +26,9 @@ struct tagiRenderInput
     xVec4 m_camViewR;
     xVec4 m_camViewU;
 };
+
+extern tagiRenderArrays gRenderArr;
+extern tagiRenderInput gRenderBuffer;
 
 void iParMgrInit();
 void iParMgrUpdate(F32 elapsedTime);

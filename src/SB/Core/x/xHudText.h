@@ -23,11 +23,17 @@ namespace xhud
         xtextbox tb;
 
         text_widget(); // possibly temp, added so zCombo.cpp compiles
-        text_widget(const text_asset&);
+        text_widget(const text_asset& a) : widget(a)
+        {
+            text[0] = '\0';
+        }
 
         static void load(xBase& data, xDynAsset& asset, size_t);
 
-        void destruct();
+        void destruct()
+        {
+            widget::destruct();
+        }
 
         virtual void destroy();
         virtual U32 type() const;
@@ -35,6 +41,7 @@ namespace xhud
         virtual void setup();
         virtual void update(F32 dt);
         virtual void render();
+        virtual void set_text(const char* intext);
     };
 
 }; // namespace xhud

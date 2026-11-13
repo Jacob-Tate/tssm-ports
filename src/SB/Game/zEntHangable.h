@@ -25,7 +25,6 @@ struct zEntHangable : zEnt
     F32 grabTimer;
     F32 spin;
     U32 state;
-    zEnt* shaggy;
     S32 enabled;
     zEnt* follow;
     S32 moving;

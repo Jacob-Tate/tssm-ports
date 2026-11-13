@@ -5,21 +5,35 @@
 #include <dolphin.h>
 
 extern "C" {
-void* malloc(U32 __size);
-void free(void* __ptr);
+char* malloc(long msize);
+void free(char* p);
 }
 
 void iVSync();
 
-#define GET_MAKER_CODE() (*((U32*)0x80000004))
-#define GET_BUS_FREQUENCY() (*((U32*)0x800000F8))
+// An alarm that resumes a suspended thread when it fires (see iSystemAlarmCallBack).
+struct iSystemAlarm
+{
+    OSAlarm alarm;
+    OSThread* thread;
+};
 
 void** psGetMemoryFunctions();
-void iVSync();
-U16 my_dsc(U16 dsc);
+void my_dsc(u16 dsc);
 
-void MemoryProtectionErrorHandler(U16 last, OSContext* ctx, U64 unk1, U64 unk2);
-void TRCInit();
+void iSystemAlarmCallBack(OSAlarm* alarm, OSContext* context);
+void iSystemSleep(S32 milliSecondsToSleep);
+void iSystemARAMInit();
+U32 iSystemARAMBasePtrForFMOD();
+U32 iSystemARAMSizeForFMOD();
+void iSystemInitRWFailSafe();
+void iSystemExitRWFailSafe();
+void iSystemARAMFree(void* ptr);
+void* iSystemARAMAlloc(U32 numbytes_to_use);
+void iSystemInit(U32 options);
+void iSystemInitGraphics();
+void iSystemExit();
+void iSystemGetWidthHeight(U32& uWidth, U32& uHeight, bool bPALMode);
 
 void null_func();
 

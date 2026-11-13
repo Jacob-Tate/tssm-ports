@@ -4,6 +4,8 @@
 #include "xDynAsset.h"
 #include "xEnt.h"
 
+struct xIniFile;
+
 namespace bungee_state
 {
     struct hook_asset : xDynAsset
@@ -23,8 +25,8 @@ namespace bungee_state
         } detach;
         struct
         {
-            F32 unused1;
-            F32 unused2;
+            F32 spring;
+            F32 decay;
         } turn;
         struct
         {
@@ -48,7 +50,7 @@ namespace bungee_state
             F32 turn_speed;
             F32 vel_scale;
             F32 roll_speed;
-            xVec3 unused1;
+            xVec3 speed;
         } camera;
         struct
         {
@@ -64,7 +66,26 @@ namespace bungee_state
         xEnt* ent;
     };
 
+    struct drop_asset : xDynAsset
+    {
+        U32 marker;
+        U32 set_view_angle;
+        F32 view_angle;
+
+        static const char* type_name()
+        {
+            return "game_object:bungee_drop";
+        }
+    };
+
     void load(xBase& data, xDynAsset& asset, size_t);
+    void load_settings(xIniFile& ini);
+    void init();
+    void deinit();
+    void reset();
+    bool update(xScene* sc, F32 dt);
+    bool render();
+    void stop();
     bool active();
     bool landed();
     bool destroy();

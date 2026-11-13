@@ -1,14 +1,18 @@
 #ifndef XWAD2_H
 #define XWAD2_H
 
+#include "xDebug.h"
 #include "zGlobals.h"
+// xCam.h before xFont.h (pulled in by xHudText.h below): retail .rodata has xCam.h's templates
+// before screen_bounds. It needs xCamera.h from zGlobals.h.
+#include "xCam.h"
 #include <types.h>
 #include <rpworld.h>
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/stdlib.h>
 #include "xString.h"
 #include "string.h"
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstring>
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/cmath>
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/cstring>
 #include "xIni.h"
 #include "xHudText.h"
 #include "xTextAsset.h"
@@ -17,6 +21,9 @@
 #include "zTextBox.h"
 #include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new>
 #include "xHudModel.h"
+#include "xHudMeter.h"
+#include "xHudImage.h"
+#include "zHud.h"
 #include "iMath.h"
 #include "xEvent.h"
 #include "xhipio.h"
@@ -28,15 +35,28 @@
 #include "zSurface.h"
 #include "rpmatfx.h"
 #include "xFont.h"
-#include "xfog.h"
+#include "xFog.h"
 #include "xFFX.h"
 #include "xFactory.h"
 #include "xEntMotion.h"
 #include "xEntBoulder.h"
+#include "xRumbleEmitter.h"
+#include "zEntPlayer.h"
+#include "xShadow.h"
+#include "xSnd.h"
+#include "xMath.h"
 #include "iCollide.h"
 #include "zEntDestructObj.h"
+#include "zDestructible.h"
+#include "iModel.h"
+#include "xDebug.h"
+#include "zParEmitter.h"
+#include <rpptank.h>
+#include "xDecal.h"
+#include "xClumpColl.h"
+#include "iParMgr.h"
 
-static st_HIPLOADDATA* HIPLCreate(const char* filename, char* dblbuf, S32 bufsize);
+static st_HIPLOADDATA* HIPLCreate(const char* filename, char* dblbuf, S32 bufsize, S32 fileflags);
 static void HIPLDestroy(st_HIPLOADDATA* lddata);
 static U32 HIPLBaseSector(st_HIPLOADDATA* lddata);
 static S32 HIPLSetBypass(st_HIPLOADDATA* lddata, S32 enable, S32 use_async);

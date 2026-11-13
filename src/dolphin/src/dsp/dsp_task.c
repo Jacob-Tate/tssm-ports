@@ -9,7 +9,7 @@ DSPTaskInfo* __DSP_rude_task;
 
 BOOL __DSP_rude_task_pending;
 
-DECL_WEAK void __DSPHandler(__OSInterrupt, OSContext* context)
+void __DSPHandler(__OSInterrupt, OSContext* context)
 {
     DSPTaskInfo* tmp_task;
     OSContext exceptionContext;

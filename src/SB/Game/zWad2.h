@@ -1,6 +1,9 @@
 #ifndef ZWAD2_H
 #define ZWAD2_H
 
+// zAutoTweak.h first: retail puts its load_param<xColor_tag,S32> template after
+// zFlameEmitter.cpp's templates and before xFont.h's statics.
+#include "zAutoTweak.h"
 #include <types.h>
 
 #include "xCounter.h"
@@ -8,45 +11,24 @@
 #include "xPartition.h"
 #include "xWad5.h"
 
+#include "iParMgr.h"
+
 #include "zFMV.h"
 #include "zGame.h"
 #include "zGameExtras.h"
+#include "zGrapple.h"
+#include "zHangable.h"
 #include "zNPCMgr.h"
 #include "zLight.h"
+#include "zLightEffect.h"
 #include "zLightning.h"
+#include "zLightWeight.h"
 #include "zLOD.h"
 #include "zMusic.h"
 #include "zNMECommon.h"
 #include "zUI.h"
 
 // Dwarf data says that most of these are only used here in zWad2.cpp
-
-enum zHitSource
-{
-    zHS_EVENT,
-    zHS_GENERAL,
-    zHS_PROJECTILE,
-    zHS_EXPLOSION,
-    zHS_LASER,
-    zHS_ENERGY,
-    zHS_FIRE,
-    zHS_SURFACE,
-    zHS_MELEE_HIGH,
-    zHS_MELEE_MID,
-    zHS_MELEE_LOW,
-    zHS_MELEE_UP,
-    zHS_MELEE_BACK,
-    zHS_MELEE_DIZZY,
-    zHS_THROW,
-    zHS_WATER,
-    zHS_DEATHPLANE,
-    zHS_INCREDI,
-    zHS_KNOCKBACK,
-    zHS_LASERBEAM,
-    zHS_INFINITE_FALL,
-    zHS_COUNT,
-    zHS_FORCE_INT = 0xffffffff
-};
 
 enum ePOWERUPMENU
 {
@@ -64,77 +46,39 @@ enum ePOWERUPMENU
     ePOWERUPMENU_Max
 };
 
-struct entrail_type
+namespace
 {
-    char* model_name;
-    S32 bone;
-    F32 rate;
-    F32 cull_dist;
-    xVec3 offset;
-    xVec3 offset_rand;
-    xVec3 vel;
-    xVec3 vel_rand;
-};
+    struct entrail_type
+    {
+        char* model_name;
+        S32 bone;
+        F32 rate;
+        F32 cull_dist;
+        xVec3 offset;
+        xVec3 offset_rand;
+        xVec3 vel;
+        xVec3 vel_rand;
+    };
 
-struct entrail_data
-{
-    U16 flags;
-    U16 type;
-    xEnt* ent;
-    xVec3 loc;
-    xVec3 vel;
-    F32 emitted;
-};
+    struct entrail_data
+    {
+        U16 flags;
+        U16 type;
+        xEnt* ent;
+        xVec3 loc;
+        xVec3 vel;
+        F32 emitted;
+
+        void reset();
+        void update(F32 dt);
+    };
+} // namespace
 
 struct zGooParams
 {
     F32 depth;
     F32 orig_depth;
     xEnt* goo_ent;
-};
-
-struct zGrapplePoint
-{
-    U32 flags;
-    xVec3* pos;
-};
-
-struct zHangableAsset : xDynAsset
-{
-    U32 object;
-    xVec3 pivot;
-    xVec3 handle;
-    F32 onGravity;
-    F32 offGravity;
-    F32 maxAngVel;
-    F32 minArcDegrees;
-    U32 hangFlags;
-};
-
-struct zHangable : xBase
-{
-    zHangableAsset* hangableAsset;
-    U32 flags;
-};
-
-struct zHangableObject
-{
-    zHangable* hangable;
-    xEnt* object;
-    F32 radius;
-    xVec3 vel;
-    xVec3 accel;
-    xVec3 handle;
-    xMat3x3 centerMat;
-    xVec3 rotAxis;
-    xVec3 lastDisp;
-    xVec3 objVel;
-};
-
-struct zHitSourceMapEntry
-{
-    char* name;
-    zHitSource sourcetype;
 };
 
 struct PatTongueVert
@@ -151,10 +95,6 @@ struct CollisionInfo
     zLightning* l;
     iSndGroupHandle soundHit1;
     iSndGroupHandle soundHit2;
-};
-
-struct lightweight_system_base
-{
 };
 
 struct PowerUpMenuTableEntry
@@ -198,20 +138,6 @@ struct zMusicState
     U32 uMusicDefault;
     U32 uMusicRestart;
     U8 bPaused;
-};
-
-struct NPCBrainTableEntry
-{
-    char* name;
-    en_npctyp type;
-    U32 id;
-};
-
-struct tagiRenderArrays
-{
-    U16 m_index[960];
-    RxObjSpace3DVertex m_vertex[480];
-    F32 m_vertexTZ[480];
 };
 
 #endif

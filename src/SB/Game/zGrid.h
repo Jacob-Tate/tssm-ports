@@ -9,13 +9,13 @@
 extern xGrid colls_grid;
 extern xGrid colls_oso_grid;
 extern xGrid npcs_grid;
+extern xGrid grabbable_grid;
 
 void zGridUpdateEnt(xEnt* ent);
 void zGridExit(zScene* s);
 void zGridInit(zScene* s);
 void zGridReset(zScene* s);
 
-void xGridEmpty(xGrid* grid);
 void xGridKill(xGrid* grid);
 
 #endif

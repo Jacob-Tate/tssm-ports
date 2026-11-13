@@ -70,6 +70,7 @@ struct HAZTypical
     F32 rad_min;
     F32 rad_max;
     F32 rad_cur;
+    xVec3 vel;
 };
 
 enum en_hazcol
@@ -85,7 +86,7 @@ struct HAZCollide : HAZTypical
 {
     xVec3 pos_collide;
     xVec3 dir_normal;
-    xParabola parabinfo;
+    xParabola* parabinfo;
     struct
     {
         S32 flg_collide : 8;

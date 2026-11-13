@@ -3,8 +3,13 @@
 
 #include <types.h>
 
-void iDrawSetFBMSK(U32 abgr);
+extern U32 lastSetFBMSK;
+
+void iDrawSetFBMSK(U32 abgr, U32 setMask, bool plusFrame2);
+void iDrawSetDisplayOffset(F32 x, F32 y);
 void iDrawBegin();
 void iDrawEnd();
+void iXFBreset();
+void* iXFBalloc(U32 size);
 
 #endif

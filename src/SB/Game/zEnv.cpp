@@ -5,20 +5,78 @@
 #include "xstransvc.h"
 #include "xGroup.h"
 #include "zSurface.h"
+#include "xClimate.h"
+#include "xEnt.h"
+#include "xDebug.h"
 
-// DWARF says void zEnvEventCB(xBase* to, U32 toEvent, F32* toParam, xBase* toParamWidget)
-void zEnvEventCB(xBase* a0, xBase* a1, U32 a2, const F32* a3, xBase* a4, U32 a5)
+void zEnvInit(void* env, void* easset)
 {
+    zEnvInit((_zEnv*)env, (xEnvAsset*)easset);
 }
 
-void zEnvLoad(_zEnv* ent, xSerial* s)
+// Retail calls this from zEnvInit(void*, void*); GC/2.6 never auto-inlines 30 or more statements.
+// The compiled-out xFAIL in the else (Ratatouille fails there when the scene environment has no
+// geometry) is what keeps it out of line.
+void zEnvInit(_zEnv* env, xEnvAsset* easset)
 {
-    xBaseLoad(ent, s);
+    xBaseInit(env, easset);
+
+    env->easset = easset;
+    env->eventFunc = zEnvEventCB;
+
+    if (env->linkCount)
+    {
+        env->link = (xLinkAsset*)(env->easset + 1);
+    }
+
+    globals.sceneCur->zen = env;
+    globals.sceneCur->zen = env;
+
+    xEnvLoadJSPList(globals.sceneCur->env, 0);
+
+    S32 mapper_count = xSTAssetCountByType('MAPR');
+    for (S32 i = 0; i < mapper_count; i++)
+    {
+        U32 size;
+        xBase* material_map = (xBase*)xSTFindAssetByType('MAPR', i, &size);
+        zSurfaceRegisterMapper(material_map->id);
+    }
+
+    if (globals.sceneCur->env)
+    {
+        if (globals.sceneCur->env->geom)
+        {
+            zLightResetAll(globals.sceneCur->env);
+            iLightInit(globals.sceneCur->env->geom->world);
+        }
+        else
+        {
+            xFAIL();
+        }
+    }
+
+    xEntGrowGlobalBoundingBox(&easset->minBounds);
+    xEntGrowGlobalBoundingBox(&easset->maxBounds);
+
+    if (easset->flags & 0x1)
+    {
+        for (S32 i = 0; i < globals.sceneCur->env->geom->jsp_count; i++)
+        {
+            xEntGrowGlobalBoundingBox(&globals.sceneCur->env->geom->jsp_bound[i].upper);
+            xEntGrowGlobalBoundingBox(&globals.sceneCur->env->geom->jsp_bound[i].lower);
+        }
+    }
 }
 
-void zEnvSave(_zEnv* ent, xSerial* s)
+void zEnvSetup(_zEnv* env)
 {
-    xBaseSave(ent, s);
+    xBaseSetup(env);
+    iEnvLightingBasics(globals.sceneCur->env->geom, env->easset);
+}
+
+void zEnvStartingCamera(_zEnv*)
+{
+    return;
 }
 
 void zEnvRender(xEnv* env)
@@ -56,92 +114,43 @@ void zEnvRender(xEnv* env)
     xEnvRender(env, FALSE);
 }
 
-void zEnvStartingCamera(_zEnv*)
+void zEnvSave(_zEnv* ent, xSerial* s)
 {
-    return;
+    xBaseSave(ent, s);
 }
 
-void zEnvSetup(_zEnv* env)
+void zEnvLoad(_zEnv* ent, xSerial* s)
 {
-    // TODO
-    // I don't think the struct is correct
-
-    // This function seems to be correct in BFBB, our globals struct is fucked though.
-    // Keep this the way it is, and fix the struct
-
-    xBaseSetup(env);
-    iEnvLightingBasics((iEnv*)globals.sceneCur->env->geom, (xEnvAsset*)env->easset);
+    xBaseLoad(ent, s);
 }
 
-// Again, Copied from Battle, Needs a good amount of work
-void zEnvInit(_zEnv* env, xEnvAsset* easset)
+void zEnvEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget, U32)
 {
-    U32 bufsize;
-    void* buf;
-
-    xBaseInit(env, easset);
-
-    env->easset = easset;
-    //env->eventFunc = zEnvEventCB;
-
-    if (env->linkCount)
+    switch (toEvent)
     {
-        env->link = (xLinkAsset*)(env->easset + 1);
+    case eEventReset:
+        xBaseReset(to, ((_zEnv*)to)->easset);
+        break;
+    case eEventSetSnow:
+        xClimateSetSnow(toParam[0]);
+        break;
+    case eEventSetRain:
+        xClimateSetRain(toParam[0]);
+        break;
+    case eEventOn:
+        iEnvJSPOn(globals.sceneCur->env->geom, (xJSPHeader*)toParamWidget);
+        break;
+    case eEventOff:
+        iEnvJSPOff(globals.sceneCur->env->geom, (xJSPHeader*)toParamWidget);
+        break;
+    case eEventJSPVisibilityIncrement:
+        iEnvJSPVisibilityInc(globals.sceneCur->env->geom, (xJSPHeader*)toParamWidget);
+        break;
+    case eEventJSPVisibilityDecrement:
+        iEnvJSPVisibilityDec(globals.sceneCur->env->geom, (xJSPHeader*)toParamWidget);
+        break;
+    case eEventSetLightKit:
+        gCurXEnv->lightKit = (xLightKit*)toParamWidget;
+        break;
     }
-
-    globals.sceneCur->zen = env;
-    globals.sceneCur->zen = env;
-
-    xSTAssetCountByType('BSP ');
-
-    buf = xSTFindAsset(easset->bspAssetID, &bufsize);
-
-    if (buf)
-    {
-        xEnvLoadBsp(globals.sceneCur->env, buf, bufsize, 0);
-    }
-
-    zSurfaceRegisterMapper(easset->bspMapperID);
-
-    if (easset->bspCollisionAssetID)
-    {
-        buf = xSTFindAsset(easset->bspCollisionAssetID, &bufsize);
-
-        if (buf)
-        {
-            xEnvLoadBsp(globals.sceneCur->env, buf, bufsize, 1);
-        }
-    }
-
-    if (easset->bspFXAssetID)
-    {
-        buf = xSTFindAsset(easset->bspFXAssetID, &bufsize);
-
-        if (buf)
-        {
-            xEnvLoadBsp(globals.sceneCur->env, buf, bufsize, 2);
-        }
-    }
-
-    if (easset->bspCameraAssetID)
-    {
-        buf = xSTFindAsset(easset->bspCameraAssetID, &bufsize);
-
-        if (buf)
-        {
-            xEnvLoadBsp(globals.sceneCur->env, buf, bufsize, 3);
-        }
-    }
-
-    if (globals.sceneCur->env && globals.sceneCur->env->geom)
-    {
-        zLightResetAll(globals.sceneCur->env);
-        iLightInit(globals.sceneCur->env->geom->world);
-    }
-}
-
-// Inlining issue
-void zEnvInit(void* env, void* easset)
-{
-    zEnvInit((_zEnv*)env, (xEnvAsset*)easset);
 }

@@ -6,6 +6,16 @@
 #include "xMath3.h"
 #include "xSurface.h"
 
+#include "zNPC.h"
+
+struct RwTexture;
+
+#define SURF_TEXANIM_ON 0x1
+#define SURF_TEXANIM_ON2 0x2
+
+#define UVANIM_FLAG_ON 0x1
+#define UVANIM_FLAG_ON2 0x2
+
 struct zSurfMatFX
 {
     U32 flags;
@@ -69,6 +79,53 @@ struct zSurfAssetBase : xBaseAsset
     F32 walljump_scale_y;
     F32 damage_timer;
     F32 damage_bounce;
+    U32 impact_sound;
+};
+
+struct zFootstepsData
+{
+    U32 particle_emitter;
+    U32 sound;
+    U32 texture;
+    F32 duration;
+};
+
+struct zHitDecalData
+{
+    U32 texture;
+    F32 x_size;
+    F32 y_size;
+};
+
+struct zSurfAssetIN : zSurfAssetBase
+{
+    U8 dash_impact_type;
+    F32 dash_impact_throw_back;
+    F32 dash_spray_magnitude;
+    F32 dash_cool_rate;
+    F32 dash_cool_amount;
+    F32 dash_pass;
+    F32 dash_ramp_max_distance;
+    F32 dash_ramp_min_distance;
+    F32 dash_ramp_key_speed;
+    F32 dash_ramp_height;
+    U32 dash_ramp_target_movepoint_id;
+    S32 damage_amount;
+    zHitSource damage_type;
+    zFootstepsData off_surface;
+    zFootstepsData on_surface;
+    zHitDecalData hit_decal_data[3];
+    F32 off_surface_time;
+    U8 swimmable_surface;
+    U8 dash_fall;
+    U8 need_button_press;
+    U8 dash_attach;
+    U8 footstep_decals;
+    U8 pad1;
+    U8 pad2;
+    U8 pad3;
+    U8 pad4;
+    U8 driving_surface_type;
 };
 
 struct zSurfacePropTexAnim
@@ -77,8 +134,9 @@ struct zSurfacePropTexAnim
     F32 speed;
     F32 frame;
     U32 group;
-    S32 group_idx;
+    U32 group_idx;
     xBase* group_ptr;
+    RwTexture** txtr_animList;
 };
 
 struct zSurfacePropUVFX
@@ -98,11 +156,12 @@ struct zSurfacePropUVFX
 
 struct zSurfaceProps
 {
-    zSurfAssetBase* asset;
+    zSurfAssetIN* asset;
     U32 texanim_flags;
     zSurfacePropTexAnim texanim[2];
     U32 uvfx_flags;
     zSurfacePropUVFX uvfx[2];
+    RwTexture* txtr_matFXDualMap;
 };
 
 struct zMaterialMapAsset
@@ -119,16 +178,30 @@ struct zMaterialMapEntry
 
 struct xScene;
 
+void zSurfaceInit();
 void zSurfaceRegisterMapper(U32 assetId);
 void zSurfaceExit();
 xSurface* zSurfaceGetSurface(U32 mat_id);
 xSurface* zSurfaceGetSurface(const xCollis* coll);
+U32 zSurfaceGetSlide(const xSurface* surf);
+U32 zSurfaceGetStep(const xSurface* surf);
+F32 zSurfaceGetSlideStartAngle(const xSurface* surf);
+F32 zSurfaceGetSlideStopAngle(const xSurface* surf);
 U32 zSurfaceGetStandOn(const xSurface* surf);
+F32 zSurfaceGetFriction(const xSurface* surf);
+S32 zSurfaceGetSlickness(const xSurface* surf);
+F32 zSurfaceGetDamping(const xSurface* surf, F32 min_vel);
+U32 zSurfaceGetMatchOrient(const xSurface* surf);
+S32 zSurfaceGetDamageType(const xSurface* surf);
+U32 zSurfaceGetDamagePassthrough(const xSurface* surf);
+U32 zSurfaceGetSticky(const xSurface* surf);
 void zSurfaceSave(xSurface* ent, xSerial* s);
 void zSurfaceLoad(xSurface* ent, xSerial* s);
 void zSurfaceSetup(xSurface* s);
 void zSurfaceUpdate(xBase* to, xScene*, F32 dt);
 void zSurfaceGetName(S32 type, char* buffer);
 xSurface& zSurfaceGetDefault();
+U8 zSurfaceOutOfBounds(const xSurface& s);
+F32 zSurfaceGetOutOfBoundsDelay(const xSurface& surface);
 
 #endif

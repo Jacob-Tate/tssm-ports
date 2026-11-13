@@ -4,6 +4,9 @@
 #include "rwcore.h"
 #include "rtanim.h"
 
+#define rpHANIMPOPPARENTMATRIX 0x01
+#define rpHANIMPUSHPARENTMATRIX 0x02
+
 struct RpHAnimNodeInfo
 {
     RwInt32 nodeID;

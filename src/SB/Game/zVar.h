@@ -16,7 +16,14 @@ struct zVarEntry
     U32 (*varCB)(void*);
 };
 
-extern zVarEntry zVarEntryTable[19];
+struct zVarMagicEntry
+{
+    U32 varNameID;
+    char* varName;
+    char* (*varCB)(char*);
+};
+
+extern zVarEntry zVarEntryTable[25];
 /*
 zVarEntryTable contents:
 (index in table = num for all entries)
@@ -50,6 +57,7 @@ struct var_type
 };
 
 extern S32 bad_card_needed;
+extern S32 bad_card_available;
 
 void zVarNewGame();
 void zVarInit(zVarEntry* table);
@@ -57,5 +65,6 @@ U32 zVarEntryCB_VibrationOn(void* arg);
 U32 zVarEntryCB_SndMode(void* arg);
 U32 zVarEntryCB_SndMusicVol(void* arg);
 U32 zVarEntryCB_SndFXVol(void* arg);
+U32 zVarEntryCB_SubtitlesOn(void* arg);
 
 #endif

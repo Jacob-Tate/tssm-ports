@@ -1,10 +1,12 @@
 #ifndef XWAD1_H
 #define XWAD1_H
 
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
+// xDebugTweak.h first: retail .rodata of this unit opens with its seven tweak_callback templates.
+#include "xDebugTweak.h"
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/stdlib.h>
 #include <stdio.h>
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstring>
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/cmath>
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/cstring>
 
 #include "zGlobals.h"
 #include "xCutscene.h"
@@ -19,10 +21,12 @@
 #include "xString.h"
 #include "xCamera.h"
 #include "xBound.h"
+#include "iCollide.h"
 #include "xbinio.h"
 #include "xBehaviour.h"
 #include "xBehaveMgr.h"
 #include "xBehaveGoalSimple.h"
+#include "xutil.h"
 #include "xAnim.h"
 #include "iAnim.h"
 #include "iModel.h"
@@ -30,6 +34,8 @@
 #include "iCamera.h"
 #include "iScrFX.h"
 #include "xShadow.h"
+#include "xJSP.h"
+#include "zSurface.h"
 
 struct st_BINIO_XTRADATA
 {

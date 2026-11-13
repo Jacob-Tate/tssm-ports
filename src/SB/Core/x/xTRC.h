@@ -2,6 +2,7 @@
 #define XTRC_H
 
 #include "iTRC.h"
+#include "xPad.h"
 
 enum _tagTRCState
 {
@@ -21,20 +22,26 @@ enum _tagTRCState
     TRC_Total
 };
 
-struct _tagTRCPadInfo
+struct _tagiTRCPadInfo
+{
+    _tagPadInit pad_init;
+};
+
+struct _tagTRCPadInfo : _tagiTRCPadInfo
 {
     S32 id;
     _tagTRCState state;
 };
 
-_tagTRCPadInfo gTrcPad[];
-_tagTRCState gTrcDisk[];
+extern _tagTRCPadInfo gTrcPad[];
+extern _tagTRCState gTrcDisk[];
 
 void xTRCInit();
 void xTRCPad(S32 pad_id, _tagTRCState state);
 void xTRCRender();
 void xTRCReset();
 void xTRCDisk(_tagTRCState state);
+void xTRCClearPadMsg();
 void render_mem_card_no_space(S32 needed, S32 available, S32 neededFiles, bool enabled);
 
 #endif

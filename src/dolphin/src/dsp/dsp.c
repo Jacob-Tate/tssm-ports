@@ -83,8 +83,7 @@ int DSPCheckInit()
     return __DSP_init_flag;
 }
 
-// it's possible to override this function but it wasn't done with DECL_WEAK(according to the symbol map)
-DECL_WEAK DSPTaskInfo* DSPAddTask(DSPTaskInfo* task)
+DSPTaskInfo* DSPAddTask(DSPTaskInfo* task)
 {
     u32 oldInt;
     oldInt = OSDisableInterrupts();

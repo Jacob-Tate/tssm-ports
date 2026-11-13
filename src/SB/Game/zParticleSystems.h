@@ -3,4 +3,6 @@
 
 #include "zParticleGenerator.h"
 
+zParticleSystem** zParticleSystemCreateAll();
+
 #endif

@@ -21,17 +21,18 @@ enum xFileDriveType
 };
 
 #ifdef GAMECUBE
+struct tag_xFile;
+
 struct tag_iFile
 {
     U32 flags;
     char path[128];
     S32 entrynum;
     DVDFileInfo fileInfo;
-    S32 unkC4;
+    void (*cb)(tag_xFile*); // 0xC4
     S32 asynckey;
-    S32 unknown[7];
-    S32 unkE8;
-    S32 offset;
+    S32 buffer[8]; // 0xCC
+    S32 offset; // 0xEC
 };
 #else
 #ifdef PS2
@@ -58,7 +59,7 @@ struct tag_xFile;
 
 void iFileInit();
 void iFileExit();
-U32* iFileLoad(char* name, U32* buffer, U32* size);
+U32* iFileLoad(const char* name, U32* buffer, U32* size);
 U32 iFileOpen(const char* name, S32 flags, tag_xFile* file);
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);
@@ -68,10 +69,12 @@ IFILE_READSECTOR_STATUS iFileReadAsyncStatus(S32 key, S32* amtToFar);
 U32 iFileClose(tag_xFile* file);
 U32 iFileGetSize(tag_xFile* file);
 void iFileReadStop();
+U8 iFileExists(const char* name, S32 flags);
 void iFileFullPath(const char* relname, char* fullname);
-void iFileSetPath(char* path);
-U32 iFileFind(const char* name, int, tag_xFile* file);
-void iFileGetInfo(tag_xFile* file, U32* addr, U32* length);
+void iFileSetPath(const char* path);
+U32 iFileFind(const char* name, int fileflags, tag_xFile* file);
+void iFileGetInfo(tag_xFile* file, U32* starting_sector, U32* size_in_bytes);
 void iFileAsyncService();
+U32 iFileGetSectorSize(xFileDriveType drive);
 
 #endif

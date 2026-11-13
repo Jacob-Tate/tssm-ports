@@ -5,6 +5,7 @@
 
 #include "xMath3.h"
 #include "xMemMgr.h"
+#include "iSnd.h"
 
 typedef struct xAnimState;
 typedef struct xAnimTransition;
@@ -15,6 +16,13 @@ typedef struct xAnimSingle;
 typedef struct xAnimPlay;
 
 extern U32 gxAnimUseGrowAlloc;
+
+struct xAnimPhysicsData
+{
+    xVec3* tranTable;
+    F32* yawTable;
+    S32 tranCount;
+};
 
 struct xAnimFile
 {
@@ -28,9 +36,8 @@ struct xAnimFile
     F32 TimeOffset;
     U16 BoneCount;
     U8 NumAnims[2];
-
-    // 0x20
-    void** RawData;
+    void** RawData; // 0x1c
+    xAnimPhysicsData* PhysicsData;
 };
 
 struct xAnimMultiFileEntry
@@ -49,7 +56,7 @@ struct xAnimMultiFile : xAnimMultiFileBase
     xAnimMultiFileEntry Files[1];
 };
 
-typedef void (*xAnimStateBeforeEnterCallback)(xAnimPlay*, xAnimState*);
+typedef void (*xAnimStateBeforeEnterCallback)(xAnimPlay*, xAnimState*, void*);
 typedef void (*xAnimStateCallback)(xAnimState*, xAnimSingle*, void*);
 typedef void (*xAnimStateBeforeAnimMatricesCallback)(xAnimPlay*, xQuat*, xVec3*, S32);
 
@@ -111,10 +118,9 @@ struct xAnimTransitionList
 
 struct xAnimTable
 {
-    xAnimTable* Next; // 0x0
-    const char* Name; // 0x4
-    xAnimTransition* TransitionList; // 0x8
-    xAnimState* StateList;
+    const char* Name; // 0x0
+    xAnimTransition* TransitionList; // 0x4
+    xAnimState* StateList; // 0x8
     U32 AnimIndex;
     U32 MorphIndex;
     U32 UserFlags;
@@ -125,7 +131,8 @@ typedef U32 (*xAnimEffectCallback)(U32, xAnimActiveEffect*, xAnimSingle*, void*)
 struct xAnimEffect
 {
     xAnimEffect* Next;
-    U32 Flags;
+    U16 Flags;
+    U16 Probability;
     F32 StartTime;
     F32 EndTime;
     xAnimEffectCallback Callback;
@@ -134,7 +141,11 @@ struct xAnimEffect
 struct xAnimActiveEffect
 {
     xAnimEffect* Effect;
-    U32 Handle;
+    union
+    {
+        U32 Handle;
+        iSndHandle SndHandle;
+    };
 };
 
 struct xAnimSingle
@@ -159,7 +170,9 @@ struct xAnimSingle
     xAnimTransition* Tran;
     xAnimSingle* Blend;
     F32 BlendFactor;
-    U32 pad;
+    xVec3 PhysDisp;
+    F32 YawDisp;
+    U32 pad[1];
 };
 
 typedef struct xModelInstance;
@@ -181,13 +194,18 @@ class AnimTableList
 { // size: 0xC
 public:
     char* name; // offset 0x0, size 0x4
-    class xAnimTable* (*constructor)(); // offset 0x4, size 0x4
+    struct xAnimTable* (*constructor)(); // offset 0x4, size 0x4
     unsigned int id; // offset 0x8, size 0x4
 };
 
 void xAnimInit();
+void xAnimTempStateInit(U32 count);
+xAnimTransition* xAnimTempTransitionAlloc(const xAnimTransition* source);
 void xAnimTempTransitionInit(U32 count);
+void xAnimPhysicsEval(xAnimPhysicsData* phys, F32 time, xVec3* disp, F32* yaw);
 xAnimFile* xAnimFileNew(void* rawData, const char* name, U32 flags, xAnimFile** linkedList);
+void xAnimFileEval(xAnimFile* data, F32 time, F32* bilinear, U32 flags, xVec3* tran, xQuat* quat,
+                   F32* arg6);
 xAnimTable* xAnimTableNew(const char* name, U32 userFlags);
 xAnimState* xAnimTableNewState(xAnimTable* table, const char* name, U32 flags, U32 userFlags,
                                F32 speed, F32* boneBlend, F32* timeSnap, F32 fadeRecip,
@@ -200,7 +218,7 @@ xAnimTransition* xAnimTableNewTransition(xAnimTable* table, const char* source, 
                                          xAnimTransitionCallback callback, U32 flags, U32 userFlags,
                                          F32 srcTime, F32 destTime, U16 priority, U16 queuePriority,
                                          F32 blendRecip, U16* blendOffset);
-void xAnimDefaultBeforeEnter(xAnimPlay* play, xAnimState* state);
+void xAnimDefaultBeforeEnter(xAnimPlay* play, xAnimState* state, void* object);
 void xAnimPoolInit(xMemPool* pool, U32 count, U32 singles, U32 blendFlags, U32 effectMax);
 xAnimPlay* xAnimPoolAlloc(xMemPool* pool, void* object, xAnimTable* table,
                           xModelInstance* modelInst);
@@ -211,11 +229,18 @@ void xAnimTableAddFile(xAnimTable* table, xAnimFile* file, const char* states);
 xAnimState* xAnimTableAddFileID(xAnimTable* table, xAnimFile* file, U32 stateID, U32 subStateID,
                                 U32 subStateCount);
 xAnimState* xAnimTableGetStateID(xAnimTable* table, U32 ID);
+void xAnimPlaySetup(xAnimPlay* play, void* object, xAnimTable* table, xModelInstance* modelInst);
 void xAnimPlaySetState(xAnimSingle* single, xAnimState* state, F32 startTime);
 void xAnimPlayChooseTransition(xAnimPlay* play);
 void xAnimPlayStartTransition(xAnimPlay* play, xAnimTransition* transition);
 void xAnimPlayUpdate(xAnimPlay* play, F32 timeDelta);
 void xAnimPlayEval(xAnimPlay* play);
+xAnimEffect* xAnimStateNewEffect(xAnimState* state, U16 flags, U16 probability, F32 startTime,
+                                 F32 endTime, xAnimEffectCallback callback, U32 userDataSize);
+void xAnimFileSetTime(xAnimFile* data, F32 duration, F32 timeOffset);
+xAnimFile* xAnimFileNewBilinear(void** rawData, const char* name, U32 hashed_name_id, U32 flags,
+                                xAnimFile** linkedList, U32 numX, U32 numY);
+void xAnimCalcPhysicsData(xAnimFile* afile, xAnimFile* endPose);
 
 inline F32 xAnimFileRawTime(xAnimFile* data, float time)
 {

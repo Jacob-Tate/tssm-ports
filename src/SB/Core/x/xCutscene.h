@@ -2,6 +2,28 @@
 #define XCUTSCENE_H
 
 #include "xFile.h"
+#include "iSnd.h"
+#include "xModel.h"
+
+// GC: 0x40 per track (PS2 DWARF has 60-byte names)
+struct xCutsceneAudioTrack
+{
+    U32 uLeftSoundId;
+    U32 uRightSoundId;
+    char szLeftSound[28];
+    char szRightSound[28];
+};
+
+struct xCutsceneAnimHdr
+{
+    U32 RootIndex;
+    F32 Translate[3];
+};
+
+struct xCutsceneModelHack
+{
+    xModelPipe* pipe;
+};
 
 struct xCutsceneInfo
 {
@@ -17,8 +39,7 @@ struct xCutsceneInfo
     U32 VisSize;
     U32 BreakCount;
     U32 pad;
-    char SoundLeft[16];
-    char SoundRight[16];
+    xCutsceneAudioTrack AudioTracks[32];
 };
 
 struct xCutsceneData
@@ -33,13 +54,31 @@ struct xCutsceneData
     };
 };
 
+#define XCUTSCENEDATA_TYPE_RW_MODEL 1
+#define XCUTSCENEDATA_TYPE_ANIMATION 2
+#define XCUTSCENEDATA_TYPE_CAMERA 3
+#define XCUTSCENEDATA_TYPE_MORPHTARGET 4
 #define XCUTSCENEDATA_TYPE_SOUND 5
+#define XCUTSCENEDATA_TYPE_JDELTAMODEL 6
+#define XCUTSCENEDATA_TYPE_JDELTAANIM 7
 #define XCUTSCENEDATA_TYPE_6 6
 
 struct xCutsceneBreak
 {
     F32 Time;
     S32 Index;
+};
+
+struct xCutsceneMphFrame
+{
+    F32 Time;
+    U32 Flags;
+};
+
+struct xCutsceneMphRun
+{
+    S32 VertIdx;
+    S32 VertCt;
 };
 
 struct xCutsceneTime
@@ -50,8 +89,17 @@ struct xCutsceneTime
     U32 ChunkIndex;
 };
 
+// GC: vtable at 0x0 (__vt__9XCSNNosey: CanRenderNow, UpdatedAnimated)
 struct XCSNNosey
 {
+    virtual void CanRenderNow()
+    {
+    }
+
+    virtual void UpdatedAnimated(RpAtomic*, RwMatrixTag*, U32, U32, U32&)
+    {
+    }
+
     void* userdata;
     S32 flg_nosey;
 };
@@ -87,9 +135,21 @@ struct xCutscene
     U32 SndNumChannel;
     U32 SndChannelReq[2];
     U32 SndAssetID[2];
-    U32 SndHandle[2];
+    iSndHandle SndHandle[2];
+    U32 SubTitlesID;
     XCSNNosey* cb_nosey;
+    xCutsceneModelHack* ModelHack;
+    U8 started;
+    U8 useDefaultTrack;
+
     void NoseySet(XCSNNosey* nosey);
+};
+
+struct CutsceneShadowModel
+{
+    RpAtomic* model;
+    RwMatrixTag* animMat;
+    U32 shadowBits;
 };
 
 struct xEnt;
@@ -100,9 +160,10 @@ void xCutscene_Init(void* toc);
 xCutscene* xCutscene_CurrentCutscene();
 void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*);
 U32 iCSFileOpen(xCutscene* csn);
-xCutscene* xCutscene_Create(U32 id);
+xCutscene* xCutscene_Create(U32 id, U32 subtitlesID);
 S32 xCutscene_Destroy(xCutscene* csn);
 S32 xCutscene_LoadStart(xCutscene* csn);
 S32 xCutscene_Update(xCutscene* csn, F32 dt);
+void xCutscene_SetSpeed(xCutscene* csn, F32 speed);
 
 #endif

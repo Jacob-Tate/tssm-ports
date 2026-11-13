@@ -2,6 +2,7 @@
 #define ZCUTSCENEMGR_H
 
 #include "xCutsceneMgr.h"
+#include "xModel.h"
 #include "rpworld.h"
 
 extern F32 gSkipTimeCutscene;
@@ -9,17 +10,18 @@ extern F32 gSkipTimeCutscene;
 struct xScene;
 struct zCutsceneMgr : xCutsceneMgr
 {
+    U8 pausedMusic;
+    U8 sendDoneForDisabledCutscene;
 };
 
 struct zCutsceneHack
 {
     char* cinname;
     char* modelname;
-    F32 radius;
-    U32 tworoot;
     U32 noshadow;
-    U32 alphaBits;
+    U32 numPipes;
     RpAtomic* (*renderCB)(RpAtomic*);
+    xModelPipe pipe[8];
 };
 
 struct zCutSceneNames
@@ -38,11 +40,12 @@ RpAtomic* HackBoundCB(RpAtomic* atomic, void* data);
 RpMaterial* HackAlphaSetMaterialAlphaCB(RpMaterial* material, void* data);
 RpAtomic* HackAlphaCB(RpAtomic* atomic, void* data);
 void zCutSceneNamesTable_clearAll();
-void zCutsceneMgrPlayStart(zCutsceneMgr* t);
-S32 zCutsceneMgrEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*);
+void zCutsceneMgrEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32);
+void zCutsceneMgrFinishLoad(xBase* to);
+void zCutsceneMgrFinishExit(xBase* to);
 
 void zCutsceneMgrKillFX(zCutsceneMgr* t);
-void zCutsceneMgrUpdateFX(zCutsceneMgr* t);
+void zCutsceneMgrUpdateFX(zCutsceneMgr* t, F32);
 void zCutsceneMgrUpdate(xBase* to, xScene* sc, F32 dt);
 void check_hide_entities();
 

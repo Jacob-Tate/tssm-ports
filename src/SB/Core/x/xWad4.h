@@ -1,13 +1,13 @@
 #ifndef XWAD4_H
 #define XWAD4_H
 
+#include "xutil.h"
 #include "xCollide.h"
 #include "iCollide.h"
 #include "xEnt.h"
 #include "xBase.h"
 #include "xScene.h"
 #include "zBase.h"
-#include "xutil.h"
 #include "xRMemData.h"
 #include "xMemMgr.h"
 #include "xhipio.h"
@@ -50,5 +50,12 @@ tagiRenderInput gRenderBuffer;
 void iParMgrRender();
 void iParMgrUpdate(F32);
 void iParMgrInit();
+void iParMgrRenderParSys_Sprite(void* data, xParGroup* ps);
+void iParMgrRenderParSys_Streak(void* data, xParGroup* ps);
+void iParMgrRenderParSys_Flat(void* data, xParGroup* ps);
+void iParMgrRenderParSys_Static(void* data, xParGroup* ps);
+void iParMgrRenderParSys_Ground(void* data, xParGroup* ps);
+void iParMgrRenderParSys_QuadStreak(void* data, xParGroup* ps);
+void iParMgrRenderParSys_InvStreak(void* data, xParGroup* ps);
 
 #endif

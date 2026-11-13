@@ -13,6 +13,7 @@
 ###
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -258,14 +259,16 @@ cflags_rel = [
 ]
 
 cflags_tssm = [
-    *cflags_base,
+    # Game code: deferred codegen (emission is the reverse of source order; inlining works in both directions).
+    *[f for f in cflags_base if f != "-inline auto"],
     "-lang=C++",
     "-common on",
     "-char unsigned",
     "-str reuse,pool,readonly",
     "-use_lmw_stmw on",
     '-pragma "cpp_extensions on"',
-    "-inline auto",
+    "-inline auto,deferred",
+    "-sym on",
     "-gccinc",
     "-i include/bink",
     "-i include/inline",
@@ -277,6 +280,53 @@ cflags_tssm = [
 ]
 
 config.linker_version = "GC/2.6"
+
+# Game code is compiled with a precompiled prefix header: src/SB/SBPrefix.h is precompiled with the
+# game flags into build/<version>/include/SBPrefix.mch and passed to every game unit with -prefix.
+# CW emits the out-of-line inlines of a precompiled header as part of the file being compiled
+# (no .text section change, emitted next to the code that references them), which is where
+# retail has its weak xVec3/xMath/xMemMgr helpers. Evidence: src/SB/SBPrefix.h.
+sb_prefix = "SBPrefix"
+sb_prefix_mch = config.build_dir / config.version / "include" / f"{sb_prefix}.mch"
+_wrapper = config.compiler_wrapper()
+_mwcc = config.compilers() / config.linker_version / "mwcceppc.exe"
+# -MD, not -MMD: with -MMD the depfile of a precompiled header omits the game headers.
+_pch_cmd = f"{_wrapper or ''} {_mwcc} $cflags -MD -precompile $out_name -o $out_dir $in".strip()
+if os.name != "nt":
+    _pch_cmd += " && $python tools/transform_dep.py $out_dir/$out_stem.d $out_dir/$out_stem.d"
+# What the precompile waits for, as tools/project.py does for the compile rules: the compilers
+# directory when it is downloaded (the download builds that directory, not mwcceppc.exe), and the
+# downloaded wibo. Naming mwcceppc.exe itself left a fresh checkout with no rule to make it.
+_pch_implicit = [config.compilers() if config.compilers_path is None else _mwcc]
+if _wrapper is not None and config.use_wibo():
+    _pch_implicit.append(_wrapper)
+config.custom_build_rules = [
+    {
+        "name": "mwcc_pch",
+        "command": _pch_cmd,
+        "description": "MWCC PCH $out",
+        "depfile": "$out_dir/$out_stem.d",
+        "deps": "gcc",
+    }
+]
+config.custom_build_steps = {
+    "pre-compile": [
+        {
+            "rule": "mwcc_pch",
+            "inputs": f"src/SB/{sb_prefix}.h",
+            "outputs": sb_prefix_mch,
+            "implicit": _pch_implicit,
+            "variables": {
+                "cflags": " ".join(cflags_tssm),
+                "out_name": sb_prefix_mch.name,
+                "out_stem": sb_prefix,
+                "out_dir": sb_prefix_mch.parent,
+            },
+        }
+    ]
+}
+# Found through -i build/<version>/include (cflags_base).
+cflags_tssm.append(f"-prefix {sb_prefix_mch.name}")
 
 
 # Helper function for Dolphin libraries
@@ -356,48 +406,49 @@ config.libs = [
         "lib": "SB",
         "mw_version": config.linker_version,
         "cflags": cflags_tssm,
+        "extra_implicit": [sb_prefix_mch],
         "progress_category": "game",
         "objects": [
-            Object(NonMatching, "SB/Core/x/xWad4.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/x/xWad2.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/x/xWad3.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/x/xWad1.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/x/xWad5.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/x/xFXHighDynamicRange.cpp"),
-            Object(NonMatching, "SB/Core/x/xFXCameraTexture.cpp"),
-            Object(NonMatching, "SB/Core/x/xModelBlur.cpp"),
-            Object(NonMatching, "SB/Core/x/xCamera.cpp"),
-            Object(NonMatching, "SB/Game/zWadNME.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWad1.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWad2.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWad3.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWadEnt.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWadHud.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zWadUI.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zMain.cpp"),
-            Object(NonMatching, "SB/Game/zTalkBox.cpp", extra_cflags=["-inline off"]),
-            Object(NonMatching, "SB/Game/zTaskBox.cpp", extra_cflags=["-inline off"]),
-            Object(NonMatching, "SB/Game/zSmoke.cpp"),
-            Object(NonMatching, "SB/Game/zSplash.cpp"),
-            Object(NonMatching, "SB/Game/zExplosion.cpp"),
-            Object(NonMatching, "SB/Game/zFMV.cpp"),
-            Object(NonMatching, "SB/Game/zJSPExtraData.cpp"),
-            Object(NonMatching, "SB/Game/zTextBox.cpp"),
-            Object(NonMatching, "SB/Game/zDust.cpp"),
-            Object(NonMatching, "SB/Game/zReactiveAnimation.cpp"),
-            Object(NonMatching, "SB/Game/zFire.cpp"),
-            Object(NonMatching, "SB/Game/zBossCam.cpp"),
-            Object(NonMatching, "SB/Game/zParticleGenerator.cpp"),
-            Object(NonMatching, "SB/Game/zParticleLocator.cpp"),
-            Object(NonMatching, "SB/Game/zParticleSystems.cpp"),
-            Object(NonMatching, "SB/Game/zParticleSystemWaterfall.cpp"),
-            Object(NonMatching, "SB/Game/zWadCine.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Game/zParticleCustom.cpp"),
-            Object(NonMatching, "SB/Core/gc/iWad.cpp", extra_cflags=["-sym on"]),
-            Object(NonMatching, "SB/Core/gc/iTRC.cpp"),
+            Object(Matching, "SB/Core/x/xWad4.cpp"),
+            Object(Matching, "SB/Core/x/xWad2.cpp"),
+            Object(Matching, "SB/Core/x/xWad3.cpp"),
+            Object(Matching, "SB/Core/x/xWad1.cpp"),
+            Object(Matching, "SB/Core/x/xWad5.cpp"),
+            Object(Matching, "SB/Core/x/xFXHighDynamicRange.cpp"),
+            Object(Matching, "SB/Core/x/xFXCameraTexture.cpp"),
+            Object(Matching, "SB/Core/x/xModelBlur.cpp"),
+            Object(Matching, "SB/Core/x/xCamera.cpp"),
+            Object(Matching, "SB/Game/zWadNME.cpp"),
+            Object(Matching, "SB/Game/zWad1.cpp"),
+            Object(Matching, "SB/Game/zWad2.cpp"),
+            Object(Matching, "SB/Game/zWad3.cpp"),
+            Object(Matching, "SB/Game/zWadEnt.cpp"),
+            Object(Matching, "SB/Game/zWadHud.cpp"),
+            Object(Matching, "SB/Game/zWadUI.cpp"),
+            Object(Matching, "SB/Game/zMain.cpp"),
+            Object(Matching, "SB/Game/zTalkBox.cpp"),
+            Object(Matching, "SB/Game/zTaskBox.cpp"),
+            Object(Matching, "SB/Game/zSmoke.cpp"),
+            Object(Matching, "SB/Game/zSplash.cpp"),
+            Object(Matching, "SB/Game/zExplosion.cpp"),
+            Object(Matching, "SB/Game/zFMV.cpp"),
+            Object(Matching, "SB/Game/zJSPExtraData.cpp"),
+            Object(Matching, "SB/Game/zTextBox.cpp"),
+            Object(Matching, "SB/Game/zDust.cpp"),
+            Object(Matching, "SB/Game/zReactiveAnimation.cpp"),
+            Object(Matching, "SB/Game/zFire.cpp"),
+            Object(Matching, "SB/Game/zBossCam.cpp"),
+            Object(Matching, "SB/Game/zParticleGenerator.cpp"),
+            Object(Matching, "SB/Game/zParticleLocator.cpp"),
+            Object(Matching, "SB/Game/zParticleSystems.cpp"),
+            Object(Matching, "SB/Game/zParticleSystemWaterfall.cpp"),
+            Object(Matching, "SB/Game/zWadCine.cpp"),
+            Object(Matching, "SB/Game/zParticleCustom.cpp"),
+            Object(Matching, "SB/Core/gc/iWad.cpp"),
+            Object(Matching, "SB/Core/gc/iTRC.cpp"),
             Object(Matching, "SB/Core/gc/iException.cpp"),
-            Object(NonMatching, "SB/Core/gc/iScrFX.cpp"),
-            Object(NonMatching, "SB/Core/gc/iARAMTmp.cpp"),
+            Object(Matching, "SB/Core/gc/iScrFX.cpp"),
+            Object(Matching, "SB/Core/gc/iARAMTmp.cpp"),
 
         ],
     },
@@ -633,7 +684,7 @@ config.libs = [
             Object(Matching, "dolphin/src/os/OSAudioSystem.c"),
             Object(Matching, "dolphin/src/os/OSCache.c"),
             Object(Matching, "dolphin/src/os/OSContext.c"),
-            Object(NonMatching, "dolphin/src/os/OSError.c"),
+            Object(Matching, "dolphin/src/os/OSError.c"),
             Object(NonMatching, "dolphin/src/os/OSExec.c"),
             Object(NonMatching, "dolphin/src/os/OSFont.c"),
             Object(Matching, "dolphin/src/os/OSInterrupt.c"),
@@ -648,8 +699,8 @@ config.libs = [
             Object(Matching, "dolphin/src/os/OSTime.c"),
             Object(Matching, "dolphin/src/os/OSSemaphore.c"),
             Object(Matching, "dolphin/src/os/OSSync.c"),
-            Object(NonMatching, "dolphin/src/os/init/__start.c"),
-            Object(NonMatching, "dolphin/src/os/init/__ppc_eabi_init.cpp")
+            Object(Matching, "dolphin/src/os/init/__start.c"),
+            Object(Matching, "dolphin/src/os/init/__ppc_eabi_init.cpp")
         ]
     ),
     DolphinLib(
@@ -678,13 +729,13 @@ config.libs = [
         [
             Object(NonMatching, "Runtime/__mem.c"),
             Object(Matching, "Runtime/__va_arg.c"),
-            Object(NonMatching, "Runtime/global_destructor_chain.c"),
+            Object(Matching, "Runtime/global_destructor_chain.c"),
             Object(NonMatching, "Runtime/New.cp"),
             Object(NonMatching, "Runtime/NMWException.cp"),
             Object(Matching, "Runtime/CPlusLibPPC.cp"),
             Object(NonMatching, "Runtime/ptmf.c"),
             Object(NonMatching, "Runtime/runtime.c"),
-            Object(NonMatching, "Runtime/__init_cpp_exceptions.cpp"),
+            Object(Matching, "Runtime/__init_cpp_exceptions.cpp"),
             Object(NonMatching, "Runtime/Gecko_ExceptionPPC.cp"),
             Object(NonMatching, "Runtime/GCN_mem_alloc.c"),
         ]

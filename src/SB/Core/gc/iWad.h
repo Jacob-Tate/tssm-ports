@@ -8,6 +8,7 @@
 #include "iAnim.h"
 #include "iAnimSKB.h"
 #include "iARAMTmp.h"
+#include "iAsync.h"
 #include "iCollide.h"
 #include "iCollideFast.h"
 #include "iColor.h"
@@ -35,6 +36,12 @@
 #include "ngcrad3d.h"
 #include "xDebug.h"
 #include "xPad.h"
+#include "xShadow.h"
+#include "xFX.h"
+#include "xSnd.h"
+#include "xMath.h"
+#include "xMath3.h"
+#include "iCamera.h"
 #include "xTRC.h"
 #include "stdlib.h"
 #include "../include/dolphin/dvd.h"
@@ -42,6 +49,12 @@
 #include <limits.h>
 #include <rwcore.h>
 #include <rtslerp.h>
+#include <rpcollis.h>
+#include <rphanim.h>
+#include <rpmatfx.h>
+#include <rpptank.h>
+#include <rpskin.h>
+#include <rpusrdat.h>
 #include <dolphin/os.h>
 
 struct ThreadParam
@@ -60,6 +73,6 @@ struct ThreadParam
     S32 wakeupCount;
 };
 
-void iFuncProfileFuncs(int, int, float);
+void iFuncProfileFuncs(S32, S32, F32);
 
 #endif

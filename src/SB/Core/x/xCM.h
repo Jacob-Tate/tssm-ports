@@ -43,10 +43,24 @@ class xCMtextbox
     // total size: 0x20
 public:
     unsigned int font; // offset 0x0, size 0x4
-    class iColor_tag color; // offset 0x4, size 0x4
+    iColor_tag color; // offset 0x4, size 0x4
     class sxy char_size; // offset 0x8, size 0x8
     class sxy char_spacing; // offset 0x10, size 0x8
     class sxy box; // offset 0x18, size 0x8
+};
+
+class xCMtexture
+{
+    // total size: 0x20
+public:
+    unsigned int assetID; // offset 0x0, size 0x4
+    xColor_tag color; // offset 0x4, size 0x4
+    float x; // offset 0x8, size 0x4
+    float y; // offset 0xC, size 0x4
+    float w; // offset 0x10, size 0x4
+    float h; // offset 0x14, size 0x4
+    struct RwTexture* texture; // offset 0x18, size 0x4
+    unsigned int pad; // offset 0x1C, size 0x4
 };
 
 class xCMpreset
@@ -68,8 +82,8 @@ public:
     unsigned int preset; // offset 0x4, size 0x4
     float t0; // offset 0x8, size 0x4
     float t1; // offset 0xC, size 0x4
-    char * text1; // offset 0x10, size 0x4
-    char * text2; // offset 0x14, size 0x4
+    char* text1; // offset 0x10, size 0x4
+    char* text2; // offset 0x14, size 0x4
 };
 
 class xCMcredits
@@ -90,8 +104,8 @@ public:
 
 void xCMupdate(F32 dt);
 void xCMrender();
-void xCMrender(F32 time, xCreditsData* data);
 void xCMstart(xCreditsData* data, F32, xBase* parent);
 void xCMstop();
+void xCMsetDest(F32 x, F32 y, F32 width, F32 height);
 
 #endif

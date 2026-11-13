@@ -3,7 +3,7 @@
 
 #include <rwsdk/rwplcore.h>
 
-typedef struct _RxObjSpace3DVertex RxObjSpace3DVertex;
+typedef struct RxObjSpace3DVertex RxObjSpace3DVertex;
 
 union RxColorUnion
 {
@@ -11,22 +11,87 @@ union RxColorUnion
     RwRGBA color;
 };
 
-// TODO: Determine whether c should go before or after objNormal
-// Context: These headers came from an official header source (unsure of release platform)
-//          However, currently decomped functions seem to pack the struct
-//          in this particular way so it's like this for now.
-//          See: zActionLIne.cpp
-struct _RxObjSpace3DVertex
+// GameCube RenderWare vertex layout (from the Ratatouille GC DWARF). As a flat struct of scalars
+// it is copied member by member.
+struct RxObjSpace3DVertex
 {
-    RwV3d objVertex;
-    RwV3d objNormal;
-    RxColorUnion c;
+    RwReal x;
+    RwReal y;
+    RwReal z;
+    RwReal nx;
+    RwReal ny;
+    RwReal nz;
+    RwUInt8 r;
+    RwUInt8 g;
+    RwUInt8 b;
+    RwUInt8 a;
     RwReal u;
     RwReal v;
 };
 
 typedef RxObjSpace3DVertex RxObjSpace3DLitVertex;
 typedef RxObjSpace3DLitVertex RwIm3DVertex;
+
+// GameCube SDK forms: the arguments are copied to a temporary before the vertex is written.
+#define RwIm3DVertexSetPos(vert, imx, imy, imz)                                                    \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwV3d tmp;                                                                                 \
+        tmp.x = (imx);                                                                             \
+        tmp.y = (imy);                                                                             \
+        tmp.z = (imz);                                                                             \
+        (vert)->x = tmp.x;                                                                         \
+        (vert)->y = tmp.y;                                                                         \
+        (vert)->z = tmp.z;                                                                         \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm3DVertexSetNormal(vert, imx, imy, imz)                                                 \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwV3d packed;                                                                              \
+        packed.x = (imx);                                                                          \
+        packed.y = (imy);                                                                          \
+        packed.z = (imz);                                                                          \
+        (vert)->nx = packed.x;                                                                     \
+        (vert)->ny = packed.y;                                                                     \
+        (vert)->nz = packed.z;                                                                     \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm3DVertexSetRGBA(vert, imr, img, imb, ima)                                              \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwRGBA col;                                                                                \
+        col.red = (imr);                                                                           \
+        col.green = (img);                                                                         \
+        col.blue = (imb);                                                                          \
+        col.alpha = (ima);                                                                         \
+        (vert)->r = col.red;                                                                       \
+        (vert)->g = col.green;                                                                     \
+        (vert)->b = col.blue;                                                                      \
+        (vert)->a = col.alpha;                                                                     \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm3DVertexSetUV(vert, imu, imv)                                                          \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        (vert)->u = (imu);                                                                         \
+        (vert)->v = (imv);                                                                         \
+    }                                                                                              \
+    MACRO_STOP
+
+enum RwIm3DTransformFlags
+{
+    rwIM3D_VERTEXUV = 1,
+    rwIM3D_ALLOPAQUE = 2,
+    rwIM3D_NOCLIP = 4,
+    rwIM3D_VERTEXXYZ = 8,
+    rwIM3D_VERTEXRGBA = 16,
+    rwIM3DTRANSFORMFLAGSFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+typedef enum RwIm3DTransformFlags RwIm3DTransformFlags;
 
 typedef struct rxHeapFreeBlock;
 typedef struct rxHeapSuperBlockDescriptor;
@@ -695,6 +760,7 @@ extern RwInt32 RwCameraRegisterPlugin(RwInt32 size, RwUInt32 pluginID,
                                       RwPluginObjectConstructor constructCB,
                                       RwPluginObjectDestructor destructCB,
                                       RwPluginObjectCopy copyCB);
+extern RwInt32 RwCameraGetPluginOffset(RwUInt32 pluginID);
 extern RwBool RwCameraDestroy(RwCamera* camera);
 extern RwCamera* RwCameraCreate(void);
 extern RwBool RwFrameDirty(const RwFrame* frame);
@@ -712,6 +778,7 @@ extern RwFrame* RwFrameTransform(RwFrame* frame, const RwMatrix* m, RwOpCombineT
 extern RwFrame* RwFrameRotate(RwFrame* frame, const RwV3d* axis, RwReal angle,
                               RwOpCombineType combine);
 extern RwFrame* RwFrameOrthoNormalize(RwFrame* frame);
+extern RwFrame* RwFrameSetIdentity(RwFrame* frame);
 extern RwInt32 RwFrameRegisterPlugin(RwInt32 size, RwUInt32 pluginID,
                                      RwPluginObjectConstructor constructCB,
                                      RwPluginObjectDestructor destructCB,
@@ -743,6 +810,10 @@ extern RwUInt8* RwRasterLockPalette(RwRaster* raster, RwInt32 lockMode);
 extern RwInt32 RwRasterGetNumLevels(RwRaster* raster);
 extern RwRaster* RwRasterShowRaster(RwRaster* raster, void* dev, RwUInt32 flags);
 extern RwRaster* RwRasterCreate(RwInt32 width, RwInt32 height, RwInt32 depth, RwInt32 flags);
+extern RwBool RwRasterClear(RwInt32 pixelValue);
+extern RwRaster* RwRasterRenderFast(RwRaster* raster, RwInt32 x, RwInt32 y);
+extern RwRaster* RwRasterPushContext(RwRaster* raster);
+extern RwRaster* RwRasterPopContext(void);
 extern RwUInt8* RwRasterLock(RwRaster* raster, RwUInt8 level, RwInt32 lockMode);
 extern RwImage* RwImageResample(RwImage* dstImage, const RwImage* srcImage);
 extern RwImage* RwImageCreateResample(const RwImage* srcImage, RwInt32 width, RwInt32 height);

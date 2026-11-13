@@ -6,3 +6,70 @@ splits: config/GGVE78/splits.txt
 symbols_known: true
 fill_gaps: false
 ldscript_template: config/GGVE78/ldscript.tpl
+add_relocations:
+  # Linker-generated addresses that the retail objects load as plain constants (lis/ori, lis/addi) and dtk
+  # did not recognise. As relocations they follow the linker script, so a build whose sections differ in
+  # size from retail's still gets a consistent stack/arena (otherwise the arena overlaps the stack).
+  # __start: initial stack pointer = _stack_addr
+  - source: 0x80005410
+    type: hi
+    target: _stack_addr
+  - source: 0x80005414
+    type: l
+    target: _stack_addr
+  # OSInit: OSSetArenaLo(__ArenaLo) and, with the BI2 debug flag, OSSetArenaLo(_stack_addr rounded up)
+  - source: 0x802F2BAC
+    type: ha
+    target: __ArenaLo
+  - source: 0x802F2BB0
+    type: l
+    target: __ArenaLo
+  - source: 0x802F2BE4
+    type: ha
+    target: _stack_addr
+  - source: 0x802F2BE8
+    type: l
+    target: _stack_addr
+  # __OSThreadInit: default thread stack base = _stack_addr
+  - source: 0x802F9000
+    type: ha
+    target: _stack_addr
+  - source: 0x802F9004
+    type: l
+    target: _stack_addr
+  # MetroTRK (dolphin_trk): debugger stack pointer = _db_stack_addr
+  - source: 0x802B8138
+    type: hi
+    target: _db_stack_addr
+  - source: 0x802B813C
+    type: l
+    target: _db_stack_addr
+  - source: 0x802B81CC
+    type: hi
+    target: _db_stack_addr
+  - source: 0x802B81D0
+    type: l
+    target: _db_stack_addr
+block_relocations:
+  # bink LogoData (binkread.c) is compressed image data; the word at 0x803B52DC happens to look like a
+  # pointer into zEntPlayer.cpp's static PlayerLedgeUpdate, which made dtk rename that local function.
+  - source: 0x803B52DC
+  # More words of the same LogoData image data that dtk took for pointers (none are real references;
+  # LogoData is only read by BinkLogoAddress). Targets: GlobalData::hazards (zWadNME .bss),
+  # zNMEGoalSentry::SentryMoveSpline, iParMgrRenderParSys_Flat, xSphereRandomPointOnSphere,
+  # g_shadCaches (zWadNME .bss), gzSoundTable_Buckotron, zHud::ModelAndFontHideOnTextBox::show and
+  # zNMEGoalFogBattle::RevisePrediction, each at an arbitrary offset inside the object.
+  # The bogus cross-unit reference to hazards also made dtk rename it hazards__10GlobalData_803C4A60;
+  # blocking 0x803B5878 restores the plain name in zWadNME.
+  - source: 0x803B5878
+  - source: 0x803B5880
+  - source: 0x803B6500
+  - source: 0x803B6690
+  - source: 0x803B6C94
+  - source: 0x803B7010
+  - source: 0x803B76F4
+  - source: 0x803B898C
+  # Neptune::Ribbon curvedata (zWadNME .rodata, ribbon curve keys {time, xColor, scale, ...}): the
+  # color word 0x80008064 of the fourth key looks like a pointer into zNMECommon::AnimCurSingle, so
+  # dtk made it a relocation and the delinked target no longer matched our data byte-for-byte.
+  - source: 0x80361CD4

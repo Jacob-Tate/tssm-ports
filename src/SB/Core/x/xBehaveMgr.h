@@ -5,6 +5,7 @@
 #include "xBehaviour.h"
 #include "xordarray.h"
 #include "xFactory.h"
+#include "xBehaveGoalSimple.h"
 
 struct xBehaveMgr : RyzMemData
 {
@@ -21,13 +22,19 @@ struct xBehaveMgr : RyzMemData
     }
 
     void Startup(S32, S32);
-    void RegBuiltIn();
+    void RegBuiltIn()
+    {
+        xGoalSimple_RegisterTypes(this->goalFactory);
+    }
     xPsyche* Subscribe(xBase* owner, S32 i);
     void UnSubscribe(xPsyche* psy);
     void ScenePrepare();
     void SceneFinish();
     void SceneReset();
-    xFactory* GetFactory();
+    xFactory* GetFactory()
+    {
+        return this->goalFactory;
+    }
 };
 
 void xBehaveMgr_ScenePrepare();

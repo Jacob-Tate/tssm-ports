@@ -7,8 +7,6 @@
 extern "C" {
 #endif // ifdef __cplusplus
 
-int isprint(int c);
-
 extern unsigned char __ctype_map[256];
 extern unsigned char __lower_map[256];
 extern unsigned char __upper_map[256];
@@ -28,6 +26,13 @@ extern unsigned char __upper_map[256];
 #define __printable (__graphic | __space_char)
 #define __whitespace (__motion_char | __space_char)
 #define __control (__motion_char | __control_char)
+
+#ifdef __cplusplus
+inline int isprint(int c)
+{
+    return (int)(__ctype_map[(u8)c] & __printable);
+}
+#endif
 
 #ifdef __cplusplus
 };

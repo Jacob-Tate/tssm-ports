@@ -1,0 +1,10 @@
+#include "xHudMeter.h"
+
+#include "zHud.cpp"
+#include "zHudKrabbyPattyMeter.cpp"
+#include "zHudManlinessMeter.cpp"
+#include "zHudTextureScroller.cpp"
+#include "zHudModelAndFont.cpp"
+#include "zHudTreasureChest.cpp"
+#include "zHudGoofyGooberMeter.cpp"
+#include "zHudNitroMeter.cpp"

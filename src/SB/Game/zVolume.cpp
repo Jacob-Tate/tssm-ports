@@ -8,66 +8,61 @@ struct PreCalcOcclude
     xVec4 FrustVec[4];
 };
 
-extern zVolume* vols;
-extern U16 nvols;
+static zVolume* vols;
+static U16 nvols;
+S32 gOccludeCount;
+zVolume* gOccludeList[10];
+S32 gOccludeCalcCount;
+PreCalcOcclude gOccludeCalc[10];
 
-extern S32 gOccludeCount;
-extern zVolume* gOccludeList[10];
-extern S32 gOccludeCalcCount;
-extern PreCalcOcclude gOccludeCalc[10];
-
-extern float lbl_803CDFB8;
-
-S32 zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32)
+// No GC symbol (inlined into zVolumeInit and dead-stripped); body as in BfBB.
+static void zVolumeInit(zVolume* vol, xVolumeAsset* asset)
 {
-    zVolume* vol = (zVolume*)to;
-    S32 i;
+    vol->Init(asset);
+    vol->eventFunc = zVolumeEventCB;
+}
 
-    switch (toEvent)
+// No GC symbol (inlined into zSceneInitFunc_Volume and dead-stripped); body as in BfBB.
+void zVolumeInit()
+{
+    U16 i;
+    U32 size;
+    xVolumeAsset* asset;
+
+    nvols = xSTAssetCountByType('VOLU');
+
+    if (nvols)
     {
-    case eEventReset:
-    {
-        vol->Reset();
-        break;
-    }
-    case eEventOccludeOn:
-    {
-        if (gOccludeCount == 10)
+        vols = (zVolume*)xMemAllocSize(nvols * sizeof(zVolume));
+
+        for (i = 0; i < nvols; i++)
         {
-            return 1;
+            asset = (xVolumeAsset*)xSTFindAssetByType('VOLU', i, &size);
+
+            zVolumeInit(&vols[i], asset);
         }
-
-        for (i = 0; i < gOccludeCount; i++)
-        {
-            if (gOccludeList[i] == vol)
-            {
-                return 1;
-            }
-        }
-
-        gOccludeList[gOccludeCount] = vol;
-        gOccludeCount++;
-
-        break;
     }
-    case eEventOccludeOff:
+    else
     {
-        for (i = 0; i < gOccludeCount; i++)
-        {
-            if (gOccludeList[i] == vol)
-            {
-                gOccludeList[gOccludeCount] = gOccludeList[gOccludeCount - 1];
-                gOccludeCount--;
-
-                return 1;
-            }
-        }
-
-        break;
+        vols = NULL;
     }
-    }
+}
 
-    return 1;
+// No GC symbol (inlined into zSceneSetup and dead-stripped); body as in BfBB.
+void zVolumeSetup()
+{
+    U32 i;
+
+    for (i = 0; i < nvols; i++)
+    {
+        xQuickCullForEverything(&vols[i].asset->bound.qcd);
+    }
+}
+
+// No GC symbol (inlined into zSceneInitFunc_Volume and dead-stripped); body as in BfBB.
+zVolume* zVolumeGetVolume(U16 n)
+{
+    return &vols[n];
 }
 
 void zVolume_OccludePrecalc(xVec3* camPos)
@@ -104,8 +99,8 @@ void zVolume_OccludePrecalc(xVec3* camPos)
         corner[0].y = a->bound.box.box.lower.y;
         corner[0].z = s * (a->bound.box.box.lower.x - a->xpivot) + a->bound.box.box.lower.z;
 
-        corner[1].y = a->bound.box.box.lower.y;
         corner[1].x = c * (a->bound.box.box.upper.x - a->xpivot) + a->xpivot;
+        corner[1].y = a->bound.box.box.lower.y;
         corner[1].z = s * (a->bound.box.box.upper.x - a->xpivot) + a->bound.box.box.lower.z;
 
         corner[2].x = c * (a->bound.box.box.upper.x - a->xpivot) + a->xpivot;
@@ -135,55 +130,107 @@ void zVolume_OccludePrecalc(xVec3* camPos)
             depthdot = -depthdot;
         }
 
-        if (iabs(camdot - depthdot) >= lbl_803CDFB8)
+        if (iabs(camdot - depthdot) < 1.0f)
         {
-            calc->DepthVec.w = depthdot;
-
-            for (j = 0; j < 4; j++)
-            {
-                xVec3Sub(&d1, &corner[j], camPos);
-                xVec3Sub(&d2, &corner[j + 1], camPos);
-                xVec3Cross((xVec3*)&locFrustVec[j], &d1, &d2);
-                xVec3Normalize((xVec3*)&locFrustVec[j], (xVec3*)&locFrustVec[j]);
-            }
-
-            testdot1 = xVec3Dot((xVec3*)&locFrustVec[0], &corner[0]);
-            testdot2 = xVec3Dot((xVec3*)&locFrustVec[0], &corner[2]);
-
-            if (testdot1 > testdot2)
-            {
-                for (j = 0; j < 4; j++)
-                {
-                    xVec3Inv((xVec3*)&locFrustVec[j], (xVec3*)&locFrustVec[j]);
-                }
-            }
-
-            for (j = 0; j < 4; j++)
-            {
-                locFrustVec[j].w = xVec3Dot((xVec3*)&locFrustVec[j], &corner[j]);
-            }
-
-            calc->FrustVec[0].x = locFrustVec[0].w;
-            calc->FrustVec[0].y = locFrustVec[1].w;
-            calc->FrustVec[0].z = locFrustVec[2].w;
-            calc->FrustVec[0].w = locFrustVec[3].w;
-
-            calc->FrustVec[1].x = locFrustVec[0].x;
-            calc->FrustVec[1].y = locFrustVec[1].x;
-            calc->FrustVec[1].z = locFrustVec[2].x;
-            calc->FrustVec[1].w = locFrustVec[3].x;
-
-            calc->FrustVec[2].x = locFrustVec[0].y;
-            calc->FrustVec[2].y = locFrustVec[1].y;
-            calc->FrustVec[2].z = locFrustVec[2].y;
-            calc->FrustVec[2].w = locFrustVec[3].y;
-
-            calc->FrustVec[3].x = locFrustVec[0].z;
-            calc->FrustVec[3].y = locFrustVec[1].z;
-            calc->FrustVec[3].z = locFrustVec[2].z;
-            calc->FrustVec[3].w = locFrustVec[3].z;
-
-            gOccludeCalcCount++;
+            continue;
         }
+
+        calc->DepthVec.w = depthdot;
+
+        for (j = 0; j < 4; j++)
+        {
+            xVec3Sub(&d1, &corner[j], camPos);
+            xVec3Sub(&d2, &corner[j + 1], camPos);
+            xVec3Cross((xVec3*)&locFrustVec[j], &d1, &d2);
+            xVec3Normalize((xVec3*)&locFrustVec[j], (xVec3*)&locFrustVec[j]);
+        }
+
+        testdot1 = xVec3Dot((xVec3*)&locFrustVec[0], &corner[0]);
+        testdot2 = xVec3Dot((xVec3*)&locFrustVec[0], &corner[2]);
+
+        if (testdot1 > testdot2)
+        {
+            for (j = 0; j < 4; j++)
+            {
+                xVec3Inv((xVec3*)&locFrustVec[j], (xVec3*)&locFrustVec[j]);
+            }
+        }
+
+        for (j = 0; j < 4; j++)
+        {
+            locFrustVec[j].w = xVec3Dot((xVec3*)&locFrustVec[j], &corner[j]);
+        }
+
+        calc->FrustVec[0].x = locFrustVec[0].w;
+        calc->FrustVec[0].y = locFrustVec[1].w;
+        calc->FrustVec[0].z = locFrustVec[2].w;
+        calc->FrustVec[0].w = locFrustVec[3].w;
+
+        calc->FrustVec[1].x = locFrustVec[0].x;
+        calc->FrustVec[1].y = locFrustVec[1].x;
+        calc->FrustVec[1].z = locFrustVec[2].x;
+        calc->FrustVec[1].w = locFrustVec[3].x;
+
+        calc->FrustVec[2].x = locFrustVec[0].y;
+        calc->FrustVec[2].y = locFrustVec[1].y;
+        calc->FrustVec[2].z = locFrustVec[2].y;
+        calc->FrustVec[2].w = locFrustVec[3].y;
+
+        calc->FrustVec[3].x = locFrustVec[0].z;
+        calc->FrustVec[3].y = locFrustVec[1].z;
+        calc->FrustVec[3].z = locFrustVec[2].z;
+        calc->FrustVec[3].w = locFrustVec[3].z;
+
+        gOccludeCalcCount++;
+    }
+}
+
+void zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32)
+{
+    zVolume* vol = (zVolume*)to;
+    S32 i;
+
+    switch (toEvent)
+    {
+    case eEventReset:
+    {
+        vol->Reset();
+        break;
+    }
+    case eEventOccludeOn:
+    {
+        if (gOccludeCount == 10)
+        {
+            return;
+        }
+
+        for (i = 0; i < gOccludeCount; i++)
+        {
+            if (gOccludeList[i] == vol)
+            {
+                return;
+            }
+        }
+
+        gOccludeList[gOccludeCount] = vol;
+        gOccludeCount++;
+
+        break;
+    }
+    case eEventOccludeOff:
+    {
+        for (i = 0; i < gOccludeCount; i++)
+        {
+            if (gOccludeList[i] == vol)
+            {
+                gOccludeList[gOccludeCount] = gOccludeList[gOccludeCount - 1];
+                gOccludeCount--;
+
+                return;
+            }
+        }
+
+        break;
+    }
     }
 }

@@ -2,6 +2,7 @@
 #define ZDISPATCHER_H
 
 #include "xBase.h"
+#include "xIni.h"
 
 struct st_ZDISPATCH_DATA : xBase
 {
@@ -22,6 +23,8 @@ enum en_DISPATCH_COMMAND
     ZDSP_CMD_CTRL_CFGSET,
     ZDSP_CMD_CTRL_VIBEGET,
     ZDSP_CMD_CTRL_VIBESET,
+    ZDSP_CMD_CTRL_SUBTGET,
+    ZDSP_CMD_CTRL_SUBTSET,
     ZDSP_CMD_SNDMOD_GET,
     ZDSP_CMD_SNDMOD_SET,
     ZDSP_CMD_SNDVOL_GET,
@@ -56,6 +59,10 @@ struct zScene;
 
 void zDispatcher_Startup();
 void zDispatcher_Shutdown();
+void zDispatcher_FindWorldTask(U32 sceneID, S32& world, S32& task);
+U32 zDispatcher_FindTaskPointer(U32 sceneID, S32 task);
+U32 zDispatcher_FindNextValidWorld(U32 sceneID);
+S16 zDispatcher_GetCurrentWorld();
 void zDispatcher_scenePrepare();
 void zDispatcher_sceneFinish();
 st_ZDISPATCH_DATA* zDispatcher_memPool(S32 cnt);
@@ -64,7 +71,6 @@ void zDispatcher_Init(st_ZDISPATCH_DATA* dspdata, xBaseAsset* bass);
 void zDispatcher_InitDep(st_ZDISPATCH_DATA* dspdata, zScene*);
 void zDispatcher_Save(st_ZDISPATCH_DATA* dspdata, xSerial* s);
 void zDispatcher_Load(st_ZDISPATCH_DATA* dspdata, xSerial* s);
-void ZDSP_instInit(st_ZDISPATCH_DATA* dspdata, xBaseAsset* bass);
 void ZDSP_instInitDep(st_ZDISPATCH_DATA* dspdata, zScene* scene);
 void ZDSP_instReset(st_ZDISPATCH_DATA* dspdata, zScene* scene);
 void ZDSP_readAsset(st_ZDISPATCH_DATA* dspdata);
@@ -72,12 +78,9 @@ void ZDSP_injectCmd(st_ZDISPATCH_DATA* dspdata, en_DISPATCH_COMMAND cmd);
 void ZDSP_injectCmd(st_ZDISPATCH_DATA* dspdata, en_DISPATCH_COMMAND cmd, S32);
 void ZDSP_injectCmd(st_ZDISPATCH_DATA* dspdata, en_DISPATCH_COMMAND cmd, void* indata, void* inxtra,
                     void* result);
-S32 ZDSP_doCommand(st_ZDISPATCH_DATA* dspdata, st_ZDISPATCH_CONTEXT* cmdCtxt);
+void zDispatcherParseINI(xIniFile* ini);
 void zDispatcherStoreOptions();
 void zDispatcherRestoreOptions();
-S32 ZDSP_elcb_event(xBase*, xBase* xb, U32 toEvent, const F32* toParam,
-                      xBase* toParamWidget);
-void WRAP_xsnd_setMusicVolume(S32 i);
-void WRAP_xsnd_setSFXVolume(S32 i);
+void ZDSP_elcb_event(xBase*, xBase* xb, U32 toEvent, const F32* toParam, xBase* toParamWidget, U32);
 
 #endif

@@ -5,6 +5,28 @@
 
 typedef struct RpLight;
 
+enum RwCriterionWorldID
+{
+    rwID_NAWORLDID = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x00),
+    rwID_MATERIALMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x01),
+    rwID_MESHMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x02),
+    rwID_GEOMETRYMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x03),
+    rwID_CLUMPMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x04),
+    rwID_LIGHTMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x05),
+    rwID_COLLISIONMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x06),
+    rwID_WORLDMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x07),
+    rwID_RANDOMMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x08),
+    rwID_WORLDOBJMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x09),
+    rwID_SECTORMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x0A),
+    rwID_BINWORLDMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x0B),
+    rwID_WORLDPIPEMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x0D),
+    rwID_BINMESHPLUGIN = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x0E),
+    rwID_RXWORLDDEVICEMODULE = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x0F),
+    rwID_NATIVEDATAPLUGIN = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x10),
+    rwID_VERTEXFMTPLUGIN = MAKECHUNKID(rwVENDORID_CRITERIONWORLD, 0x11),
+    rwCRITERIONWORLDIDFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+
 struct RpMaterial
 {
     RwTexture* texture;
@@ -68,7 +90,7 @@ struct RpMaterialList
 struct RpTriangle
 {
     RwUInt16 vertIndex[3];
-    RwInt16 matIndex;
+    RwUInt16 matIndex;
 };
 
 struct RpBuildMeshTriangle
@@ -93,6 +115,18 @@ struct RpMesh
     RxVertexIndex* indices;
     RwUInt32 numIndices;
     RpMaterial* material;
+};
+
+enum RpMeshHeaderFlags
+{
+    rpMESHHEADERTRISTRIP = 0x0001,
+    rpMESHHEADERTRIFAN = 0x0002,
+    rpMESHHEADERLINELIST = 0x0004,
+    rpMESHHEADERPOLYLINE = 0x0008,
+    rpMESHHEADERPOINTLIST = 0x0010,
+    rpMESHHEADERPRIMMASK = 0x00FF,
+    rpMESHHEADERUNINDEXED = 0x0100,
+    rpMESHHEADERFLAGSFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
 };
 
 struct RpMeshHeader
@@ -133,6 +167,47 @@ struct RpGeometry
     RpMeshHeader* mesh;
     RwResEntry* repEntry;
     RpMorphTarget* morphTarget;
+};
+
+#define RpGeometryGetMaterialMacro(_geometry, _num) (((_geometry)->matList.materials)[(_num)])
+
+#define RpGeometryGetMaterial(_geometry, _num) RpGeometryGetMaterialMacro(_geometry, _num)
+
+enum RpGeometryFlag
+{
+    rpGEOMETRYTRISTRIP = 0x0001,
+    rpGEOMETRYPOSITIONS = 0x0002,
+    rpGEOMETRYTEXTURED = 0x0004,
+    rpGEOMETRYPRELIT = 0x0008,
+    rpGEOMETRYNORMALS = 0x0010,
+    rpGEOMETRYLIGHT = 0x0020,
+    rpGEOMETRYMODULATEMATERIALCOLOR = 0x0040,
+    rpGEOMETRYTEXTURED2 = 0x0080,
+    rpGEOMETRYNATIVE = 0x01000000,
+    rpGEOMETRYNATIVEINSTANCE = 0x02000000,
+    rpGEOMETRYFLAGSMASK = 0x00ff,
+    rpGEOMETRYNATIVEFLAGSMASK = 0x0f000000,
+    rpGEOMETRYFLAGFORCEENUMSIZEINT = RWFORCEENUMSIZEINT,
+};
+
+enum RpGeometryLockMode
+{
+    rpGEOMETRYLOCKPOLYGONS = 0x01,
+    rpGEOMETRYLOCKVERTICES = 0x02,
+    rpGEOMETRYLOCKNORMALS = 0x04,
+    rpGEOMETRYLOCKPRELIGHT = 0x08,
+    rpGEOMETRYLOCKTEXCOORDS = 0x10,
+    rpGEOMETRYLOCKTEXCOORDS1 = 0x10,
+    rpGEOMETRYLOCKTEXCOORDS2 = 0x20,
+    rpGEOMETRYLOCKTEXCOORDS3 = 0x40,
+    rpGEOMETRYLOCKTEXCOORDS4 = 0x80,
+    rpGEOMETRYLOCKTEXCOORDS5 = 0x0100,
+    rpGEOMETRYLOCKTEXCOORDS6 = 0x0200,
+    rpGEOMETRYLOCKTEXCOORDS7 = 0x0400,
+    rpGEOMETRYLOCKTEXCOORDS8 = 0x0800,
+    rpGEOMETRYLOCKTEXCOORDSALL = 0x0ff0,
+    rpGEOMETRYLOCKALL = 0x0fff,
+    rpGEOMETRYLOCKMODEFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
 };
 
 enum RpInterpolatorFlag
@@ -318,6 +393,9 @@ typedef RpAtomic* (*RpAtomicCallBackRender)(RpAtomic* atomic);
 #define RpAtomicSetPipeline RpAtomicSetPipelineMacro
 #define RpAtomicGetPipeline RpAtomicGetPipelineMacro
 
+#define rpATOMIC 1
+#define rpCLUMP 2
+
 struct RpAtomic
 {
     RwObjectHasFrame object;
@@ -354,14 +432,13 @@ struct RpPolygon
 struct RpWorldSector
 {
     RwInt32 type;
-    RpPolygon* polygons;
+    RpTriangle* triangles;
     RwV3d* vertices;
     RpVertexNormal* normals;
     RwTexCoords* texCoords[8];
     RwRGBA* preLitLum;
     RwResEntry* repEntry;
     RwLinkList collAtomicsInWorldSector;
-    RwLinkList noCollAtomicsInWorldSector;
     RwLinkList lightsInWorldSector;
     RwBBox boundingBox;
     RwBBox tightBoundingBox;
@@ -371,6 +448,14 @@ struct RpWorldSector
     RwUInt16 numVertices;
     RwUInt16 numPolygons;
     RwUInt16 pad;
+};
+
+struct RpTie
+{
+    RwLLLink lAtomicInWorldSector;
+    RpAtomic* apAtom;
+    RwLLLink lWorldSectorInAtomic;
+    RpWorldSector* worldSector;
 };
 
 typedef RpWorldSector* (*RpWorldSectorCallBack)(RpWorldSector* worldSector, void* data);
@@ -562,6 +647,7 @@ extern RwUInt32 RpAtomicStreamGetSize(RpAtomic* atomic);
 extern RpAtomic* RpAtomicStreamWrite(RpAtomic* atomic, RwStream* stream);
 extern RpAtomic* RpAtomicStreamRead(RwStream* stream);
 extern RpClump* RpClumpStreamRead(RwStream* stream);
+extern RpClump* RpClumpStreamWrite(RpClump* clump, RwStream* stream);
 extern RwInt32 RpAtomicRegisterPlugin(RwInt32 size, RwUInt32 pluginID,
                                       RwPluginObjectConstructor constructCB,
                                       RwPluginObjectDestructor destructCB,
@@ -669,6 +755,9 @@ extern RpMeshHeader* _rpMeshRead(RwStream* stream, const void* object,
                                  const RpMaterialList* matList);
 extern RwInt32 _rpMeshSize(const RpMeshHeader* meshHeader, const void* object);
 extern RwInt16 _rpMeshGetNextSerialNumber(void);
+typedef RpMeshHeader* (*RpTriStripMeshCallBack)(RpBuildMesh* buildMesh, void* data);
+extern RwBool RpMeshSetTriStripMethod(RpTriStripMeshCallBack callback, void* data);
+extern RwBool RpMeshGetTriStripMethod(RpTriStripMeshCallBack* callback, void** data);
 extern RpMeshHeader* RpBuildMeshGenerateDefaultTriStrip(RpBuildMesh* buildmesh, void* data);
 extern RpMeshHeader* _rpTriListMeshGenerate(RpBuildMesh* buildMesh, void* data);
 extern RpMeshHeader* _rpMeshOptimise(RpBuildMesh* buildmesh, RwUInt32 flags);
@@ -720,6 +809,50 @@ extern RxPipeline* RpWorldSetDefaultSectorPipeline(RxPipeline* pipeline);
 extern RxPipeline* RpAtomicSetDefaultPipeline(RxPipeline* pipeline);
 extern RxNodeDefinition* RxNodeDefinitionGetGameCubeAtomicAllInOne(void);
 extern RxNodeDefinition* RxNodeDefinitionGetGameCubeWorldSectorAllInOne(void);
+
+// GameCube "AllInOne" pipeline node (world/pipe/p2/gcn; layouts from the Ratatouille GC DWARF).
+struct RxGameCubePipeData
+{
+    RwResEntry* resEntry;
+    RpMeshHeader* meshHeader;
+    RwInt32 flags;
+    RwRGBAReal ambientLightColor;
+    RwInt32 ambientLight;
+    RwUInt32 lightMask;
+    RwInt32 numLights;
+    void* nodeData;
+};
+
+struct RxGameCubeVertexAttr
+{
+    void* array;
+    RwUInt8 attr;
+    RwUInt8 stride;
+    RwUInt8 indexType;
+    RwUInt8 pad[1];
+};
+
+// Instance data header, stored right after the RwResEntry. The display lists (one per mesh)
+// follow the variable-length attr array.
+struct RxGameCubeVertexBuffer
+{
+    RwUInt16 token;
+    RwUInt16 serialNumber;
+    RwUInt32 flags;
+    RwUInt32 numAttrArrays;
+    RxGameCubeVertexAttr attr[1];
+};
+
+struct RxGameCubeDisplayList
+{
+    void* displayList;
+    RwUInt32 size;
+};
+
+typedef void* (*RxGameCubeAllInOneRenderCallBack)(void* object, RxGameCubePipeData* pipeData);
+
+extern void RxGameCubeAllInOneSetRenderCallBack(RxPipelineNode* node,
+                                                RxGameCubeAllInOneRenderCallBack callback);
 
 #ifdef __cplusplus
 }

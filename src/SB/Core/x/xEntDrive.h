@@ -11,6 +11,7 @@ struct xEntDrive
         xVec3 loc;
         F32 yaw;
         const xCollis* coll;
+        xMat4x3 trioldmat;
     };
 
     U32 flags;
@@ -20,22 +21,22 @@ struct xEntDrive
     F32 tm;
     F32 tmr;
     F32 s;
-    xEnt* odriver;
+    xEnt* old_driver;
     xEnt* driver;
     xEnt* driven;
-    xVec3 op;
-    xVec3 p;
-    xVec3 q;
-    F32 yaw;
+    xVec3 driven_pos_in_old_driver;
+    xVec3 driven_pos_in_driver;
+    xVec3 last_driven_pos;
+    F32 yaw_in_driver;
     xVec3 dloc;
 
-    // 0x5c
+    // 0x60
     tri_data tri;
 };
 
 void xEntDriveInit(xEntDrive* drv, xEnt* driven);
 void xEntDriveMount(xEntDrive* drv, xEnt* driver, F32 mt, const xCollis* coll);
 void xEntDriveDismount(xEntDrive* drv, F32 dmt);
-void xEntDriveUpdate(xEntDrive* drv, xScene* s, F32 dt, xCollis* coll);
+void xEntDriveUpdate(xEntDrive* drv, xScene* s, F32 dt, const xCollis* coll);
 
 #endif

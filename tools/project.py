@@ -890,9 +890,11 @@ def generate_build_ninja(
                     "basedir": os.path.dirname(obj.src_obj_path),
                     "basefile": obj.src_obj_path.with_suffix(""),
                 },
-                implicit=(
-                    mwcc_sjis_implicit if obj.options["shift_jis"] else mwcc_implicit
-                ),
+                implicit=[
+                    *(mwcc_sjis_implicit if obj.options["shift_jis"] else mwcc_implicit),
+                    # Extra build inputs, e.g. a precompiled prefix header (.mch)
+                    *obj.options.get("extra_implicit", []),
+                ],
                 order_only="pre-compile",
             )
 

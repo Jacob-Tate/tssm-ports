@@ -72,6 +72,6 @@ struct st_FILESAVEINFO
     void* xtradata;
 };
 
-st_FILELOADINFO* xBinioLoadCreate(const char* filename);
+st_FILELOADINFO* xBinioLoadCreate(const char* filename, S32 fileflags);
 
 #endif

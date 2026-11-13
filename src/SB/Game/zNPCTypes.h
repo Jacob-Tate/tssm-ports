@@ -1,6 +1,8 @@
 #ifndef ZNPCTYPES_H
 #define ZNPCTYPES_H
 
+#include <types.h>
+
 enum en_npctyp
 {
     NPC_TYPE_UNKNOWN,
@@ -116,8 +118,18 @@ enum en_npctyp
 
 struct xFactory;
 
+struct zNPCTypeInfo
+{
+    U32 id;
+    void (*scene_init)();
+    void (*scene_enter)();
+    void (*setup)();
+    void (*reset)();
+};
+
 void zNPCTypes_StartupTypes();
 void zNPCTypes_ShutdownTypes();
 void zNPCTypes_RegisterTypes(xFactory* fac);
+static void zNPCTypes_ForEachType(void (*zNPCTypeInfo::*func)());
 
 #endif

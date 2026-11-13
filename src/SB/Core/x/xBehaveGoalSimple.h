@@ -7,13 +7,8 @@
 
 struct xGoalEmpty : xGoal
 {
-    xGoalEmpty(S32 goalID) : xGoal(goalID)
+    xGoalEmpty()
     {
-    }
-
-    virtual const char* Name()
-    {
-        return "xGoalEmpty";
     }
 
     virtual void Clear()
@@ -30,13 +25,8 @@ struct xGoalGeneric : xGoal
     S32 (*fun_sysevent)(xGoal*, void*, xBase*, xBase*, U32, const F32*, xBase*, S32*);
     void* usrData;
 
-    xGoalGeneric(S32 goalID) : xGoal(goalID)
+    xGoalGeneric()
     {
-    }
-
-    virtual const char* Name()
-    {
-        return "xGoalGeneric";
     }
 
     virtual void Clear()
@@ -48,11 +38,9 @@ struct xGoalGeneric : xGoal
     virtual S32 Suspend(F32 dt, void* updCtxt);
     virtual S32 Resume(F32 dt, void* updCtxt);
     virtual S32 SysEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
-                           xBase* toParamWidget, S32* handled);
+                         xBase* toParamWidget, S32* handled);
 };
 
 void xGoalSimple_RegisterTypes(xFactory* fac);
-xFactoryInst* GOALCreate_Generic(S32 who, RyzMemGrow* growCtxt, void* dat);
-void GOALDestroy_Generic(xFactoryInst* item);
 
 #endif

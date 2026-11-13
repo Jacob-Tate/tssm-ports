@@ -3,6 +3,7 @@
 
 #include <types.h>
 #include "xBase.h"
+#include "iSnd.h"
 
 struct zMusicSituation
 {
@@ -27,24 +28,44 @@ struct zVolumeInfo
     U32 adjusted[2];
 };
 
+enum eTrackReason
+{
+    eMusic,
+    eNewMusic,
+    eTempMusic
+};
+
 struct zMusicTrackInfo
 {
-    U32 snd_id;
-    U32 loop;
-    zMusicSituation* situation;
-    U32 assetID;
-    F32 lastVol;
+    iSndHandle sndHandle;
+    U32 sndAssetID;
+    F32 volume;
+    F32 startVolume;
+    F32 targetVolume;
+    F32 targetVolumeTime;
+    F32 crossFadeStartTime;
+    eTrackReason trackDesc;
+    F32 playTime;
 };
+
+extern F32 gDialogueMusicLevel;
 
 void zMusicRefreshVolume();
 void zMusicNotify(S32 situation);
 void zMusicNotifyEvent(const F32* toParam, xBase* base);
+F32 zMusicGetCurrentVolume(U32);
+void zMusicTempSongStopEvent();
+void zMusicTempSongEvent(const F32* toParam, U32 toParamWidgetID);
+void zMusicNewSongEvent(const F32* toParam, U32 toParamWidgetID);
 void zMusicSetVolume(F32 vol, F32 delay);
 void zMusicKill();
 void zMusicPause();
-void zMusicUnpause(S32 kill);
+void zMusicUnpause();
 void zMusicReset();
 void zMusicInit();
 void zMusicUpdate(F32 dt);
+
+// Defined inline in zMusic.cpp (no symbol in TSSM; Ratatouille's debug build has it as a static).
+void _zMusicStop(U32 uWhichSlot);
 
 #endif

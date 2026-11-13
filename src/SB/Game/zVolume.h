@@ -2,6 +2,8 @@
 #define ZVOLUME_H
 
 #include "xVolume.h"
+#include "xstransvc.h"
+#include "xMemMgr.h"
 
 struct zVolume : xVolume
 {
@@ -13,6 +15,6 @@ void zVolumeInit();
 void zVolumeSetup();
 zVolume* zVolumeGetVolume(U16 n);
 void zVolume_OccludePrecalc(xVec3* camPos);
-S32 zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*);
+void zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32);
 
 #endif

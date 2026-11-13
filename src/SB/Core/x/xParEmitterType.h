@@ -10,30 +10,30 @@ struct xPECircle
     xVec3 dir;
 };
 
-struct _tagEmitSphere
+struct xPESphere
 {
     F32 radius;
 };
 
-struct _tagEmitRect
+struct xPERect
 {
     F32 x_len;
     F32 z_len;
 };
 
-struct _tagEmitLine
+struct xPELine
 {
     xVec3 pos1;
     xVec3 pos2;
     F32 radius;
 };
 
-struct _tagEmitVolume
+struct xPEVolume
 {
     U32 emit_volumeID;
 };
 
-struct _tagEmitOffsetPoint
+struct xPEOffsetPoint
 {
     xVec3 offset;
 };
@@ -65,5 +65,32 @@ struct xPEEntBound
     F32 expand;
     F32 deflection;
 };
+
+struct xPar;
+struct xParEmitter;
+struct xParEmitterAsset;
+struct xEnt;
+struct xVolume;
+
+void xParEmitterEmitEntBound(xPar* p, xParEmitterAsset* a, F32 dt, const xEnt* ent);
+void xParEmitterEmitEntBone(xPar* p, xParEmitterAsset* a, F32 dt, const xMat4x3& mat);
+void xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
+                                 const xMat4x3& mat);
+xMat4x3* xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
+                                     const xEnt& ent);
+void xParEmitterEmitOCircle(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitOCircleEdge(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitVCylEdge(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitOffsetPoint(xParEmitter* pe, xPar* p, xParEmitterAsset* a, F32 dt, xEnt* ent);
+void xParEmitterEmitEntity(xPar* p, xParEmitterAsset* a, F32 dt, xEnt* ent);
+void xParEmitterEmitVolume(xPar* p, xParEmitterAsset* a, F32 dt, xVolume* vol);
+void xParEmitterEmitSphereEdge(xPar* p, xParEmitterAsset* a, F32 dt, S32 subtype);
+void xParEmitterEmitSphere(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitLine(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitRectEdge(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitRect(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitCircle(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitCircleEdge(xPar* p, xParEmitterAsset* a, F32 dt);
+void xParEmitterEmitPoint(xPar* p, xParEmitterAsset* a, F32 dt);
 
 #endif

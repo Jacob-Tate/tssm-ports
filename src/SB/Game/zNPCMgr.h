@@ -1,62 +1,115 @@
 #ifndef ZNPCMGR_H
 #define ZNPCMGR_H
 
+#include "xBase.h"
 #include "xFactory.h"
-#include "xBehaveMgr.h"
 #include "zNPCTypes.h"
+#include "zNPC.h"
 
 #include <types.h>
+#include <string.h>
 
+struct xEnt;
+struct xEntAsset;
+struct xDynAsset;
+
+namespace zNPC
+{
+    struct base;
+}
+
+struct NPCBrainTableEntry
+{
+    char* name;
+    en_npctyp type;
+    U32 id;
+};
+
+extern NPCBrainTableEntry g_brainTable[67];
+
+// No symbol (always inlined): used by zNPC.cpp's create_anim_table and CreateDynNME.
+inline en_npctyp zNPCMgr_TypeForBrain(U32 brainID)
+{
+    if (brainID != 0)
+    {
+        for (S32 i = 0; i < (S32)(sizeof(g_brainTable) / sizeof(g_brainTable[0])); i++)
+        {
+            if (brainID == g_brainTable[i].id)
+            {
+                return g_brainTable[i].type;
+            }
+        }
+    }
+
+    return NPC_TYPE_COMMON;
+}
+
+// TSSM layout (PS2 DWARF, zNPCMgrpv.h): size 0x1C8.
 struct zNPCMgr : RyzMemData
 {
     st_XORDEREDARRAY npclist;
     xFactory* npcFactory;
-    xBehaveMgr* bmgr;
     xBase selfbase;
+    S32 flg_createForAnim;
+    zNPC::base* firstAllocList[104];
 
-    zNPCMgr();
-    enum en_npctyp NPCTypeForModel(U32 brainID, U32 mdl_hash);
-    void BackdoorUpdateAllNPCsOnce(xScene*, F32);
-    void PrepTypeTable();
+    xEnt* CreateDynNME(const xEntAsset* ent_asset, const xDynAsset* dyn_asset, S32 siz_dynass);
+    zNPC::base* FindNPC(U32 aid);
     void Startup();
     void Shutdown();
-    void ScenePrepare(S32 npccnt);
-    void SceneFinish();
-    void SceneReset();
-    void ScenePostInit();
-    void ScenePostSetup();
-    void SceneTimestep(xScene* xscn, F32 dt);
-    void ScenePostRender();
-    void ScenePostParticleRender();
-    xEnt* CreateNPC(xEntAsset* assdat);
-    void DBG_Reset();
-    void DBG_PerfTrack();
-    ~zNPCMgr();
 
-    /* Use as needed.
-	en_NPCTYPES NPCTypeForModel(U32 brainID, U32 mdl_hash);
-	xEnt* CreateNPC(xEntAsset* asset);
-	void ScenePostParticleRender();
-	void ScenePostRender();
-	void* __dt();
-	*/
+    // Always inlined in TSSM (out of line in the Incredibles prototype DWARF, which gives the
+    // name and locals).
+    xEnt* EarlyNPCInst(en_npctyp ntyp)
+    {
+        zNPC::base* npc_inst = firstAllocList[ntyp];
+        if (npc_inst != NULL)
+        {
+            return npc_inst;
+        }
+
+        xFactoryInst* fac_inst = npcFactory->CreateItem(ntyp, NULL, NULL);
+        npc_inst = (zNPC::base*)fac_inst;
+        if (firstAllocList[ntyp] == NULL)
+        {
+            firstAllocList[ntyp] = npc_inst;
+        }
+
+        return npc_inst;
+    }
+
+    void ScenePrepare(S32 npccnt)
+    {
+        XOrdInit(&npclist, npccnt, 0);
+        zNPCTypes_ForEachType(&zNPCTypeInfo::scene_enter);
+    }
+
+    void SceneFinish()
+    {
+        memset(firstAllocList, 0, sizeof(firstAllocList));
+        for (S32 i = 0; i < npclist.cnt; i++)
+        {
+            ((zNPC::base*)npclist.list[i])->destroy();
+        }
+        XOrdDone(&npclist, 0);
+        npcFactory->DestroyAll();
+    }
+
+    ~zNPCMgr()
+    {
+    }
 };
 
 zNPCMgr* zNPCMgrSelf();
-zNPCMgr* zNPCMgr_GetNPCList();
+st_XORDEREDARRAY* zNPCMgr_GetNPCList();
+S32 zNPCMgr_OrdTest_npcid(const void* vkey, void* vitem);
 void zNPCMgr_Startup();
 void zNPCMgr_Shutdown();
 void zNPCMgr_scenePrepare(S32 npccnt);
+void zNPCMgr_sceneInit();
 void zNPCMgr_sceneFinish();
 void zNPCMgr_sceneReset();
 void zNPCMgr_scenePostInit();
-void zNPCMgr_scenePostSetup();
-void zNPCMgr_sceneTimestep(xScene* xscn, F32 dt);
-void zNPCMgr_scenePostRender();
-void zNPCMgr_scenePostParticleRender();
-void zNPCMsg_SceneFinish();
-xEnt* zNPCMgr_createNPCInst(S32, xEntAsset* assdat);
-
-//S32 zNPCMgr_OrdComp_npcid(void* vkey, void* vitem);
+xEnt* zNPCMgr_createDynNMEInst(const xEntAsset* assdat, const xDynAsset* dynass, S32 siz_dynass);
 
 #endif

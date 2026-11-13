@@ -18,4 +18,24 @@ long abs(long n);
 }
 #endif
 
+// MSL declares the allocation functions in namespace std (cstdlib) and brings them into the
+// global namespace with using-declarations. A call through std::free is not linked to a
+// global-scope definition of free for inlining (iMemExit calls free out of line in retail).
+#ifdef __cplusplus
+namespace std
+{
+    extern "C" {
+#endif
+
+    void* malloc(size_t size);
+    void free(void* ptr);
+
+#ifdef __cplusplus
+    }
+} // namespace std
+
+using std::free;
+using std::malloc;
+#endif
+
 #endif

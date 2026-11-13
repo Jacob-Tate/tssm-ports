@@ -42,7 +42,7 @@ struct xFFXRotMatchState
 
 void xFFXPoolInit(U32 num_ffx);
 xFFX* xFFXAlloc();
-void xFFXFree(xFFX* ffx);
+void xFFXFree(xFFX* f);
 void xFFXTurnOn(xFFX* f);
 void xFFXTurnOff(xFFX* f);
 S16 xFFXAddEffect(xEnt* ent, xFFX* f);

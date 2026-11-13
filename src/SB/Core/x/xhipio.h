@@ -38,7 +38,7 @@ struct st_HIPLOADDATA
 
 struct st_HIPLOADFUNCS
 {
-    st_HIPLOADDATA* (*create)(const char*, char*, S32);
+    st_HIPLOADDATA* (*create)(const char*, char*, S32, S32);
     void (*destroy)(st_HIPLOADDATA*);
     U32 (*basesector)(st_HIPLOADDATA*);
     U32 (*enter)(st_HIPLOADDATA*);

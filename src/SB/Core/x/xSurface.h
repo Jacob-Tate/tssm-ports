@@ -31,5 +31,6 @@ void xSurfaceLoad(xSurface* ent, xSerial* s);
 void xSurfaceReset(xSurface* ent);
 U16 xSurfaceGetNumSurfaces();
 xSurface* xSurfaceGetByIdx(U16 n);
+xSurface* xSurfaceGetByName(const char* name);
 
 #endif

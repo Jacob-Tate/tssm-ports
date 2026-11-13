@@ -4,15 +4,17 @@
 #include "xModel.h"
 #include "xCurveAsset.h"
 #include "xCollide.h"
+#include "xMath.h"
 
 #include "zParEmitter.h"
-//#include "zLightning.h"
+#include "zExplosion.h"
 
 #include <rwcore.h>
 #include <rpworld.h>
 
 typedef struct zFrag;
 typedef struct zShrapnelAsset;
+struct zLightning;
 
 enum zFragLocType
 {
@@ -45,6 +47,7 @@ struct zFragLocation
 {
     zFragLocType type;
     zFragLocInfo info;
+    F32 rand_radius;
 };
 
 enum zFragType
@@ -57,6 +60,9 @@ enum zFragType
     eFragLightning,
     eFragSound,
     eFragShockwave,
+    eFragExplosion,
+    eFragDistortion,
+    eFragFire,
     eFragCount,
     eFragForceSize = 0x7fffffff
 };
@@ -80,6 +86,7 @@ struct zFragParticleAsset : zFragAsset
     zFragLocation source;
     zFragLocation vel;
     xParEmitterCustomSettings emit;
+    U32 flags;
     U32 parEmitterID;
     zParEmitter* parEmitter;
 };
@@ -95,6 +102,9 @@ struct zFragProjectileAsset : zFragAsset
     RpAtomic* modelFile;
     zFragLocation launch;
     zFragLocation vel;
+    zFragLocation velPlusMinus;
+    zFragLocation rot;
+    zFragLocation rotPlusMinus;
     F32 bounce;
     S32 maxBounces;
     U32 flags;
@@ -117,8 +127,9 @@ struct zFragProjectile
     F32 tColl;
     S32 numBounces;
     F32 scale;
-    F32 parentScale;
     F32 alpha;
+    F32 bounceC1;
+    F32 bounceC2;
     xVec3 N;
     xVec3 axis;
 };
@@ -136,23 +147,19 @@ struct zFragLightning
     zFragLightningAsset* fasset;
     xModelInstance* startParent;
     xModelInstance* endParent;
-    //zLightning* lightning;
+    zLightning* lightning;
 };
 
 struct zFragSoundAsset : zFragAsset
 {
     U32 assetID;
     zFragLocation source;
-    F32 volume;
-    F32 innerRadius;
-    F32 outerRadius;
 };
 
 struct zFragSound
 {
     zFragSoundAsset* fasset;
-    xVec3 location;
-    U32 soundID;
+    iSndHandle soundID;
 };
 
 struct zFragShockwaveAsset : zFragAsset
@@ -180,16 +187,82 @@ struct zFragShockwave
     F32 deltColor[4];
 };
 
+struct zFragShrapnelAsset : zFragAsset
+{
+    U32 shrapnelID;
+    zShrapnelAsset* shrapAsset;
+};
+
+struct zFragShrapnel
+{
+    zFragShrapnelAsset* fasset;
+};
+
+struct zFragExplosionAsset : zFragAsset
+{
+    U32 type;
+    zFragLocation loc;
+    U32 flags;
+};
+
+struct zFragExplosion
+{
+    zFragExplosionAsset* fasset;
+    zExplosion::trail_emitter trail;
+    xVec3 initPos;
+};
+
+struct zFragDistortionAsset : zFragAsset
+{
+    U32 type;
+    zFragLocation loc;
+    U32 flags;
+    F32 radius;
+    F32 duration;
+    F32 intensity;
+    F32 freq;
+    F32 repeat_delay;
+};
+
+struct zFragDistortion
+{
+    zFragDistortionAsset* fasset;
+    xVec3 loc;
+    S32 type;
+    F32 repeat_time;
+};
+
+struct zFragFireAsset : zFragAsset
+{
+    zFragLocation loc;
+    U32 flags;
+    F32 radius;
+    F32 scale;
+    F32 fuel;
+    F32 heat;
+    F32 damage;
+    F32 knockback;
+};
+
+struct zFragFire
+{
+    zFragFireAsset* fasset;
+};
+
 struct zFragInfo
 {
     union
     {
         zFragGroup group;
+        zFragShrapnel shrapnel;
         zFragParticle particle;
         zFragProjectile projectile;
         zFragLightning lightning;
         zFragSound sound;
         zFragShockwave shockwave;
+        zFragExplosion explosion;
+        zFragDistortion distortion;
+        zFragFire fire;
     };
 };
 
@@ -201,6 +274,7 @@ struct zFrag
     F32 alivetime;
     F32 lifetime;
     void (*update)(zFrag*, F32);
+    void (*destroy)(zFrag*);
     xModelInstance* parent[2];
     zFrag* prev;
     zFrag* next;
@@ -213,11 +287,49 @@ struct zShrapnelAsset
     void (*initCB)(zShrapnelAsset*, xModelInstance*, xVec3*, void (*)(zFrag*, zFragAsset*));
 };
 
+struct zShrapnelParentList
+{
+    U32 parentID;
+    xModelInstance* parentModel;
+};
+
+struct zShrapnelInitTable
+{
+    char* name;
+    void (*initCB)(zShrapnelAsset*, xModelInstance*, xVec3*, void (*)(zFrag*, zFragAsset*));
+    U32 ID;
+};
+
 struct zScene;
 
+// No symbol in TSSM (always inlined).
+inline void zShrapnel_CalcBounceCoefficients(F32& c1, F32& c2, F32 bounce, F32 friction)
+{
+    c1 = -1.0f * bounce - 1.0f;
+    c2 = xlerp(1.0f, bounce, friction);
+}
+
+void zFrag_Free(zFrag* frag);
+void zFragLoc_InitDir(zFragLocation* loc, xVec3* vec, xModelInstance* parent);
+void zFragLoc_InitVec(zFragLocation* loc, xVec3* vec, xModelInstance* parent);
+void zFrag_DefaultShrapnelUpdate(zFrag* frag, F32 dt);
+void zFrag_DefaultSoundUpdate(zFrag* frag, F32 dt);
+void zFrag_DefaultLightningUpdate(zFrag* frag, F32 dt);
+void zFrag_DefaultProjectileUpdate(zFrag* frag, F32 dt);
+void zFrag_ParticleManager(F32 dt);
+void zFrag_DefaultParticleUpdate(zFrag* frag, F32 dt);
+void zFrag_LightningManager(F32 dt);
+void zFrag_ProjectileManager(F32 dt);
+void zFrag_ProjectileRenderer();
+U8 zFrag_DefaultInit(zFrag* frag, zFragAsset* fasset);
+void zShrapnel_DefaultInit(zShrapnelAsset* shrap, xModelInstance* parent, xVec3* initVel,
+                           void (*cb)(zFrag*, zFragAsset*));
+void zShrapnel_GameInit();
 void zShrapnel_SceneInit(zScene*);
 void zShrapnel_Update(F32 dt);
 void zShrapnel_Reset();
 void zShrapnel_Render();
+void zShrapnel_CinematicInit(zShrapnelAsset* shrap, RpAtomic* cinModel, RwMatrixTag* animMat,
+                             xVec3* initVel, void (*cb)(zFrag*, zFragAsset*));
 
 #endif

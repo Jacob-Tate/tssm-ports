@@ -25,7 +25,7 @@ struct xBase
     U8 linkCount; // 0x5
     U16 baseFlags; // 0x6
     xLinkAsset* link; // 0x8
-    void (*eventFunc)(xBase*, xBase*, U32, F32*, xBase*, U32); // 0xC
+    void (*eventFunc)(xBase*, xBase*, U32, const F32*, xBase*, U32); // 0xC
 };
 
 void xBaseInit(xBase* xb, const xBaseAsset* asset);
@@ -33,10 +33,30 @@ void xBaseSetup(xBase* xb);
 void xBaseSave(xBase* ent, xSerial* s);
 void xBaseLoad(xBase* ent, xSerial* s);
 void xBaseReset(xBase* xb, xBaseAsset* asset);
-U32 xBaseIsValid(xBase* xb);
-void xBaseValidate(xBase* xb);
-bool xBaseIsEnabled(const xBase* xb);
-void xBaseDisable(xBase* xb);
-void xBaseEnable(xBase* xb);
+// No GC symbol (always inlined).
+inline U32 xBaseIsValid(xBase* xb)
+{
+    return xb->baseFlags & 0x4;
+}
+
+inline void xBaseValidate(xBase* xb)
+{
+    xb->baseFlags |= 0x4;
+}
+
+inline bool xBaseIsEnabled(const xBase* xb)
+{
+    return xb->baseFlags & 0x1;
+}
+
+inline void xBaseDisable(xBase* xb)
+{
+    xb->baseFlags &= ~0x1;
+}
+
+inline void xBaseEnable(xBase* xb)
+{
+    xb->baseFlags |= 0x1;
+}
 
 #endif

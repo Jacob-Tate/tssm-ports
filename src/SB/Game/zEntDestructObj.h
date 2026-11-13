@@ -63,7 +63,7 @@ void zEntDestructObj_Init(zEntDestructObj* ent, xEntAsset* asset);
 
 // TODO: update unk with callback signatures from zEnt
 void zEntDestructObj_Move(zEntDestructObj* ent, xScene* scene, F32 unk, xEntFrame* frame);
-void zEntDestructObj_Update(zEntDestructObj* ent, xScene* scene, F32 unk);
+void zEntDestructObj_Update(zEntDestructObj* ent, xScene* scene, F32 dt);
 void zEntDestructObj_Hit(zEntDestructObj* ent, U32 mask);
 U32 zEntDestructObj_GetHit(zEntDestructObj* ent, U32 mask);
 void zEntDestructObj_Save(zEntDestructObj* ent, xSerial* s);

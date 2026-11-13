@@ -8,21 +8,49 @@ struct st_STRAN_SCENE
     U32 scnid;
     S32 lockid;
     st_PACKER_READ_DATA* spkg;
-    S32 isHOP;
+    S32 flgHipHop;
     void* userdata;
     char fnam[256];
 };
 
 struct st_STRAN_DATA
 {
-    st_STRAN_SCENE hipscn[16];
+    st_STRAN_SCENE hipscn[20];
     U32 loadlock;
 };
 
+enum xRegion
+{
+    eRegionUnknown = -1,
+    eRegionUS,
+    eRegionBE,
+    eRegionCH,
+    eRegionCZ,
+    eRegionDE,
+    eRegionDK,
+    eRegionES,
+    eRegionFI,
+    eRegionFR,
+    eRegionIT,
+    eRegionJP,
+    eRegionKR,
+    eRegionNL,
+    eRegionNO,
+    eRegionPL,
+    eRegionPT,
+    eRegionRU,
+    eRegionSE,
+    eRegionSK,
+    eRegionTW,
+    eRegionUK,
+    eRegionCount,
+    eRegionMaxCount = 32
+};
+
 S32 xSTStartup(PKRAssetType* handlers);
-S32 xSTPreLoadScene(U32 sid, void* userdata, S32 flg_hiphop);
+S32 xSTPreLoadScene(U32 sid, void* userdata, S32 flg_hiphop, S32 fileflags, const char* filename);
 S32 xSTQueueSceneAssets(U32 sid, S32 flg_hiphop);
-void xSTUnLoadScene(U32 sid, S32 flg_hiphop);
+void xSTUnLoadSceneMany(U32 sceneID, S32 type);
 F32 xSTLoadStep(U32);
 void xSTDisconnect(U32 sid, S32 flg_hiphop);
 S32 xSTSwitchScene(U32 sid, void* userdata, S32 (*progmon)(void*, F32));
@@ -37,5 +65,8 @@ char* xST_xAssetID_HIPFullPath(U32 aid);
 S32 PKRShutdown();
 char* xST_xAssetID_HIPFullPath(U32 aid, U32* sceneID);
 S32 xSTShutdown();
+xRegion xSTGetLocalizationEnum();
+char* xSTGetLocalizationCode();
+void xSTSetLocalizationCode(const char* code);
 
 #endif

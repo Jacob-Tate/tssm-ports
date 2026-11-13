@@ -9,9 +9,20 @@
 
 typedef void (*lightInitFunc)(_zLight*);
 
-void zLightEffectSet(_zLight* zlight, S32 idx);
 void zLightOn(_zLight* zl, S32 on);
 static F32 leGetRandom();
+void zLightEffectStrobeSlow(_zLight* zlight, F32 seconds);
+void zLightEffectStrobe(_zLight* zlight, F32 seconds);
+void zLightEffectStrobeFast(_zLight* zlight, F32 seconds);
+void zLightEffectDimSlow(_zLight* zlight, F32 seconds);
+void zLightEffectDim(_zLight* zlight, F32 seconds);
+void zLightEffectDimFast(_zLight* zlight, F32 seconds);
+void zLightEffectHalfDimSlow(_zLight* zlight, F32 seconds);
+void zLightEffectHalfDim(_zLight* zlight, F32 seconds);
+void zLightEffectHalfDimFast(_zLight* zlight, F32 seconds);
+void zLightEffectRandomColSlow(_zLight* zlight, F32 seconds);
+void zLightEffectRandomCol(_zLight* zlight, F32 seconds);
+void zLightEffectRandomColFast(_zLight* zlight, F32 seconds);
 void zLightEffectInitStrobe(_zLight* zlight);
 void zLightEffectInitDim(_zLight* zlight);
 void zLightEffectInitHalfDim(_zLight* zlight);

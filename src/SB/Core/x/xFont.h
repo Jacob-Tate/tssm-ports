@@ -3,9 +3,13 @@
 
 #include "xMath2.h"
 #include "iColor.h"
+#include "xColor.h"
 #include "xString.h"
 
 #include <rwcore.h>
+
+static const basic_rect<F32> screen_bounds = { 0, 0, 1, 1 };
+static const basic_rect<F32> default_adjust = { 0, 0, 1, 1 };
 
 struct xfont
 {
@@ -14,15 +18,37 @@ struct xfont
     F32 height;
     F32 space;
     iColor_tag color;
+    iColor_tag shadowColor;
+    F32 shadowOffsetX;
+    F32 shadowOffsetY;
     basic_rect<F32> clip;
 
     static void init();
     static void set_render_state(RwRaster* raster);
     static void restore_render_state();
-    static xfont create();
+    static xfont create()
+    {
+        return create(0, 0.0f, 0.0f, 0.0f, g_WHITE, screen_bounds);
+    }
     static xfont create(U32 id, F32 width, F32 height, F32 space, iColor_tag color,
-                        const basic_rect<F32>& clip);
+                        const basic_rect<F32>& clip, iColor_tag shadowColor = g_BLACK,
+                        F32 shadowOffsetX = 2.0f, F32 shadowOffsetY = 2.0f)
+    {
+        xfont r;
+        r.id = id;
+        r.width = width;
+        r.height = height;
+        r.space = space;
+        r.color = color;
+        r.clip = clip;
+        r.shadowColor = shadowColor;
+        r.shadowOffsetX = shadowOffsetX;
+        r.shadowOffsetY = shadowOffsetY;
 
+        return r;
+    }
+
+    basic_rect<F32> bounds(U32 c) const;
     basic_rect<F32> bounds(char c) const;
     basic_rect<F32> bounds(const char* text) const;
     basic_rect<F32> bounds(const char* text, size_t text_size, F32 max_width, size_t& size) const;
@@ -30,23 +56,12 @@ struct xfont
     void stop_render() const;
     void irender(const char* text, F32 x, F32 y) const;
     void irender(const char* text, size_t text_size, F32 x, F32 y) const;
-    void render(const char* text, F32 x, F32 y) const;
-
-    xfont& operator=(const xfont& rhs)
+    // No symbol on GC (always inlined); defined in-class as in the Ratatouille GC build.
+    void render(const char* text, F32 x, F32 y) const
     {
-        id = rhs.id;
-        width = rhs.width;
-        height = rhs.height;
-        space = rhs.space;
-
-        *(U32*)(&color) = *(U32*)(&rhs.color);
-
-        *(U32*)(&clip.x) = *(U32*)(&rhs.clip.x);
-        *(U32*)(&clip.y) = *(U32*)(&rhs.clip.y);
-        *(U32*)(&clip.w) = *(U32*)(&rhs.clip.w);
-        *(U32*)(&clip.h) = *(U32*)(&rhs.clip.h);
-
-        return *this;
+        start_render();
+        irender(text, x, y);
+        stop_render();
     }
 };
 
@@ -77,7 +92,8 @@ struct xtextbox
             bool dynamic : 1; // bit 25
             bool page_break : 1; // bit 26
             bool stateful : 1; // bit 27
-            U16 dummy : 4; // bits 28-31
+            bool japanese_break : 1; // bit 28
+            U16 dummy : 3; // bits 29-31
         } flag;
         // Offset: 0xC
         U16 context_size;
@@ -89,8 +105,16 @@ struct xtextbox
         const callback* cb;
         tag_type* tag;
 
-        void intersect_flags(const jot& other);
-        void reset_flags();
+        // No symbols in the target: inlined into their callers (names from the Ratatouille GC
+        // DWARF). Retail does a single halfword and/store over the whole flag word.
+        void intersect_flags(const jot& a)
+        {
+            *(U16*)&flag &= *(const U16*)&a.flag;
+        }
+        void reset_flags()
+        {
+            *(U16*)&flag = 0;
+        }
     };
 
     struct split_tag
@@ -146,7 +170,7 @@ struct xtextbox
     F32 tab_stop;
     F32 left_indent;
     F32 right_indent;
-    callback* cb;
+    const callback* cb;
     void* context;
     const char** texts;
     const size_t* text_sizes;
@@ -154,7 +178,8 @@ struct xtextbox
     substr text;
     size_t text_hash;
 
-    static callback text_cb;
+    static const callback text_cb;
+    static bool japanese_word_breaking;
 
     static void text_render(const jot& j, const xtextbox& tb, F32 x, F32 y);
     static tag_entry_list read_tag(const substr& s);
@@ -163,20 +188,98 @@ struct xtextbox
     static size_t read_list(const tag_entry& e, S32* v, size_t vsize);
     static void clear_layout_cache();
     static void register_tags(const tag_type* tag, size_t count);
-    static tag_type* find_format_tag(const substr& s);
     static tag_type* find_format_tag(const substr& s, S32& index);
-    static xtextbox create();
+    static tag_type* find_format_tag(const substr& s)
+    {
+        S32 index;
+        return find_format_tag(s, index);
+    }
+    static xtextbox create()
+    {
+        return create(xfont::create(), screen_bounds, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
     static xtextbox create(const xfont& font, const basic_rect<F32>& bounds, U32 flags,
-                           F32 line_space, F32 tab_stop, F32 left_indent, F32 right_indent);
+                           F32 line_space, F32 tab_stop, F32 left_indent, F32 right_indent)
+    {
+        xtextbox r;
+        r.font = font;
+        r.bounds = bounds;
+        r.flags = flags;
+        r.line_space = line_space;
+        r.tab_stop = tab_stop;
+        r.left_indent = left_indent;
+        r.right_indent = right_indent;
+        r.texts_size = 0;
+        r.text_hash = 0;
+        r.cb = &text_cb;
+
+        return r;
+    }
 
     void set_text(const char* text);
-    void set_text(const char* text, size_t text_size);
+    void set_text(const char* text, size_t text_size)
+    {
+        if (!text || !text_size)
+        {
+            texts_size = 0;
+            text_hash = 0;
+            return;
+        }
+
+        this->text.text = text;
+        this->text.size = text_size;
+
+        set_text(&this->text.text, &this->text.size, 1);
+    }
     void set_text(const char** texts, size_t size);
-    void set_text(const char** texts, const size_t* text_sizes, size_t size);
+    void set_text(const char** texts, const size_t* text_sizes, size_t size)
+    {
+        this->texts_size = size;
+        this->text_hash = 0;
+
+        if (!size)
+        {
+            return;
+        }
+
+        this->texts = texts;
+        this->text_sizes = text_sizes;
+
+        if (!text_sizes)
+        {
+            for (size_t i = 0; i < size; i++)
+            {
+                this->text_hash = this->text_hash * 131 + xStrHash(texts[i]);
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < size; i++)
+            {
+                this->text_hash = this->text_hash * 131 + xStrHash(texts[i], text_sizes[i]);
+            }
+        }
+    }
     layout& temp_layout(bool cache) const;
-    void render(bool cache) const;
+    void render(bool cache) const
+    {
+        render(temp_layout(cache), 0, -1);
+    }
     void render(layout& l, S32 begin_jot, S32 end_jot) const;
-    F32 yextent(F32 max, S32& size, bool cache) const;
+    F32 yextent(bool cache) const
+    {
+        return yextent(temp_layout(cache), 0, -1);
+    }
+    F32 yextent(const layout& l, S32 begin_jot, S32 end_jot) const
+    {
+        S32 size;
+
+        return yextent(1e38f, size, l, begin_jot, end_jot);
+    }
+    F32 yextent(F32 max, S32& size, bool cache) const
+    {
+        return yextent(max, size, temp_layout(cache), 0, -1);
+    }
     F32 yextent(F32 max, S32& size, const layout& l, S32 begin_jot, S32 end_jot) const;
 };
 
@@ -196,22 +299,86 @@ struct xtextbox::layout
     void refresh_end(const xtextbox& tb);
     void clear();
     void trim_line(jot_line& line);
-    void erase_jots(size_t begin_jot, size_t end_jot);
+    void erase_jots(size_t first, size_t last);
     void merge_line(jot_line& line);
-    void bound_line(jot_line& line);
-    bool fit_line();
-    bool fit_line(bool);
-    void next_line();
+    // No symbol in the target: inlined into its callers.
+    void bound_line(jot_line& line)
+    {
+        line.bounds.w = line.bounds.h = line.baseline = 0.0f;
+
+        for (size_t i = line.first; i != line.last; i++)
+        {
+            jot& a = _jots[i];
+
+            if (!a.flag.ethereal && -a.bounds.y > line.baseline)
+            {
+                line.baseline = -a.bounds.y;
+            }
+        }
+
+        for (size_t i = line.first; i != line.last; i++)
+        {
+            jot& a = _jots[i];
+
+            if (!a.flag.ethereal)
+            {
+                a.bounds.x = line.bounds.w;
+                line.bounds.w += a.bounds.w;
+
+                F32 total_height = line.baseline + a.bounds.y + a.bounds.h;
+
+                if (total_height > line.bounds.h)
+                {
+                    line.bounds.h = total_height;
+                }
+            }
+        }
+
+        line.page_break = (line.last > line.first && _jots[line.last - 1].flag.page_break);
+    }
+    bool fit_line(bool isLastLine);
+    // No symbol in the target: inlined into its callers.
+    void next_line()
+    {
+        jot_line& line1 = _lines[_lines_size];
+
+        _lines_size++;
+
+        jot_line& line2 = _lines[_lines_size];
+
+        line2.first = line1.last;
+        line2.last = _jots_size;
+        line2.bounds.x = 0.0f;
+        line2.bounds.y = line1.bounds.y + line1.bounds.h;
+
+        bound_line(line2);
+    }
     void calc(const xtextbox& ctb, size_t start_text);
     void render(const xtextbox& ctb, S32 begin_jot, S32 end_jot);
     F32 yextent(F32 max, S32& size, S32 begin_jot, S32 end_jot) const;
     bool changed(const xtextbox& ctb);
-    size_t jots_size() const;
+    size_t jots_size() const
+    {
+        return _jots_size;
+    }
+    jot* jots()
+    {
+        return _jots;
+    }
 };
 
 void render_fill_rect(const basic_rect<F32>& bounds, iColor_tag color);
+void xFontPrintTopText();
+void xFontInitModelCache();
 
-F32 NSCREENX(F32);
-F32 NSCREENY(F32);
+inline F32 NSCREENX(F32 scale)
+{
+    return (1.0f / 640) * scale;
+}
+
+inline F32 NSCREENY(F32 scale)
+{
+    return (1.0f / 480) * scale;
+}
 
 #endif

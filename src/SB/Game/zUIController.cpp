@@ -1,17 +1,27 @@
 #include "zUIController.h"
 
-void zUIController_Init(zUIController*, zUIControllerAsset*)
-{
-}
+#include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new>
 
-// Inlining issue
-void zUIController_Init(xBase&, xDynAsset&, unsigned long)
+void zUIController::DoInit()
 {
-    zUIController* UIControl = 0;
-    zUIControllerAsset* UIControlAsset = 0;
-    zUIController_Init(UIControl, UIControlAsset);
+    zUI::DoInit();
+    if (linkCount)
+    {
+        link = (xLinkAsset*)(GetAsset() + 1);
+    }
 }
 
 void zUIController::DoRender() const
 {
+}
+
+void zUIController_Init(xBase& data, xDynAsset& asset, size_t)
+{
+    zUIController_Init((zUIController*)&data, (zUIControllerAsset*)&asset);
+}
+
+void zUIController_Init(zUIController* ui, zUIControllerAsset* asset)
+{
+    new (ui) zUIController;
+    zUI_Init(ui, asset);
 }

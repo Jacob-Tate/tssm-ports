@@ -5,9 +5,14 @@
 #include "zGameState.h"
 
 //extern eSNDCurrentPlayer gPendingPlayer;
-F32 sTimeElapsed;
-U32 gLevelChanged;
-U32 startPressed = -1;
+extern F32 sTimeElapsed;
+extern U32 gLevelChanged;
+extern U32 startPressed;
+extern U32 gSoak;
+extern char** soaklevels;
+extern char* allsoaklevels[33];
+extern S32 enableSuperSoaker;
+extern S32 enableMuttonMasher;
 //extern U8 sHackSmoothedUpdate;
 //extern U32 gBusStopIsRunning;
 
@@ -16,6 +21,8 @@ enum _tagGameVidMode
     eGameVidModeNTSC,
     eGameVidModePAL
 };
+
+extern _tagGameVidMode gVidMode;
 
 enum eGameWhereAmI
 {
@@ -106,10 +113,19 @@ enum eGameWhereAmI
     eGameWhere_SetupPlayerEnd
 };
 
-iTime sTimeCurrent;
-iTime sTimeLast;
+enum pause_ability
+{
+    PA_NONE,
+    PA_MENU,
+    PA_STALL
+};
+
+extern iTime sTimeCurrent;
+extern iTime sTimeLast;
 
 void zGameSetupPlayer();
+void zGameResetPlayerToSceneStart();
+void zGameInitPlayer();
 void xDrawBegin();
 void xDrawEnd();
 S32 zGameIsPaused();
@@ -119,6 +135,10 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba);
 void zGameScreenTransitionEnd();
 void zGameModeSwitch(eGameMode modeNew);
 void zGameStall();
+void zGamePause();
+pause_ability zGameOkToPause();
+void zGameExit();
+void DoTheResetinator();
 void zGameStats_Init();
 
 #endif

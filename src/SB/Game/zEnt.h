@@ -9,6 +9,7 @@
 
 //For inline/weak functions
 #include "xSnd.h"
+#include "xString.h"
 
 struct zScene;
 
@@ -24,11 +25,11 @@ struct zEnt : xEnt
     xAnimTable* atbl;
 };
 
-void checkpoint_collision_hack(zEnt* ent);
-char* zParamGetString(xModelAssetParam* param, U32 size, char* tok, char* def);
+const char* zParamGetString(xModelAssetParam* param, U32 size, const char* tok, const char* def);
 S32 zParamGetFloatList(xModelAssetParam* param, U32 size, const char* tok, S32 count, F32* def,
                        F32* result);
-void zEntGetShadowParams(xEnt* ent, xVec3* center, F32* radius, xEntShadow::radius_enum rtype);
+void zEntGetShadowParams(xEnt* ent, xVec3* center, F32* radius, F32* strength,
+                         xEntShadow::radius_enum rtype);
 S32 zParamGetVector(xModelAssetParam* param, U32 size, const char* tok, xVec3 result, xVec3*);
 S32 zParamGetVector(xModelAssetParam* param, U32 size, char* tok, xVec3 result, xVec3*);
 S32 zParamGetFloatList(xModelAssetParam* param, U32 size, char* tok, S32 count, F32* def,
@@ -39,10 +40,12 @@ F32 zParamGetFloat(xModelAssetParam* param, U32 size, const char* tok, F32 def);
 F32 zParamGetFloat(xModelAssetParam* param, U32 size, char* tok, F32 def);
 S32 zParamGetInt(xModelAssetParam* param, U32 size, const char* tok, S32 def);
 S32 zParamGetInt(xModelAssetParam* param, U32 size, char* tok, S32 def);
-xModelAssetParam* zEntGetModelParams(U32 assetID, U32* size);
+xModelAssetParam* zEntGetModelParams(U32 assetID, U16* size);
 void zEntAnimEvent_AutoAnim(zEnt* ent, U32 animEvent, const F32* animParam);
 xAnimTable* xEnt_AnimTable_AutoEventSmall();
 void zEntAnimEvent(zEnt* ent, U32 animEvent, const F32* animParam);
+void zEntAnimEventCore(xModelInstance* model, xAnimTable* atbl, U32 animEvent, const F32* animParam,
+                       xEnt* ent);
 void zEntParseModelInfo(xEnt* ent, U32 assetID);
 xModelInstance* zEntRecurseModelInfo(void* info, xEnt* ent);
 void zEntEventAllOfType(U32 toEvent, U32 type);
@@ -56,7 +59,6 @@ void zEntInit(zEnt* ent, xEntAsset* asset, U32 type);
 
 // TODO: Misplaced Inlines/Weak functions
 WEAK void xModelAnimCollStop(xModelInstance& m);
-WEAK xMat4x3* xEntGetFrame(const xEnt* ent);
 WEAK void xSndPlay3D(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xVec3* pos,
                      F32 radius, sound_category category, F32 delay);
 

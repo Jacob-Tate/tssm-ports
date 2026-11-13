@@ -26,12 +26,50 @@ struct xSimpleObjAsset
     U8 flags;
 };
 
+struct zReactiveAnimationData;
+struct zReactiveGenre;
+struct zSimpleMgr;
+struct zDestructible;
+
+// GC layout (size 0x100): the reactive-animation fields share storage with the simple-anim fields
+// (reactive objects have sflags 0x200 and never use anim or the pre-baked fastMatList).
 struct zEntSimpleObj : zEnt
 {
-    xSimpleObjAsset* sasset; // 0xD4
-    U32 sflags;
-    void* anim;
-    F32 animTime;
+    xSimpleObjAsset* sasset; // 0xDC
+    U32 sflags; // 0xE0
+    union
+    {
+        struct
+        {
+            zReactiveAnimationData* reactiveAnimationData; // 0xE4
+            zReactiveGenre* reactGenre; // 0xE8
+            zSimpleMgr* smgrExtra; // 0xEC
+        };
+        struct
+        {
+            void* anim; // 0xE4
+            F32 animTime; // 0xE8
+            RwMatrixTag* fastMatList; // 0xEC
+        };
+    };
+    zDestructible* destructible; // 0xF0
+    zSimpleMgr* smgr; // 0xF4
+    xEntOpacity opacity; // 0xF8
+};
+
+struct zSimpleMgr
+{
+    xSphere worldBound;
+    F32 noRenderDist;
+    F32 lodDist0;
+    F32 fadeDist;
+    U32 flags;
+    xModelBucket** lodBucket[2];
+    RpAtomic* lodAtomic[2];
+    RwMatrixTag* mat;
+    xModelInstance* model;
+    zEntSimpleObj* ent;
+    xLightKit* lkit;
 };
 
 struct zScene;
@@ -44,14 +82,14 @@ void zEntSimpleObj_MgrCustomUpdate(zScene* s, F32 dt);
 void zEntSimpleObj_MgrCustomRender();
 void zEntTrackPhysics_Init(void* ent, void* asset);
 void zEntSimpleObj_Init(void* ent, void* asset);
-void zEntSimpleObj_Render(xEnt* ent);
-void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool arg2);
-void zEntSimpleObj_Move(xEnt*, xScene*, F32, xEntFrame*);
+U8 zEntSimpleObj_UsePartialCameraCollision(zEntSimpleObj* ent);
+void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool physparams, bool candestroy);
 void zEntSimpleObj_Setup(zEntSimpleObj* ent);
 void zEntSimpleObj_Update(zEntSimpleObj* ent, xScene* scene, F32 dt);
 void zEntSimpleObj_Save(zEntSimpleObj* ent, xSerial* s);
 void zEntSimpleObj_Load(zEntSimpleObj* ent, xSerial* s);
 void zEntSimpleObj_Reset(zEntSimpleObj* ent, xScene* scene);
-s32 zEntSimpleObjEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* base3);
+void zEntSimpleObjEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
+                          xBase* toParamWidget, U32 toParamWidgetID);
 
 #endif

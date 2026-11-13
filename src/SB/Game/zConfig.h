@@ -1,6 +1,8 @@
 #ifndef ZCONFIG_H
 #define ZCONFIG_H
 
+#include <types.h>
+
 enum ePlayerEnum
 {
     PLAYER_BEGIN,
@@ -35,5 +37,19 @@ enum ePlayerEnum
     SPONGEBALL_NORMAL,
     PLAYER_COUNT
 };
+
+U8 zConfig_isPlayerPatrick(ePlayerEnum playerEnum);
+U8 zConfig_isPlayerSpongebob(ePlayerEnum playerEnum);
+U32 zConfig_getAlternateCostume(ePlayerEnum player);
+U32 zConfig_getAlternateCostume(U32 normalPlayerTag);
+void zConfig_setPointerPlayer_MapEntry(U32 sceneID, U32 playerTag);
+S32 zConfig_getPlayers(U32 sceneID, U32* players);
+ePlayerEnum zConfig_getPlayerEnum(U32 playerTag);
+ePlayerEnum zConfig_getPlayerEnum(U32 sceneID, S32 playerIdx);
+S32 zConfig_getPlayerCount(U32 sceneID);
+char* zConfig_getPlayerModelInfoString(U32 _tag);
+U32 zConfig_getPlayerTag(U32 sceneID, S32 playerIdx);
+void zConfig_setScenePlayer_MapEntry(U32 sceneID, U32 playerTag);
+U32 zConfig_getPlayerEnumIdx(U32 playerTag);
 
 #endif
