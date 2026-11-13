@@ -1187,7 +1187,14 @@ static inline void WoundKnockNPCs(zNMEGoalWound* goal, zNMEStandard* npc)
         for (S32 i = npccol->npc_sidx; i < npccol->npc_eidx; i++)
         {
             xCollis* colrec = &npccol->colls[i];
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: optr is the xEnt that was hit; a host compiler puts an enemy's vptr
+            // ahead of its xEnt, so the cast goes through xEnt* (it adjusts) rather than from void*,
+            // which would make the Damage call below jump through the xEnt's id.
+            zNMECommon* npc_hit = (zNMECommon*)(xEnt*)colrec->optr;
+#else
             zNMECommon* npc_hit = (zNMECommon*)colrec->optr;
+#endif
             xVec3 vec_hit = colrec->hdng * spd;
 
             npc_hit->Damage(DMGTYP_NMEKNOCKED, npc, &vec_hit, -1, ePowerupLevelNormal);
@@ -2055,8 +2062,17 @@ S32 zNMEGoalScareWait::GoalHandleMail(NMEMsg* msg)
             psyche->GoalSet(NME_GOAL_SCARE, 0);
             if (((zNMECommon*)psyche->clt_owner)->npc_duplodude != NULL)
             {
+#ifdef PLATFORM_PC
+                // PLATFORM_PC: the spawner finds the enemy by its zNMECommon* (StatForNPC), and
+                // clt_owner is its xBase*. A host compiler puts the vptr ahead of the xEnt, so the
+                // two differ and the void* has to be the enemy itself, as the other notices pass.
+                ((zNMECommon*)psyche->clt_owner)
+                    ->npc_duplodude->DuploNotice(SM_NOTE_NMELIVINGINSIN,
+                                                 (zNMECommon*)psyche->clt_owner);
+#else
                 ((zNMECommon*)psyche->clt_owner)
                     ->npc_duplodude->DuploNotice(SM_NOTE_NMELIVINGINSIN, psyche->clt_owner);
+#endif
             }
             handled = 1;
         }

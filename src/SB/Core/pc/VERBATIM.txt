@@ -1,0 +1,36 @@
+# Files copied unchanged from src/SB/Core/gc/ (tools/pcimport.py --import-gc).
+#
+# A copy rather than a shared include path, so the two builds can never see
+# each other's platform layer -- but a change to the gc original does not
+# reach the copy. `tools/pcimport.py --check` compares these hashes with the
+# gc files and names any that have moved on.
+#
+# sha1  name
+8e208b66d42ab10db7cb72084e7298947d29d0ee  iAnim.h
+cfdefb1679606facd1aac15f729758c4e586e8ec  iAnim.cpp
+32d247cba027f128a6a0250c6d820bae0b166386  iAnimSKB.cpp
+adec59ee205bc7a5e629653da172ef0c7c6c35a8  iCollide.h
+36ab102aadf02a5da8dc3d47f99a4b06488bd5b8  iCollideFast.h
+7028321be3bcbdf6c46eecc17dae46e31545f3e4  iColor.h
+a7ff4a13cf86393f8f9c01cddb6deba65aa4eefe  iCutscene.h
+17a7ba19851a07bdec5a8a5573c166b36f3cd955  iDebug.h
+a4c33147007451573e0fcbeaf18c2f28db30f016  iEnv.h
+7ca57e61e8fbe0e1fb2b26efb70a95fee5c49ab4  iEnv.cpp
+a1b38623b3948a7e994b53241455805e6da88214  iFX.h
+5ab3bcb18a261401891d6b7afa43892968c901b2  iLight.h
+7ca8af28395ea8fcc7e8f393930beda38cc5c3d8  iLight.cpp
+b5a19b9596bbad14a17abdbc7f7da3f72b28396a  iMath.h
+8878d284a075cc8fac10718b7d02755a75c5b8bd  iMath.cpp
+aec4e19d46bc4ea0eba8821d1cf149d8763bbe06  iMath3.h
+4ac35b2c154ec97cb89946d6022c06f11af32783  iMath3.cpp
+0f9e917f9cb3e216b90463c675497663e5f55aa5  iModel.h
+e822c6905a0afa0ee00ebc8ed73722c3c6555920  iMorph.h
+bcf716ed4f8f8bf34cdd55c601588008fb07a4a5  iMorph.cpp
+ed7c7062de17cddbb384e1541eb6712e1cab9670  iParMgr.h
+ff3316f82dce91fee64b95017414417895b55cdc  iParMgr.cpp
+3a935fcde54f23774b0d7d026cb2dd38572b0771  iScrFX.h
+93d31481e95b0e7aeedd6d68b77ec464a8deb700  iAsync.h
+5739c0f5fb431b73fdf068ae8101d189b588d540  iARAMTmp.h
+3b83e868f24c367fc480ca8dc1d21cb8eb0723dc  iMemMgr.h
+2ba2c3f399b5229c97afbf66eacc23caab03315e  iPad.h
+13b157b89ddaa07222376363a37ab8b55bc22603  ngcrad3d.h

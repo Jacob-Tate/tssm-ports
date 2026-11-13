@@ -81,14 +81,27 @@ namespace
 namespace xRumble
 {
 
+    // PLATFORM_PC: `data` is the scene's xBase for this object. CodeWarrior puts emitterBase's
+    // vptr after its members, so the xBase is at offset 0 and the object can be built at &data.
+    // A host compiler puts the vptr at offset 0 and the xBase after it, so the object is built
+    // where its xBase lands on &data (the cast adjusts), as zUI*_Init's casts already do; the
+    // scene keeps headroom before each dynamic-type array for it (zScene.cpp).
     void effect::Init(xBase& data, xDynAsset& asset, size_t asset_size)
     {
+#ifdef PLATFORM_PC
+        new ((effect*)&data) effect((effectAsset*)&asset);
+#else
         new (&data) effect((effectAsset*)&asset);
+#endif
     }
 
     void boxEmitter::Init(xBase& data, xDynAsset& asset, size_t asset_size)
     {
+#ifdef PLATFORM_PC
+        new ((boxEmitter*)&data) boxEmitter((boxEmitterAsset*)&asset);
+#else
         new (&data) boxEmitter((boxEmitterAsset*)&asset);
+#endif
     }
 
     U8 boxEmitter::GetIntensity(const xVec3& playerPos, F32& intensity) const
@@ -112,7 +125,11 @@ namespace xRumble
 
     void sphericalEmitter::Init(xBase& data, xDynAsset& asset, size_t asset_size)
     {
+#ifdef PLATFORM_PC
+        new ((sphericalEmitter*)&data) sphericalEmitter((sphericalEmitterAsset*)&asset);
+#else
         new (&data) sphericalEmitter((sphericalEmitterAsset*)&asset);
+#endif
     }
 
     U8 sphericalEmitter::GetIntensity(const xVec3& playerPos, F32& intensity) const

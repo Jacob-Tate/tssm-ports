@@ -10,6 +10,16 @@
 #include <float.h>
 #include "xCam.h"
 
+#ifdef PLATFORM_PC
+#include "iFloatByte.h"
+#include "iScreen.h"
+// PLATFORM_PC: the glare's alpha runs far past the S32 range when glareDirLen is near 0;
+// store it into the vertex byte as the console does (iFloatByte.h) on every host.
+#define xScrFxGlareAlpha(a) iFloatToByte(a)
+#else
+#define xScrFxGlareAlpha(a) (a)
+#endif
+
 struct xScrFxLensFlareElement : xDynAsset
 {
     U32 textureID;
@@ -544,8 +554,15 @@ void xScrFXFullScreenGlareRender()
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
 
+#ifdef PLATFORM_PC
+    // PC: the glare covers the whole screen, not the 4:3 UI box (iScreen.h).
+    iScreen2DScreenSpaceBegin();
+#endif
     xScrFxDrawBox(0.0f, 0.0f, FB_XRES, FB_YRES, color.red, color.green, color.blue, color.alpha, dp,
                   0.0f);
+#ifdef PLATFORM_PC
+    iScreen2DScreenSpaceEnd();
+#endif
 }
 
 void xScrFXGlareRender(const xMat4x3& mat)
@@ -601,28 +618,28 @@ void xScrFXGlareRender(const xMat4x3& mat)
                                        g->pos.z - w.z - h.z);
                     RwIm3DVertexSetUV(vert, 0.0f, 0.0f);
                     RwIm3DVertexSetRGBA(vert, g->col.red, g->col.green, g->col.blue,
-                                        g->col.alpha * val);
+                                        xScrFxGlareAlpha(g->col.alpha * val));
                     vert++;
 
                     RwIm3DVertexSetPos(vert, g->pos.x - w.x + h.x, g->pos.y - w.y + h.y,
                                        g->pos.z - w.z + h.z);
                     RwIm3DVertexSetUV(vert, 0.0f, 1.0f);
                     RwIm3DVertexSetRGBA(vert, g->col.red, g->col.green, g->col.blue,
-                                        g->col.alpha * val);
+                                        xScrFxGlareAlpha(g->col.alpha * val));
                     vert++;
 
                     RwIm3DVertexSetPos(vert, g->pos.x + w.x - h.x, g->pos.y + w.y - h.y,
                                        g->pos.z + w.z - h.z);
                     RwIm3DVertexSetUV(vert, 1.0f, 0.0f);
                     RwIm3DVertexSetRGBA(vert, g->col.red, g->col.green, g->col.blue,
-                                        g->col.alpha * val);
+                                        xScrFxGlareAlpha(g->col.alpha * val));
                     vert++;
 
                     RwIm3DVertexSetPos(vert, g->pos.x + w.x + h.x, g->pos.y + w.y + h.y,
                                        g->pos.z + w.z + h.z);
                     RwIm3DVertexSetUV(vert, 1.0f, 1.0f);
                     RwIm3DVertexSetRGBA(vert, g->col.red, g->col.green, g->col.blue,
-                                        g->col.alpha * val);
+                                        xScrFxGlareAlpha(g->col.alpha * val));
 
                     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)g->raster);
 

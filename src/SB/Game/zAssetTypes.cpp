@@ -178,6 +178,12 @@ AnimTableList animTable[8] = {
 
 static xAnimTable* (*tableFuncList[])() = { NULL };
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the platform layer's asset hooks. On a 64-bit host they widen, as each asset is
+// loaded, the types that keep pointers in 4-byte slots (the "copy-at-load" sites), so the handlers
+// in this table and the code that reads assets in place see the host's layouts.
+void iAssetTypesInstall(PKRAssetType* handlers);
+#endif
 
 inline void ATBL_Init()
 {
@@ -189,6 +195,9 @@ inline void ATBL_Init()
 
 void zAssetStartup()
 {
+#ifdef PLATFORM_PC
+    iAssetTypesInstall(assetTypeHandlers);
+#endif
     xSTStartup(assetTypeHandlers);
     ATBL_Init();
 }
@@ -408,6 +417,17 @@ static U32 soundEffectCB(U32 cbenum, xAnimActiveEffect* acteffect, xAnimSingle* 
     U32 sndhandle = 0;
     xEnt* ent_tmp = (xEnt*)object;
     zAnimFxSoundGroup* snd;
+
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: UI models animate too (zUIModel::InitModel passes its xBase) and are no
+    // xEnt. As a sound's 3D parent xSndMgrPlay would read entity fields out of their zUI
+    // fields, so their sounds play unparented. (xEntValidType is not the test: it predates
+    // this game's own entity types, Car, TrainCar and the like, which are real parents.)
+    if (ent_tmp != NULL && ent_tmp->baseType == eBaseTypeUIModel)
+    {
+        ent_tmp = NULL;
+    }
+#endif
 
     if (cbenum == 1)
     {

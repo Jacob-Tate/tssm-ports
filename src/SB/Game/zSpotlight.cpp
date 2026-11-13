@@ -20,6 +20,9 @@
 #include "xstransvc.h"
 #include "xutil.h"
 #include "xMemMgr.h"
+#ifdef PLATFORM_PC
+#include "iFloatByte.h"
+#endif
 #include "xMemory.h"
 #include "xDebug.h"
 
@@ -817,7 +820,13 @@ void zSpotlight::add_flare()
         flare->size = dsize * mag + size0;
         F32 glow0 = asset->flare.glow_min;
         F32 dglow = asset->flare.glow_max - glow0;
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: this can be inf; store it into the byte as the console does
+        // (iFloatByte.h), which x86 hosts otherwise turn into 0 instead of 255.
+        flare->color.a = iFloatToByte(0.5f + (dglow * mag + glow0));
+#else
         flare->color.a = 0.5f + (dglow * mag + glow0);
+#endif
     }
     else
     {

@@ -8,6 +8,9 @@
 #include "xMemory.h"
 #include "xMorph.h"
 #include "xstransvc.h"
+#ifdef PLATFORM_PC
+#include "iScreen.h"
+#endif
 
 static xModelPool* sxModelPoolList;
 static RwCamera* subcamera;
@@ -576,6 +579,20 @@ void xModelRender2D(const xModelInstance& model, const basic_rect<F32>& r, const
     objmat.flags = 0;
 
     const RwV2d* camvw = RwCameraGetViewWindow(camera);
+#ifdef PLATFORM_PC
+    // PC: the rect is in the 4:3 UI box, which is this share of a screen
+    // camera's view window (iScreen.h), so the model lands on the 2D beside it
+    // and keeps its shape. The identity at 4:3.
+    RwV2d boxvw;
+    RwRaster* raster = RwCameraGetRaster(camera);
+    if (raster != NULL && RwRasterGetWidth(raster) == iScreenWidth() &&
+        RwRasterGetHeight(raster) == iScreenHeight())
+    {
+        boxvw.x = camvw->x * iScreenUIFracXF();
+        boxvw.y = camvw->y * iScreenUIFracYF();
+        camvw = &boxvw;
+    }
+#endif
     F32 viewscale = camvw->x * r.w * 2.0f;
     F32 shearX = camvw->x * -(r.x * 2.0f + r.w - 1.0f);
     F32 shearY = camvw->y * -(r.y * 2.0f + r.h - 1.0f);

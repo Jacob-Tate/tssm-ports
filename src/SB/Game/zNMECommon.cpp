@@ -834,6 +834,23 @@ S32 zNMECommon::DfltSysEventMail(NMESysEvent* sysmail)
     case eEventSetUpdateDistance:
         if (globals.updateMgr != NULL)
         {
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: the cull manager knows each entity by its xEnt* (zSceneSetup passes
+            // the scene's xEnt list) and finds this one by comparing pointers. A host compiler
+            // puts an enemy's vptr at offset 0, ahead of its xEnt, so `this` as a void* matched
+            // nothing and the event was ignored; the xEnt* (the cast adjusts) is what it knows.
+            if (sysmail->toParam[0] <= 0.0f)
+            {
+                xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_AlwaysTrueCB, NULL);
+            }
+            else
+            {
+                FloatAndVoid dist;
+                dist.f = SQR(sysmail->toParam[0]);
+                xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_DistanceSquaredCB,
+                                  dist.v);
+            }
+#else
             if (sysmail->toParam[0] <= 0.0f)
             {
                 xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_AlwaysTrueCB, NULL);
@@ -844,6 +861,7 @@ S32 zNMECommon::DfltSysEventMail(NMESysEvent* sysmail)
                 dist.f = SQR(sysmail->toParam[0]);
                 xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_DistanceSquaredCB, dist.v);
             }
+#endif
         }
         break;
     case eEventLaunchShrapnel:

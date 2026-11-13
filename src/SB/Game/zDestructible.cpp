@@ -33,6 +33,24 @@ namespace
     F32 DOBJ_STD_BOUND_VAR = 0.5f;
 } // namespace
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: some destructibles have no xEntFrame (ent->frame is NULL), and the console code
+// reads the frame's position and velocity regardless. On the console that reads low memory and
+// gets junk; on PC page 0 is unmapped and it crashes. These give a sound no position (it follows
+// the entity it is given), the rumble the model's position, and the shrapnel no velocity.
+namespace
+{
+    xVec3 sNoFrameVel = { 0.0f, 0.0f, 0.0f };
+}
+#define DEST_SND_POS(ent) ((ent)->frame ? &(ent)->frame->mat.pos : (const xVec3*)NULL)
+#define DEST_RUMBLE_POS(ent) ((ent)->frame ? (ent)->frame->mat.pos : *xEntGetPos(ent))
+#define DEST_FRAME_VEL(ent) ((ent)->frame ? (ent)->frame->vel : sNoFrameVel)
+#else
+#define DEST_SND_POS(ent) (&(ent)->frame->mat.pos)
+#define DEST_RUMBLE_POS(ent) ((ent)->frame->mat.pos)
+#define DEST_FRAME_VEL(ent) ((ent)->frame->vel)
+#endif
+
 namespace
 {
     // Not in the TSSM DWARF (inlined); name and parameters from Ratatouille.
@@ -126,11 +144,11 @@ namespace
         xSoundFX* soundfx;
 
         dest->dstates[dest->curstateidx].sh_handle_idle =
-            xSndMgrPlay(dest->dstates[dest->curstateidx].sg_handle_idle, 2, &ent->frame->mat.pos,
-                        NULL, ent, NULL, NULL);
+            xSndMgrPlay(dest->dstates[dest->curstateidx].sg_handle_idle, 2, DEST_SND_POS(ent), NULL,
+                        ent, NULL, NULL);
         dest->dstates[dest->curstateidx].sh_handle_hit =
-            xSndMgrPlay(dest->dstates[dest->curstateidx].sg_handle_hit, 2, &ent->frame->mat.pos,
-                        NULL, ent, NULL, NULL);
+            xSndMgrPlay(dest->dstates[dest->curstateidx].sg_handle_hit, 2, DEST_SND_POS(ent), NULL,
+                        ent, NULL, NULL);
 
         if (dest->dstates[dest->curstateidx].sg_fx_id)
         {
@@ -142,8 +160,8 @@ namespace
     inline void zDestructible_StateChange(xEnt* ent, zDestructible* dest)
     {
         zDestructibleState* state = &dest->dstates[dest->curstateidx];
-        dest->dstates[dest->curstateidx].sh_handle_hit_switch = xSndMgrPlay(
-            state->sg_handle_hit_switch, 2, &ent->frame->mat.pos, NULL, ent, NULL, NULL);
+        dest->dstates[dest->curstateidx].sh_handle_hit_switch =
+            xSndMgrPlay(state->sg_handle_hit_switch, 2, DEST_SND_POS(ent), NULL, ent, NULL, NULL);
 
         if (dest->dstates[dest->curstateidx].sg_fx_id_switch)
         {
@@ -153,7 +171,7 @@ namespace
 
         if (state->rumbleSwitch && state->rumbleSwitch->pAsset)
         {
-            state->rumbleSwitch->pAsset->position = ent->frame->mat.pos;
+            state->rumbleSwitch->pAsset->position = DEST_RUMBLE_POS(ent);
             zEntEvent(state->rumbleSwitch, eEventStartRumbleEffect, globals.currentActivePad, 0.0f,
                       0.0f, 0.0f);
         }
@@ -192,7 +210,7 @@ namespace
 
         if (state->rumbleHit && state->rumbleHit->pAsset)
         {
-            state->rumbleHit->pAsset->position = ent->frame->mat.pos;
+            state->rumbleHit->pAsset->position = DEST_RUMBLE_POS(ent);
             zEntEvent(state->rumbleHit, eEventStartRumbleEffect, globals.currentActivePad, 0.0f,
                       0.0f, 0.0f);
         }
@@ -680,7 +698,7 @@ void zDestructibleAsset_EventCB(xBase* from, xBase* root_base, zDestructible* to
     {
     case eEventSceneBegin:
         dest->sh_handle_idle =
-            xSndMgrPlay(dest->sg_handle_idle, 0, &ent->frame->mat.pos, NULL, ent, NULL, NULL);
+            xSndMgrPlay(dest->sg_handle_idle, 0, DEST_SND_POS(ent), NULL, ent, NULL, NULL);
         break;
     case eEventAnimPlayRandom:
         if (cstate->animList)
@@ -730,7 +748,7 @@ void zDestructibleAsset_EventCB(xBase* from, xBase* root_base, zDestructible* to
         }
 
         zDestructible_StopSounds(ent, dest);
-        zDestructible_Swap(ent, dest, ent->frame->vel, false);
+        zDestructible_Swap(ent, dest, DEST_FRAME_VEL(ent), false);
 
         if (dest->dstates[dest->curstateidx].percent != 100)
         {

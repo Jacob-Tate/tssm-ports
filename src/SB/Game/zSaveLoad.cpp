@@ -33,6 +33,13 @@ namespace
     S32 saveState;
 } // namespace
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: zSaveLoad_CardPick went straight to the only folder holding
+// saves (iSGOnlyTargetWithGames), so backing out of the saves leaves the load
+// screen.
+static S32 sCardPickSkipped;
+#endif
+
 U8 preAutoSaving;
 
 S32 currentCard = -1;
@@ -1276,6 +1283,25 @@ S32 zSaveLoad_CardPick(S32 mode)
     currentCard = -1;
     saveLoadPromptSel = -1;
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: loading, with saves in only one of the two folders that
+    // stand in for the memory card slots, goes straight to them, as the Xbox
+    // release (one hard disk) does. Asking let a player pick the empty folder
+    // and read "NO GAME SAVES PRESENT ON THE XBOX HARD DISK" with every save
+    // in the other. Saving still asks where.
+    sCardPickSkipped = 0;
+    if (mode == 1)
+    {
+        S32 only = iSGOnlyTargetWithGames();
+        if (only >= 0)
+        {
+            currentCard = only;
+            sCardPickSkipped = 1;
+            return 1;
+        }
+    }
+#endif
+
     zSaveLoad_UIEvent(mode == 1 ? 1 : 0x16, eEventVisible);
     zSaveLoad_UIEvent(mode == 1 ? 4 : 0x17, eEventUIFocusOn_Select);
 
@@ -1426,7 +1452,11 @@ void BuildIt(char* build_txt, S32 i)
         // Out-of-bounds write kept from the original: every build stores to date2 + 63 here (BfBB
         // reads it as date1[31], the same address when date1 sits right above date2). The value
         // is never read.
+        // PLATFORM_PC: dropped. Nothing reads the byte, and on a host it lands 32 bytes past
+        // date2, wherever the compiler put the frame.
+#ifndef PLATFORM_PC
         date2[63] = '\0';
+#endif
     }
 }
 
@@ -2114,6 +2144,16 @@ U32 zSaveLoad_LoadLoop()
             {
             case 2:
             case 4:
+#ifdef PLATFORM_PC
+                // PLATFORM_PC: back (or cancel) from saves reached without a
+                // card choice leaves the load screen; there is no choice to
+                // go back to.
+                if (sCardPickSkipped)
+                {
+                    loadState = 8;
+                    break;
+                }
+#endif
             case 5:
             case 6:
             case 7:

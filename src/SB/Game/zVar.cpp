@@ -19,6 +19,26 @@
 
 #include <string.h>
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the console reports free space in blocks, and the Xbox text reads
+// "Available Free Block(s): {var:SpaceAvailableString} block(s)". The port's save layer
+// reports free bytes (clamped to 0x7FFFFFFF on a large disk), so word it in the Xbox
+// dashboard's 16 KB blocks, capped at "50,000+" as the dashboard caps it.
+static S32 zVarSpaceBlocks(char* out, S32 bytes)
+{
+    S32 blocks = bytes / 16384;
+
+    if (blocks > 50000)
+    {
+        return sprintf(out, "50,000+");
+    }
+    return sprintf(out, "%d", blocks);
+}
+#define zVarSpaceSprintf(out, bytes) zVarSpaceBlocks((out), (bytes))
+#else
+#define zVarSpaceSprintf(out, bytes) sprintf((out), "%d", (bytes))
+#endif
+
 U32 zVarEntryCB_SndFXVol(void*);
 U32 zVarEntryCB_SndMusicVol(void*);
 
@@ -219,7 +239,7 @@ namespace
     char* var_text_SpaceAvailable()
     {
         static char buffer[12];
-        sprintf(buffer, "%d", zSaveLoad_getMCavailable());
+        zVarSpaceSprintf(buffer, zSaveLoad_getMCavailable());
         return buffer;
     }
 
@@ -231,7 +251,7 @@ namespace
 
         memset(spaceStr, 0, sizeof(spaceStr));
         memset(buffer, 0, sizeof(buffer));
-        sprintf(spaceStr, "%d", spaceAvailable);
+        zVarSpaceSprintf(spaceStr, spaceAvailable);
         sprintf(buffer, "%s", spaceStr);
         return buffer;
     }
@@ -649,7 +669,7 @@ char* zVMCB_CurrentTime(char* buffer)
 
 char* zVMCB_SpaceAvailable(char* buffer)
 {
-    return buffer + sprintf(buffer, "%d", zSaveLoad_getMCavailable());
+    return buffer + zVarSpaceSprintf(buffer, zSaveLoad_getMCavailable());
 }
 
 char* zVMCB_SpaceAvailableString(char* buffer)
@@ -658,7 +678,7 @@ char* zVMCB_SpaceAvailableString(char* buffer)
     S32 spaceAvailable = zSaveLoad_getMCavailable();
 
     memset(spaceStr, 0, sizeof(spaceStr));
-    sprintf(spaceStr, "%d", spaceAvailable);
+    zVarSpaceSprintf(spaceStr, spaceAvailable);
     return buffer + sprintf(buffer, "%s", spaceStr);
 }
 

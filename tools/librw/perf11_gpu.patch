@@ -1,0 +1,640 @@
+diff --git a/src/gl/gl3device.cpp b/src/gl/gl3device.cpp
+--- a/src/gl/gl3device.cpp
++++ b/src/gl/gl3device.cpp
+@@ -169,6 +169,7 @@ int32 u_toonExtra3;
+ 
+ bool32 constantVertexColorWhite;
+ 
++
+ int32 virtualScreenWidth;
+ int32 virtualScreenHeight;
+ 
+@@ -192,6 +193,27 @@ static uint32 virtualScreenMSDepth;
+ static int32 virtualScreenSamplesWanted = 1;
+ static int32 virtualScreenSamples = 1;
+ 
++// TSSM port: what the frame costs a GPU that draws in tiles (phones). See
++// setVirtualScreenOptions in rwgl3.h for what each switch does.
++static uint32 virtualScreenOptions = VSOPT_DEFAULT;
++// The multisampled framebuffer is EXT_multisampled_render_to_texture's: its
++// samples live only in the GPU's tile memory and are folded into
++// virtualScreenTex (and the depth into virtualScreenDepthTex) as each tile is
++// written out, so no explicit resolve is drawn.
++static bool32 virtualScreenMSRTT;
++static uint32 virtualScreenDepthTex;
++// The frame has been read back once (the glow or the warp copied it), and the
++// rest of it -- the glow's composite, the HUD -- is drawn single-sampled into
++// virtualScreenFbo instead of going back into the multisampled buffer.
++static bool32 virtualScreenPost;
++// The multisampled buffer has been bound to draw into since the last present,
++// and virtualScreenFbo already holds the folded picture of what it holds.
++static bool32 virtualScreenMSDrawn;
++static bool32 virtualScreenResolved;
++// A texture-stage view of virtualScreenTex; see virtualScreenReadRaster.
++static Raster *virtualScreenView;
++void evictRaster(Raster *raster);
++
+ void
+ setVirtualScreen(int32 width, int32 height)
+ {
+@@ -213,6 +235,34 @@ getVirtualScreenSamples(void)
+ 	return virtualScreenSamples;
+ }
+ 
++void
++setVirtualScreenOptions(uint32 options)
++{
++	virtualScreenOptions = options;
++}
++
++uint32
++getVirtualScreenOptions(void)
++{
++	return virtualScreenOptions;
++}
++
++bool32
++virtualScreenUsesMSRTT(void)
++{
++	return virtualScreenMSRTT;
++}
++
++// TSSM port: whether invalidateVirtualScreenMS discards anything. glad loads
++// glInvalidateFramebuffer only for GLES (load_GL_ES_VERSION_3_0), so on a
++// desktop GL context it never does.
++bool32
++virtualScreenDiscardsMS(void)
++{
++	return (virtualScreenOptions & VSOPT_INVALIDATE) && (virtualScreenOptions & VSOPT_DISCARDMS) &&
++	       glad_glInvalidateFramebuffer != nil && virtualScreenMSFbo != 0 && !virtualScreenMSRTT;
++}
++
+ Shader *defaultShader, *defaultShader_noAT;
+ Shader *defaultShader_fullLight, *defaultShader_fullLight_noAT;
+ Shader *uvXformShader, *uvXformShader_noAT;
+@@ -1357,12 +1407,133 @@ virtualScreenResolvedFramebuffer(void)
+ // as D3D9 owns virtualScreenDepth rather than using the camera's. A single-
+ // sample depth attachment beside a multisample colour one is an incomplete
+ // framebuffer, and the camera's raster is single-sampled.
++//
++// TSSM port: on GLES with EXT_multisampled_render_to_texture (and _2, for the
++// depth) the pair is that extension's instead: the colour is virtualScreenTex
++// itself and the depth is virtualScreenDepthTex, both attached multisampled.
++// A tiling GPU keeps the samples in its tile memory and writes out only the
++// folded pixel, so a frame costs one write of the picture instead of a write
++// of every sample and a resolve that reads them all back. The catch is that
++// the samples do not survive the end of a render pass -- only the folded
++// pixels do -- so the multisampled buffer must be entered once per frame:
++// the shadows are drawn before the scene (xShadow.cpp, PLATFORM_PC), and once
++// the frame has been read (the glow) the rest goes into the single-sample
++// buffer (virtualScreenPost). The depth is a texture, not a renderbuffer, so
++// that the single-sample buffer can carry on with the scene's depth.
++// Only the folded colour is sure to survive, though:
++// EXT_multisampled_render_to_texture2 lets the driver discard a multisampled
++// depth texture at the end of a pass, as if invalidated (only a depth
++// renderbuffer is kept), and the phone's Adreno does. Whatever is drawn after
++// the frame was left and entered again then depth-tests against undefined
++// depth, which is why this path is off in VSOPT_DEFAULT (VSOPT_MSRTT). A
++// desktop driver may keep it; none has to.
++typedef void (APIENTRYP PFN_FramebufferTexture2DMultisampleEXT)(GLenum, GLenum, GLenum, GLuint,
++                                                                 GLint, GLsizei);
++#define VS_GL_MAX_SAMPLES_EXT 0x8D57
++#define VS_GL_TEXTURE_SAMPLES_EXT 0x8D6C
++
++static bool32
++acquireVirtualScreenMSRTT(int32 want)
++{
++#if defined(LIBRW_SDL2) || defined(LIBRW_SDL3)
++	if(!SDL_GL_ExtensionSupported("GL_EXT_multisampled_render_to_texture") ||
++	   !SDL_GL_ExtensionSupported("GL_EXT_multisampled_render_to_texture2"))
++		return 0;
++	PFN_FramebufferTexture2DMultisampleEXT fbTexMS = (PFN_FramebufferTexture2DMultisampleEXT)
++		SDL_GL_GetProcAddress("glFramebufferTexture2DMultisampleEXT");
++	if(fbTexMS == nil)
++		return 0;
++
++	int32 maxSamples = 0;
++	glGetIntegerv(VS_GL_MAX_SAMPLES_EXT, &maxSamples);
++	if(want > maxSamples)
++		want = maxSamples;
++	if(want <= 1)
++		return 0;
++
++	// Depth only: nothing in the game tests stencil, and a depth texture of
++	// this format is core GLES 3.
++	glGenTextures(1, &virtualScreenDepthTex);
++	uint32 prev = bindTexture(virtualScreenDepthTex);
++	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, virtualScreenWidth, virtualScreenHeight,
++	             0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nil);
++	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++	bindTexture(prev);
++
++	uint32 prevFbo = currentFramebuffer;
++	bool32 ok = 1;
++
++	// The single-sample buffer takes the depth texture in place of its own
++	// renderbuffer, so that it holds the scene's depth after the fold.
++	bindFramebuffer(virtualScreenFbo);
++	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0);
++	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
++	                       virtualScreenDepthTex, 0);
++	if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++		ok = 0;
++
++	if(ok){
++		glGenFramebuffers(1, &virtualScreenMSFbo);
++		bindFramebuffer(virtualScreenMSFbo);
++		fbTexMS(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, virtualScreenTex, 0, want);
++		fbTexMS(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, virtualScreenDepthTex, 0,
++		        want);
++		if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++			ok = 0;
++		else{
++			GLint granted = 0;
++			glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++			                                      VS_GL_TEXTURE_SAMPLES_EXT, &granted);
++			if(granted > 1)
++				want = granted;
++		}
++	}
++
++	if(!ok){
++		// Back to the explicit pair: the single-sample buffer gets its own
++		// depth renderbuffer again.
++		bindFramebuffer(virtualScreenFbo);
++		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
++		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
++		                          virtualScreenDepth);
++		bindFramebuffer(prevFbo);
++		if(virtualScreenMSFbo){
++			deleteFramebuffer(virtualScreenMSFbo);
++			virtualScreenMSFbo = 0;
++		}
++		deleteTexture(virtualScreenDepthTex);
++		virtualScreenDepthTex = 0;
++		printf("librw: EXT_multisampled_render_to_texture refused the virtual screen; "
++		       "resolving explicitly\n");
++		return 0;
++	}
++
++	bindFramebuffer(prevFbo);
++	// Its own depth renderbuffer is no longer attached anywhere.
++	glDeleteRenderbuffers(1, &virtualScreenDepth);
++	virtualScreenDepth = 0;
++	virtualScreenMSRTT = 1;
++	virtualScreenSamples = want;
++	printf("librw: %dx anti-aliasing through EXT_multisampled_render_to_texture\n", want);
++	return 1;
++#else
++	return 0;
++#endif
++}
++
+ static void
+ acquireVirtualScreenMS(void)
+ {
+ 	if(virtualScreenSamplesWanted <= 1)
+ 		return;
+ 
++	if(gl3Caps.gles && (virtualScreenOptions & VSOPT_MSRTT) &&
++	   acquireVirtualScreenMSRTT(virtualScreenSamplesWanted))
++		return;
++
+ 	int32 maxSamples = 0;
+ 	glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+ 	int32 want = virtualScreenSamplesWanted;
+@@ -1415,6 +1586,12 @@ resolveVirtualScreen(void)
+ {
+ 	if(virtualScreenMSFbo == 0 || virtualScreenFbo == 0)
+ 		return;
++	// TSSM port: the extension folds the samples into virtualScreenTex by
++	// itself whenever another framebuffer is bound, and after
++	// enterVirtualScreenPost the picture is drawn single-sampled.
++	if(virtualScreenMSRTT || virtualScreenPost || virtualScreenResolved)
++		return;
++	virtualScreenResolved = 1;
+ 
+ 	glBindFramebuffer(GL_READ_FRAMEBUFFER, virtualScreenMSFbo);
+ 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, virtualScreenFbo);
+@@ -1427,6 +1604,160 @@ resolveVirtualScreen(void)
+ 	rebindFramebuffer();
+ }
+ 
++// TSSM port: discard depth and stencil of the framebuffer bound to `target`
++// (VSOPT_INVALIDATE). A tiling GPU then does not write them out at the end of
++// the pass; nothing reads either after the point this is called.
++static void
++invalidateDepthStencil(GLenum target)
++{
++	if(!(virtualScreenOptions & VSOPT_INVALIDATE) || glad_glInvalidateFramebuffer == nil)
++		return;
++	static const GLenum ds[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
++	glInvalidateFramebuffer(target, 2, ds);
++}
++
++// TSSM port: discard every sample of the explicit multisampled buffer, colour
++// as well as depth and stencil (VSOPT_DISCARDMS with VSOPT_INVALIDATE), once
++// its colour has been folded into virtualScreenFbo. A tiling GPU then does not
++// write the samples out to memory: at 2340x1080 with 4x, about 40 MB a frame.
++// Off by default because the next frame does read them: a frame clears only
++// depth, and where the scene leaves a sample undrawn (cracks between
++// triangles) or blends onto it, it is last frame's colour. It is bound to
++// GL_READ_FRAMEBUFFER here, so that the call names it; the caller binds what
++// it needs next. Never with render-to-texture anti-aliasing, whose colour
++// attachment is the picture itself, and never on desktop GL
++// (virtualScreenDiscardsMS).
++static void
++invalidateVirtualScreenMS(void)
++{
++	if(!virtualScreenDiscardsMS())
++		return;
++	static const GLenum all[] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT,
++	                              GL_STENCIL_ATTACHMENT };
++	glBindFramebuffer(GL_READ_FRAMEBUFFER, virtualScreenMSFbo);
++	glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 3, all);
++}
++
++// TSSM port: the frame has been read back (VSOPT_SINGLESAMPLEPOST). From here
++// to the present everything drawn into the virtual screen goes into the
++// single-sample buffer, with the scene's depth, so the explicit multisampled
++// buffer is entered once per frame: a tiling GPU does not have to write every
++// sample of colour and depth out and read them all back in to draw the glow's
++// composite and the HUD. What changes is that those draws are not
++// anti-aliased: the glow is a full-screen quad and the HUD is mostly 2D, whose
++// edges are in its art. Not quite all of them: where a letter's quad cuts
++// through its art, the quad's edge is hard instead of partly covered (a few
++// pixels of each line of dialog text, up to about 110 of 255).
++//
++// Only on GLES without render-to-texture anti-aliasing, which is every GLES
++// by default. With it, going back into the multisampled framebuffer reads the
++// folded colour, as the single-sample one would, so it costs the same and the
++// HUD keeps its anti-aliasing (VSOPT_POSTALWAYS uses it anyway, for
++// comparisons); the depth it is meant to read as well is not kept on Adreno
++// (VSOPT_MSRTT). A desktop GPU does not pay for entering a framebuffer again
++// at all.
++static void
++enterVirtualScreenPost(void)
++{
++	if(!(virtualScreenOptions & VSOPT_SINGLESAMPLEPOST) || virtualScreenPost ||
++	   virtualScreenMSFbo == 0 || virtualScreenFbo == 0)
++		return;
++	if(!(virtualScreenOptions & VSOPT_POSTALWAYS) && (!gl3Caps.gles || virtualScreenMSRTT))
++		return;
++	// Only inside a frame: a read after the present (a snapshot) has nothing
++	// left to draw, and the next frame starts in the multisampled buffer.
++	if(!virtualScreenMSDrawn)
++		return;
++	if(!virtualScreenMSRTT && !virtualScreenResolved){
++		// Explicit samples: fold colour and depth with a blit.
++		glBindFramebuffer(GL_READ_FRAMEBUFFER, virtualScreenMSFbo);
++		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, virtualScreenFbo);
++		glDisable(GL_SCISSOR_TEST);
++		glBlitFramebuffer(0, 0, virtualScreenWidth, virtualScreenHeight,
++		                  0, 0, virtualScreenWidth, virtualScreenHeight,
++		                  GL_COLOR_BUFFER_BIT, GL_NEAREST);
++		glBlitFramebuffer(0, 0, virtualScreenWidth, virtualScreenHeight,
++		                  0, 0, virtualScreenWidth, virtualScreenHeight,
++		                  GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++		invalidateDepthStencil(GL_READ_FRAMEBUFFER);
++		// Folded, colour and depth. Until the present nothing enters the
++		// multisampled buffer again: setFrameBuffer sends its cameras to
++		// virtualScreenFbo while virtualScreenPost is set, and the binding
++		// below is moved there too. Nothing reads it: resolveVirtualScreen
++		// returns at once, and the readers of the frame (copyVirtualScreen,
++		// the read view, a raster lock, the present) read virtualScreenFbo.
++		// Only the next frame does (VSOPT_DISCARDMS).
++		invalidateVirtualScreenMS();
++		rebindFramebuffer();
++		virtualScreenResolved = 1;
++	}
++	virtualScreenPost = 1;
++	// A camera of the virtual screen that is in an update now draws into the
++	// multisampled buffer; the next setFrameBuffer moves it.
++	if(currentFramebuffer == virtualScreenMSFbo)
++		bindFramebuffer(virtualScreenFbo);
++}
++
++// TSSM port: the picture as a texture to sample, without copying it: a
++// Raster that names virtualScreenTex. For an effect whose first pass reads
++// the frame into a target of its own (the glow's first halving); NOT for one
++// that draws back into the frame while reading it, which needs
++// copyVirtualScreen. Puts the frame into the single-sample state first, as a
++// copy would. Nil when there is no virtual screen or VSOPT_READVIEW is off.
++Raster*
++virtualScreenReadRaster(void)
++{
++	if(!(virtualScreenOptions & VSOPT_READVIEW) || virtualScreenFbo == 0 || virtualScreenTex == 0)
++		return nil;
++	if(virtualScreenView == nil){
++		virtualScreenView = Raster::create(virtualScreenWidth, virtualScreenHeight, 32,
++		                                   Raster::CAMERATEXTURE | Raster::C8888 |
++		                                   Raster::DONTALLOCATE, PLATFORM_GL3);
++		if(virtualScreenView == nil)
++			return nil;
++	}
++	Gl3Raster *natras = PLUGINOFFSET(Gl3Raster, virtualScreenView, nativeRasterOffset);
++	if(natras->texid != virtualScreenTex || virtualScreenView->width != virtualScreenWidth ||
++	   virtualScreenView->height != virtualScreenHeight){
++		evictRaster(virtualScreenView);
++		virtualScreenView->width = virtualScreenWidth;
++		virtualScreenView->height = virtualScreenHeight;
++		// As a camera texture of C8888 is made, sampled as virtualScreenFramebuffer
++		// made the texture: linear and clamped.
++		natras->internalFormat = GL_RGBA8;
++		natras->format = GL_RGBA;
++		natras->type = GL_UNSIGNED_BYTE;
++		natras->hasAlpha = 1;
++		natras->alphaKind = ALPHAGRADED;
++		natras->bpp = 4;
++		natras->numLevels = 1;
++		natras->autogenMipmap = 0;
++		natras->texid = virtualScreenTex;
++		natras->fbo = 0;
++		natras->fboMate = nil;
++		natras->filterMode = Texture::LINEAR;
++		natras->addressU = Texture::CLAMP;
++		natras->addressV = Texture::CLAMP;
++		natras->maxAnisotropy = 1;
++	}
++	enterVirtualScreenPost();
++	resolveVirtualScreen();
++	return virtualScreenView;
++}
++
++static void
++destroyVirtualScreenView(void)
++{
++	if(virtualScreenView == nil)
++		return;
++	Gl3Raster *natras = PLUGINOFFSET(Gl3Raster, virtualScreenView, nativeRasterOffset);
++	// The texture is the virtual screen's, deleted with it.
++	natras->texid = 0;
++	natras->fbo = 0;
++	virtualScreenView->destroy();
++	virtualScreenView = nil;
++}
++
+ // Set when the driver refused the virtual screen, so that the allocation is not
+ // tried again on every setFrameBuffer.
+ static bool32 virtualScreenRefused;
+@@ -1517,6 +1848,8 @@ copyVirtualScreen(Raster *dst)
+ 	// obeys it -- and the colour mask is not, because a blit does not.
+ 	// The resolved buffer, not the multisampled one: glBlitFramebuffer will
+ 	// not scale a multisample source, and this is the same picture.
++	// TSSM port: and the rest of the frame is drawn single-sampled.
++	enterVirtualScreenPost();
+ 	resolveVirtualScreen();
+ 	glBindFramebuffer(GL_READ_FRAMEBUFFER, virtualScreenFbo);
+ 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, natdst->fbo);
+@@ -1672,6 +2005,16 @@ destroyVirtualScreen(void)
+ 		deleteTexture(depthCopyTex);
+ 		depthCopyTex = 0;
+ 	}
++	// TSSM port: the render-to-texture depth and the read view.
++	if(virtualScreenDepthTex){
++		deleteTexture(virtualScreenDepthTex);
++		virtualScreenDepthTex = 0;
++	}
++	virtualScreenMSRTT = 0;
++	virtualScreenPost = 0;
++	virtualScreenMSDrawn = 0;
++	virtualScreenResolved = 0;
++	destroyVirtualScreenView();
+ 	virtualScreenRefused = 0;
+ }
+ 
+@@ -2527,7 +2870,17 @@ setFrameBuffer(Camera *cam)
+ 	Gl3Raster *natfb = PLUGINOFFSET(Gl3Raster, fbuf, nativeRasterOffset);
+ 	assert(fbuf->type == Raster::CAMERA || fbuf->type == Raster::CAMERATEXTURE);
+ 
+-	bindFramebuffer(natfb->fbo);
++	// TSSM port: once the frame has been read it is finished single-sampled
++	// (enterVirtualScreenPost).
++	if(natfb->fbo != 0 && natfb->fbo == virtualScreenMSFbo && virtualScreenPost)
++		bindFramebuffer(virtualScreenFbo);
++	else{
++		bindFramebuffer(natfb->fbo);
++		if(natfb->fbo != 0 && natfb->fbo == virtualScreenMSFbo){
++			virtualScreenMSDrawn = 1;
++			virtualScreenResolved = 0;
++		}
++	}
+ 
+ 	// The virtual screen owns its depth -- see virtualScreenFramebuffer -- so
+ 	// there is nothing to pair here. Every camera raster shares that one
+@@ -2758,6 +3111,11 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
+ 		mask |= GL_DEPTH_BUFFER_BIT;
+ 	if(mode & Camera::CLEARSTENCIL)
+ 		mask |= GL_STENCIL_BUFFER_BIT;
++	// TSSM port: a depth clear clears the stencil beside it too. Nothing reads
++	// stencil, and a tiling GPU that is asked to keep the stencil half of a
++	// packed depth-stencil buffer has to load the whole buffer to do it.
++	if((mask & GL_DEPTH_BUFFER_BIT) && (virtualScreenOptions & VSOPT_INVALIDATE))
++		mask |= GL_STENCIL_BUFFER_BIT;
+ 	// glClear obeys all three write masks, so a clear issued while one is off
+ 	// would do nothing. D3D9's Clear() obeys none, and a clear that clears
+ 	// is what a caller of this means either way.
+@@ -2810,6 +3168,39 @@ forgetGlState(void)
+ 		glBindVertexArray(vao);
+ }
+ 
++// TSSM port: the size in pixels of the surface the frame is presented into.
++// That is the window's size everywhere but where the window system lets the
++// application give its surface buffers of another size, which the display
++// then scales: on Android the port gives the window's surface the render
++// size, so the picture is not scaled by the GPU (iWindowSDL.cpp). EGL knows
++// the size of the buffer being drawn; the window's own size is the answer
++// wherever that cannot be asked.
++void
++getWindowDrawableSize(int32 *w, int32 *h)
++{
++	int ww = 0, wh = 0;
++#if defined(LIBRW_SDL2) || defined(LIBRW_SDL3)
++	SDL_GetWindowSize(glGlobals.window, &ww, &wh);
++#elif defined(LIBRW_GLFW)
++	glfwGetFramebufferSize(glGlobals.window, &ww, &wh);
++#endif
++	*w = ww;
++	*h = wh;
++#if defined(__ANDROID__) && defined(LIBRW_SDL3)
++	typedef unsigned int (*QuerySurfaceFn)(void *dpy, void *surface, int attribute, int *value);
++	static QuerySurfaceFn query = (QuerySurfaceFn)SDL_EGL_GetProcAddress("eglQuerySurface");
++	SDL_EGLDisplay dpy = SDL_EGL_GetCurrentDisplay();
++	SDL_EGLSurface surface = SDL_EGL_GetWindowSurface(glGlobals.window);
++	int qw = 0, qh = 0;
++	if(query && dpy && surface &&
++	   query(dpy, surface, 0x3057 /* EGL_WIDTH */, &qw) &&
++	   query(dpy, surface, 0x3056 /* EGL_HEIGHT */, &qh) && qw > 0 && qh > 0){
++		*w = qw;
++		*h = qh;
++	}
++#endif
++}
++
+ static void
+ blitVirtualScreen(Raster *raster)
+ {
+@@ -2832,23 +3223,48 @@ blitVirtualScreen(Raster *raster)
+ 	if(vw <= 0 || vh <= 0)
+ 		return;
+ 
++	// TSSM port: into the surface's own pixels, which can be fewer than the
++	// window's (getWindowDrawableSize); the overlay below is still told the
++	// window's size, which its layout and the touches are in.
++	int32 surfw = winw, surfh = winh;
++	getWindowDrawableSize(&surfw, &surfh);
++
+ 	// Widest first, then narrowed if that would not fit vertically. Done in
+ 	// 64-bit because a 4K window times a 2160-line screen overflows 32.
+-	int32 dw = winw;
+-	int32 dh = (int32)((int64)winw * vh / vw);
+-	if(dh > winh){
+-		dh = winh;
+-		dw = (int32)((int64)winh * vw / vh);
++	int32 dw = surfw;
++	int32 dh = (int32)((int64)surfw * vh / vw);
++	if(dh > surfh){
++		dh = surfh;
++		dw = (int32)((int64)surfh * vw / vh);
+ 	}
+-	int32 dx = (winw - dw)/2;
+-	int32 dy = (winh - dh)/2;
++	int32 dx = (surfw - dw)/2;
++	int32 dy = (surfh - dh)/2;
++
++	// TSSM port: the frame's depth is not read again (every frame starts with
++	// a depth clear), so a tiling GPU need not write it out.
++	glBindFramebuffer(GL_FRAMEBUFFER, virtualScreenMSFbo && !virtualScreenPost ?
++	                                      virtualScreenMSFbo : virtualScreenFbo);
++	invalidateDepthStencil(GL_FRAMEBUFFER);
+ 
+ 	// The resolved buffer rather than natfb->fbo, which is the multisampled one
+ 	// when there is one: glBlitFramebuffer will not scale a multisample source,
+ 	// and this blit scales to the window.
+ 	resolveVirtualScreen();
++	// TSSM port: the frame is now all in virtualScreenFbo, and so is every read
++	// of it until the next frame draws into the multisampled buffer: after the
++	// present virtualScreenMSDrawn is clear, so enterVirtualScreenPost does
++	// nothing, and virtualScreenResolved stays set until setFrameBuffer binds
++	// the multisampled buffer again, so resolveVirtualScreen does nothing and a
++	// snapshot taken after the present copies virtualScreenFbo. Only the next
++	// frame reads the samples (VSOPT_DISCARDMS). After enterVirtualScreenPost
++	// they were discarded there.
++	if(!virtualScreenPost)
++		invalidateVirtualScreenMS();
+ 	glBindFramebuffer(GL_READ_FRAMEBUFFER, virtualScreenFbo);
+ 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
++	// The next frame starts in the multisampled buffer again.
++	virtualScreenPost = 0;
++	virtualScreenMSDrawn = 0;
+ 
+ 	glDisable(GL_SCISSOR_TEST);
+ 	openWriteMasks();
+@@ -2856,8 +3272,9 @@ blitVirtualScreen(Raster *raster)
+ 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+ 	glClear(GL_COLOR_BUFFER_BIT);
+ 
++	// The same size is a copy, which GL_NEAREST says.
+ 	glBlitFramebuffer(0, 0, vw, vh, dx, dy, dx + dw, dy + dh,
+-	                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
++	                  GL_COLOR_BUFFER_BIT, dw == vw && dh == vh ? GL_NEAREST : GL_LINEAR);
+ 
+ 	if(presentOverlay){
+ 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+@@ -2871,9 +3288,25 @@ blitVirtualScreen(Raster *raster)
+ 	// The blit carried the frame's alpha into a window that has an alpha
+ 	// channel, and a compositor that honours it shows the desktop through.
+ 	// Opaque again, colour untouched; the next flush restores the mask.
+-	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+-	oldGlState.colorMask = COLORWRITEALPHA;
+-	glClear(GL_COLOR_BUFFER_BIT);
++	// TSSM port: not on a window with no alpha to make opaque, where the clear
++	// is a full-window draw that changes nothing.
++	static GLint windowAlphaBits = -1;
++	if(windowAlphaBits < 0){
++		glBindFramebuffer(GL_FRAMEBUFFER, 0);
++		windowAlphaBits = 8;
++		glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER,
++		                                      gl3Caps.gles ? GL_BACK : GL_BACK_LEFT,
++		                                      GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE,
++		                                      &windowAlphaBits);
++		if(glGetError() != GL_NO_ERROR)
++			windowAlphaBits = 8;
++		printf("librw: the window has %d alpha bits\n", (int)windowAlphaBits);
++	}
++	if(windowAlphaBits != 0 || !(virtualScreenOptions & VSOPT_INVALIDATE)){
++		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
++		oldGlState.colorMask = COLORWRITEALPHA;
++		glClear(GL_COLOR_BUFFER_BIT);
++	}
+ 
+ 	// The read and draw bindings above went round bindFramebuffer's cache, so
+ 	// it no longer describes the binding. Put both back by hand.
+diff --git a/src/gl/rwgl3.h b/src/gl/rwgl3.h
+--- a/src/gl/rwgl3.h
++++ b/src/gl/rwgl3.h
+@@ -511,6 +511,61 @@ void destroyVirtualScreen(void);
+ // 1 when there is no multisampling.
+ void setVirtualScreenSamples(int32 samples);
+ int32 getVirtualScreenSamples(void);
++
++// TSSM port: what a frame costs a GPU that draws in tiles (every phone GPU),
++// where each time a render target is left its pixels are written out to
++// memory and each time it is entered again they are read back in.
++enum VirtualScreenOptions
++{
++	// On GLES, draw the anti-aliased frame through
++	// EXT_multisampled_render_to_texture (and _2): the samples stay in tile
++	// memory and only the folded pixels are written. Set before the engine
++	// opens; without the extensions the explicit pair is used. Not in
++	// VSOPT_DEFAULT: on Adreno the multisampled depth is not kept when the
++	// frame buffer is left and entered again inside a frame (the extension
++	// allows that for a depth texture), so what is drawn after that is
++	// depth-tested against undefined depth.
++	VSOPT_MSRTT = 1,
++	// Once the frame has been read back mid-frame (copyVirtualScreen,
++	// virtualScreenReadRaster), draw the rest of it single-sampled, with the
++	// scene's depth, instead of entering the multisampled buffer again. On
++	// GLES without VSOPT_MSRTT's extensions only, unless VSOPT_POSTALWAYS.
++	// What is drawn after it (the HUD) is not anti-aliased.
++	VSOPT_SINGLESAMPLEPOST = 2,
++	// Discard depth and stencil where nothing reads them again
++	// (glInvalidateFramebuffer), and clear stencil with every depth clear.
++	VSOPT_INVALIDATE = 4,
++	// virtualScreenReadRaster hands out the frame itself for sampling.
++	VSOPT_READVIEW = 8,
++	// VSOPT_SINGLESAMPLEPOST on every GL, for comparisons.
++	VSOPT_POSTALWAYS = 16,
++	// With VSOPT_INVALIDATE: discard the explicit multisampled buffer whole,
++	// colour too, once it has been folded (after the fold for the glow, or
++	// at the present). Not in VSOPT_DEFAULT: the next frame reads last
++	// frame's colour where its scene leaves a sample undrawn or blends onto
++	// it, and after a discard a tiling GPU leaves anything there. GLES only:
++	// librw loads glInvalidateFramebuffer for GLES alone.
++	VSOPT_DISCARDMS = 32,
++	VSOPT_DEFAULT = 14
++};
++void setVirtualScreenOptions(uint32 options);
++uint32 getVirtualScreenOptions(void);
++// Whether the multisampled frame is EXT_multisampled_render_to_texture's.
++bool32 virtualScreenUsesMSRTT(void);
++// Whether the explicit multisampled buffer is discarded once folded
++// (VSOPT_DISCARDMS): never on a desktop GL context, which has no
++// glInvalidateFramebuffer here, nor without a multisampled buffer.
++bool32 virtualScreenDiscardsMS(void);
++// The frame as a texture to sample, without a copy: a Raster naming the
++// virtual screen's own texture, valid until the next present. For an effect
++// whose pass reads the frame into a target of its own; one that draws back
++// into the frame while reading it needs copyVirtualScreen. Nil when there is
++// no virtual screen or VSOPT_READVIEW is off.
++Raster *virtualScreenReadRaster(void);
++// The size in pixels of the surface the frame is presented into, which on
++// Android can be smaller than the window (the display scales it). A present
++// overlay is told the window's size and draws into this many pixels.
++void getWindowDrawableSize(int32 *w, int32 *h);
+ // Fold the samples into the single-sample picture every reader of the frame
+ // sees. Called for you by showRaster and by copyVirtualScreen.
+ void resolveVirtualScreen(void);

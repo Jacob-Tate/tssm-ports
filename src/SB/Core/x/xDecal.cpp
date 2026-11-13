@@ -1341,7 +1341,13 @@ namespace
 
         if (d1->texture != d2->texture)
         {
+#ifdef PLATFORM_PC
+            // Address order, as the console's divide gives for two real textures: see
+            // compare_buckets in xParticleBatch.cpp.
+            return d1->texture < d2->texture ? -1 : 1;
+#else
             return d1->texture - d2->texture;
+#endif
         }
 
         if (d1->blend_mode_id != d2->blend_mode_id)

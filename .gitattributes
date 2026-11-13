@@ -11,3 +11,6 @@
 
 # decomp-toolkit writes files with LF
 config/**/*.txt  text eol=lf
+
+# Patches applied to third_party/librw by CMakeLists.txt
+tools/librw/*.patch text eol=lf

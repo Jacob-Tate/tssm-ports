@@ -369,7 +369,14 @@ static void zNMETiki_PickTikisToAnimate()
             continue;
         }
 
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: optr is the xEnt that was hit; a host compiler puts an enemy's vptr ahead
+        // of its xEnt, so the cast goes through xEnt* (it adjusts, and keeps NULL) rather than
+        // from void*.
+        zNMECommon* npc = (zNMECommon*)(xEnt*)coll->optr;
+#else
         zNMECommon* npc = (zNMECommon*)coll->optr;
+#endif
         if (npc == NULL || npc->baseType != eBaseTypeNPC)
         {
             continue;

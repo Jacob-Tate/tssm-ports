@@ -471,8 +471,17 @@ void zParticleLocator::scene_enter()
 {
     SPtr tmpBlock;
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: 0x110 is the console's sizeof(activity_data). It holds pointers, so on a
+    // 64-bit host it is larger (296 bytes): the 0x8810-byte block then held 117 of the 128
+    // activities activate() hands out, and the rest were written past its end.
+    tmpBlock = (SPtr)xMemAlloc(gActiveHeap, 0x10 + 0x80 * sizeof(activity_data), 0);
+    activities = (activity_data*)__construct_new_array((void*)tmpBlock, 0x0, 0x0,
+                                                       sizeof(activity_data), 0x80);
+#else
     tmpBlock = (SPtr)xMemAlloc(gActiveHeap, 0x8810, 0);
     activities = (activity_data*)__construct_new_array((void*)tmpBlock, 0x0, 0x0, 0x110, 0x80);
+#endif
     activities_used = 0;
 }
 

@@ -115,7 +115,13 @@ void zNMEMindy::Reset()
 {
     zNMEFriendly::Reset();
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the callbacks below take what the animation passes them, the xEnt (they
+    // say why), so this passes the xEnt too.
+    CloseShellDone(NULL, NULL, (xEnt*)this);
+#else
     CloseShellDone(NULL, NULL, this);
+#endif
 
     offsetY = 0.5f;
     offsetYTimer = 0.5f;
@@ -126,9 +132,19 @@ void zNMEMindy::Destroy()
     zNMEFriendly::Destroy();
 }
 
+// PLATFORM_PC: an animation callback's object is the xEnt (xAnimPlay::Object: zEntParseModelInfo
+// sets up Mindy's animation with her xEnt, and the player's callbacks and soundEffectCB read it
+// as one). A host compiler puts an enemy's vptr at offset 0, ahead of its xEnt, so a cast from
+// void* to zNMEMindy* is 8 bytes (x86: 4) off: the shell and celebration callbacks read and wrote
+// whatever lies that far past the fields they name (on x64 the celebration check read
+// tvStaticTimeIndex). Each callback reaches her by a cast through xEnt*, which adjusts.
 U32 zNMEMindy::SpatulaGrabCB(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    ((zNMEMindy*)(xEnt*)object)->celebrationAnimPlay = 0;
+#else
     ((zNMEMindy*)object)->celebrationAnimPlay = 0;
+#endif
 
     zCameraSetReward(1);
     zCameraDisableInput();
@@ -144,8 +160,13 @@ U32 zNMEMindy::SpatulaGrabCB(xAnimTransition* tran, xAnimSingle* anim, void* obj
 
 U32 zNMEMindy::SpatulaGrabStopCB(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    if (((zNMEMindy*)(xEnt*)object)->itemType == NME_TYPE_SPONGEBOB &&
+        xStrHash(anim->State->Name) == hashMindyAnims[1])
+#else
     if (((zNMEMindy*)object)->itemType == NME_TYPE_SPONGEBOB &&
         xStrHash(anim->State->Name) == hashMindyAnims[1])
+#endif
     {
         if (globals.autoSaveFeature)
         {
@@ -171,23 +192,39 @@ U32 zNMEMindy::SpatulaGrabStopCB(xAnimTransition* tran, xAnimSingle* anim, void*
 
 U32 zNMEMindy::SpatulaGrabCheck(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    return ((zNMEMindy*)(xEnt*)object)->celebrationAnimPlay;
+#else
     return ((zNMEMindy*)object)->celebrationAnimPlay;
+#endif
 }
 
 U32 zNMEMindy::OpenShellCheck(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    return ((zNMEMindy*)(xEnt*)object)->currentShellState == eShellOpening;
+#else
     return ((zNMEMindy*)object)->currentShellState == eShellOpening;
+#endif
 }
 
 U32 zNMEMindy::OpenShellDone(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    ((zNMEMindy*)(xEnt*)object)->currentShellState = eShellOpened;
+#else
     ((zNMEMindy*)object)->currentShellState = eShellOpened;
+#endif
     return 1;
 }
 
 U32 zNMEMindy::CloseShellCheck(xAnimTransition* tran, xAnimSingle* anim, void* object)
 {
+#ifdef PLATFORM_PC
+    return ((zNMEMindy*)(xEnt*)object)->currentShellState == eShellClosing;
+#else
     return ((zNMEMindy*)object)->currentShellState == eShellClosing;
+#endif
 }
 
 U32 zNMEMindy::CloseShellDone(xAnimTransition* tran, xAnimSingle* anim, void* object)
@@ -195,7 +232,11 @@ U32 zNMEMindy::CloseShellDone(xAnimTransition* tran, xAnimSingle* anim, void* ob
     zNMEMindy* ent;
     xModelInstance* tvStaticAtomic;
 
+#ifdef PLATFORM_PC
+    ent = (zNMEMindy*)(xEnt*)object;
+#else
     ent = (zNMEMindy*)object;
+#endif
 
     ent->currentShellState = eShellClosed;
     ent->currentTVStaticState = eTVStatic;

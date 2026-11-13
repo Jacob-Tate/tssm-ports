@@ -93,7 +93,16 @@ struct _tagxPad
 // GameCube
 #define XPAD_BUTTON_Z 0x100000
 
+// PLATFORM_PC: the bit a player or vehicle move reads. The Xbox release swaps
+// the X and B face buttons for moves only (attack on X, bowl/cartwheel on B),
+// while menus keep cancel on B. Wrapping the mask rather than the pad keeps the
+// menus on the bits the code names. Everywhere else this is the mask itself.
+#ifdef PLATFORM_PC
+U32 iPadLayoutButton(U32 mask);
+#define XPAD_MOVE(mask) iPadLayoutButton(mask)
+#else
 #define XPAD_MOVE(mask) (mask)
+#endif
 
 extern _tagxPad mPad[4];
 extern _tagxRumble mRumbleList[32];

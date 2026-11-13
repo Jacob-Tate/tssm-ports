@@ -887,7 +887,14 @@ struct zMODEnemy : zModule
 
         for (S32 i = 0; i < num_nme; i++)
         {
+#ifdef PLATFORM_PC
+            // The list holds whole enemies. A host compiler puts their vptr at
+            // offset 0, ahead of the xEnt, so the xEnt is reached by a cast that
+            // adjusts, not one from void*.
+            xModelSetLightKit(((zNMENPCWrapper*)nmelist.list[i])->model, lkit);
+#else
             xModelSetLightKit(((xEnt*)nmelist.list[i])->model, lkit);
+#endif
         }
     }
 };

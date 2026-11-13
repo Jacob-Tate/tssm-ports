@@ -1,0 +1,20 @@
+diff --git a/src/gl/gl3device.cpp b/src/gl/gl3device.cpp
+index da299a4..0259594 100644
+--- a/src/gl/gl3device.cpp
++++ b/src/gl/gl3device.cpp
+@@ -3194,9 +3194,14 @@ startSDL3(void)
+ 	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, glGlobals.numSamples);
+ 
+ 	int i;
+-	for(i = 0; profiles[i].gl; i++)
++	for(i = 0; profiles[i].gl; i++){
++		// Test only: TSSM_GL_ES=1 skips the desktop profiles, so a desktop
++		// driver that offers OpenGL ES contexts runs the phone's GLES path.
++		if(getenv("TSSM_GL_ES") && profiles[i].gl != SDL_GL_CONTEXT_PROFILE_ES)
++			continue;
+ 		if(tryProfileSDL3(i, &win, &ctx))
+ 			break;
++	}
+ 
+ 	if(win == nil || ctx == nil){
+ 		RWERROR((ERR_GENERAL, SDL_GetError()));

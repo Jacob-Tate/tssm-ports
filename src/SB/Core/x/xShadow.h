@@ -53,6 +53,9 @@ void xShadowVertical_DrawCache(xShadowCache* cache, F32 shadowFactor, F32 fadeDi
 S32 Im2DRenderQuad(F32 x1, F32 y1, F32 x2, F32 y2, F32 z, F32 recipCamZ, F32 uvOffset);
 void xShadowManager_Reset();
 void xShadowManager_Render();
+#ifdef PLATFORM_PC
+void xShadowManager_PreRender(RwCamera* sceneCamera);
+#endif
 void xShadowRender(xEnt* ent, F32 max_dist);
 
 #endif

@@ -50,7 +50,13 @@ struct xCutsceneData
     union
     {
         U32 FileOffset;
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: a 4-byte slot as in the files (the cutscene headers and their time chunks
+        // are read in place) that holds a RenderWare pointer, as on the console: an iPtr32.
+        iPtr32<void> DataPtr;
+#else
         void* DataPtr;
+#endif
     };
 };
 

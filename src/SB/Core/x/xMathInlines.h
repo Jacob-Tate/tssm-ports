@@ -174,7 +174,14 @@ inline F32 xinvsqrt(register F32 fVal)
 // through, as in retail.
 inline void xsqrtfast(F32& o, register F32 fVal)
 {
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: a zero length leaves fRetVal unset (the console stores whatever the
+    // register held); a host compiler reads an undefined value. Start it at fVal so a zero
+    // length gives 0 (the form noted above as compiling identically on the console).
+    register F32 fRetVal = fVal;
+#else
     register F32 fRetVal;
+#endif
 
     if (!(fVal <= 0.0f))
     {

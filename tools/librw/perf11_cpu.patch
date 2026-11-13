@@ -1,0 +1,544 @@
+diff --git a/src/gl/gl3device.cpp b/src/gl/gl3device.cpp
+index aec8554..659cf2a 100644
+--- a/src/gl/gl3device.cpp
++++ b/src/gl/gl3device.cpp
+@@ -1209,6 +1209,81 @@ bindTexture(uint32 texid)
+ 	return prev;
+ }
+ 
++// TSSM port (perf11_cpu): run-time switches for comparing against the old
++// paths, read once when the device starts. Unset means on.
++static bool32
++cpuOptSwitch(const char *name)
++{
++	const char *e = getenv(name);
++	return e == nil || *e == '\0' || atoi(e) != 0;
++}
++
++// TSSM port (perf11_cpu): one vertex array object per instanced geometry and
++// one per immediate-mode stream, so that a draw binds one object instead of
++// setting every attribute up again. That was two buffer binds and an enable,
++// a pointer and a disable per attribute for every atomic: 73% of the 6000 GL
++// calls of a frame in SC02. A GLES driver such as Adreno's runs those on the
++// game thread and validates the vertex state again at each draw.
++//
++// Only where the context has them (GL 3.0, GLES 3.0); TSSM_GL_VAO=0 turns
++// them off for comparison. Decided in initOpenGL, before anything is
++// instanced, and never changed after.
++//
++// The binding is cached like the texture and framebuffer ones. vao, the one
++// object every draw used before, is bound again after instancing, so that GL
++// calls from outside librw that set attributes without a vertex array of their
++// own land in it and never in a geometry's.
++bool32 useVaos;
++static uint32 boundVertexArray = ~0u;
++
++void
++bindVertexArray(uint32 v)
++{
++	if(boundVertexArray != v){
++		boundVertexArray = v;
++		glBindVertexArray(v);
++	}
++}
++
++void
++bindDefaultVertexArray(void)
++{
++	if(gl3Caps.glversion >= 30)
++		bindVertexArray(vao);
++}
++
++// Deleting the bound vertex array leaves 0 bound, and the name can be handed
++// out again: the cache must not keep claiming it.
++void
++forgetVertexArray(uint32 v)
++{
++	if(boundVertexArray == v)
++		boundVertexArray = ~0u;
++}
++
++#ifdef LIBRW_SDL3
++// TSSM port (perf11_cpu): the swap interval is set when it changes rather than
++// before every swap. SDL passes every call on to eglSwapInterval or
++// wglSwapIntervalEXT; NVIDIA's waits on its driver thread, 0.6 ms a frame, and
++// on Android each call goes to the surface's buffer queue. The interval
++// belongs to the context and its surface: initOpenGL forgets it for a new
++// context, and on Android SDL sets it again itself when the window gets a new
++// surface (android_egl_context_restore). A failed call is tried again on the
++// next swap. TSSM_GL_SWAP_CACHE=0 sets it every frame as before. (SDL3 only:
++// the SDL2 build is not the port's.)
++static int32 swapIntervalSet = -1;
++static bool32 swapIntervalCache = 1;
++
++static void
++setSwapInterval(int32 interval)
++{
++	if(swapIntervalCache && interval == swapIntervalSet)
++		return;
++	bool ok = SDL_GL_SetSwapInterval(interval);
++	swapIntervalSet = ok ? interval : -1;
++}
++#endif
++
+ uint32
+ bindFramebuffer(uint32 fbo)
+ {
+@@ -2730,6 +2805,7 @@ forgetGlState(void)
+ 	glGlobals.presentHeight = 0;
+ 	glGlobals.presentOffX = 0;
+ 	glGlobals.presentOffY = 0;
++	boundVertexArray = ~0u;
+ 	if(gl3Caps.glversion >= 30)
+ 		glBindVertexArray(vao);
+ }
+@@ -2824,10 +2900,7 @@ showRaster(Raster *raster, uint32 flags)
+ 		SDL_GL_SetSwapInterval(0);
+ 	SDL_GL_SwapWindow(glGlobals.window);
+ #elif defined(LIBRW_SDL3)
+-	if(flags & Raster::FLIPWAITVSYNCH)
+-		SDL_GL_SetSwapInterval(1);
+-	else
+-		SDL_GL_SetSwapInterval(0);
++	setSwapInterval(flags & Raster::FLIPWAITVSYNCH ? 1 : 0);
+ 	SDL_GL_SwapWindow(glGlobals.window);
+ #elif defined(LIBRW_GLFW)
+ 	if(flags & Raster::FLIPWAITVSYNCH)
+@@ -3534,6 +3607,16 @@ initOpenGL(void)
+ 		glBindVertexArray(vao);
+ 	}
+ 
++	// TSSM port (perf11_cpu): see bindVertexArray and setSwapInterval.
++	boundVertexArray = ~0u;
++	useVaos = gl3Caps.glversion >= 30 && cpuOptSwitch("TSSM_GL_VAO");
++#ifdef LIBRW_SDL3
++	swapIntervalSet = -1;
++	swapIntervalCache = cpuOptSwitch("TSSM_GL_SWAP_CACHE");
++	printf("tssm: gl3: vertex arrays %s, swap interval set %s\n",
++	       useVaos ? "per geometry" : "off", swapIntervalCache ? "on change" : "every frame");
++#endif
++
+ #ifdef RW_GL_USE_UBOS
+ 	glGenBuffers(1, &ubo_state);
+ 	glBindBuffer(GL_UNIFORM_BUFFER, ubo_state);
+diff --git a/src/gl/gl3immed.cpp b/src/gl/gl3immed.cpp
+index 8b06c0e..d5cb162 100644
+--- a/src/gl/gl3immed.cpp
++++ b/src/gl/gl3immed.cpp
+@@ -93,11 +93,16 @@ openIm2D(void)
+ 	glBindBuffer(GL_ARRAY_BUFFER, im2DVbo);
+ 	glBufferData(GL_ARRAY_BUFFER, STARTVERTICES*sizeof(Im2DVertex), nil, GL_STREAM_DRAW);
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glGenVertexArrays(1, &im2DVao);
+-	glBindVertexArray(im2DVao);
+-	setAttribPointers(im2dattribDesc, 3);
+-#endif
++	// TSSM port (perf11_cpu): the stream's vertex array holds its index
++	// buffer and attributes (bindVertexArray in gl3device.cpp).
++	im2DVao = 0;
++	if(useVaos){
++		glGenVertexArrays(1, &im2DVao);
++		bindVertexArray(im2DVao);
++		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im2DIbo);
++		setAttribPointers(im2dattribDesc, 3);
++		bindDefaultVertexArray();
++	}
+ }
+ 
+ void
+@@ -105,9 +110,10 @@ closeIm2D(void)
+ {
+ 	glDeleteBuffers(1, &im2DIbo);
+ 	glDeleteBuffers(1, &im2DVbo);
+-#ifdef RW_GL_USE_VAOS
+-	glDeleteVertexArrays(1, &im2DVao);
+-#endif
++	if(im2DVao){
++		forgetVertexArray(im2DVao);
++		glDeleteVertexArrays(1, &im2DVao);
++	}
+ 	im2dShader->destroy();
+ 	im2dShader = nil;
+ }
+@@ -156,6 +162,30 @@ streamSize(int32 n, int32 usual)
+ 	return n > usual ? n : usual;
+ }
+ 
++// TSSM port (perf11_cpu): a stream buffer is given storage of the batch's own
++// size, with the batch in it, in one call. It used to be orphaned at 10000
++// elements (280 KB of im2d vertices, 360 KB of im3d) and then written: about
++// 15 times a frame, 400 MB a second of fresh buffer storage at 120 fps for a
++// HUD, shadows and screen passes that hand over a few kilobytes. A new store
++// each time is still what keeps the driver from waiting on draws that read
++// the old one. Not a ring written in place with glBufferSubData or a mapping:
++// what those cost depends on how the driver handles a write to a buffer the
++// GPU may still be reading, from a stall to a copy of the whole buffer, and
++// mapping was 2.5 times slower on NVIDIA. TSSM_GL_STREAM=0 is the old way.
++static bool32 streamExact = 1;
++
++static void
++streamData(GLenum target, uint32 buffer, int32 n, int32 usual, uint32 elemSize, void *data)
++{
++	glBindBuffer(target, buffer);
++	if(streamExact)
++		glBufferData(target, n*elemSize, data, GL_STREAM_DRAW);
++	else{
++		glBufferData(target, streamSize(n, usual)*elemSize, nil, GL_STREAM_DRAW);
++		glBufferSubData(target, 0, n*elemSize, data);
++	}
++}
++
+ void
+ im2DRenderPrimitive(PrimitiveType primType, void *vertices, int32 numVertices)
+ {
+@@ -163,29 +193,26 @@ im2DRenderPrimitive(PrimitiveType primType, void *vertices, int32 numVertices)
+ 	// depth buffer, and a screen-space quad is not one. See setIm2DActive.
+ 	setIm2DActive(1);
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(im2DVao);
+-#endif
++	if(useVaos)
++		bindVertexArray(im2DVao);
++	else
++		bindDefaultVertexArray();
+ 
+-	glBindBuffer(GL_ARRAY_BUFFER, im2DVbo);
+-	glBufferData(GL_ARRAY_BUFFER, streamSize(numVertices, STARTVERTICES)*sizeof(Im2DVertex), nil, GL_STREAM_DRAW);
+-	glBufferSubData(GL_ARRAY_BUFFER, 0, numVertices*sizeof(Im2DVertex), vertices);
++	streamData(GL_ARRAY_BUFFER, im2DVbo, numVertices, STARTVERTICES, sizeof(Im2DVertex), vertices);
+ 
+ 	if(im2dOverrideShader)
+ 		im2dOverrideShader->use();
+ 	else
+ 		im2dShader->use();
+-#ifndef RW_GL_USE_VAOS
+-	setAttribPointers(im2dattribDesc, 3);
+-#endif
++	if(!useVaos)
++		setAttribPointers(im2dattribDesc, 3);
+ 
+ 	im2DSetXform();
+ 
+ 	flushCache();
+ 	glDrawArrays(primTypeMap[primType], 0, numVertices);
+-#ifndef RW_GL_USE_VAOS
+-	disableAttribPointers(im2dattribDesc, 3);
+-#endif
++	if(!useVaos)
++		disableAttribPointers(im2dattribDesc, 3);
+ 	setIm2DActive(0);
+ }
+ 
+@@ -198,34 +225,29 @@ im2DRenderIndexedPrimitive(PrimitiveType primType,
+ 	// depth buffer, and a screen-space quad is not one. See setIm2DActive.
+ 	setIm2DActive(1);
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(im2DVao);
+-#endif
+-
+-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im2DIbo);
+-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, streamSize(numIndices, STARTINDICES)*2, nil, GL_STREAM_DRAW);
+-	glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, numIndices*2, indices);
++	// The vertex array first: the index buffer binding is its.
++	if(useVaos)
++		bindVertexArray(im2DVao);
++	else
++		bindDefaultVertexArray();
+ 
+-	glBindBuffer(GL_ARRAY_BUFFER, im2DVbo);
+-	glBufferData(GL_ARRAY_BUFFER, streamSize(numVertices, STARTVERTICES)*sizeof(Im2DVertex), nil, GL_STREAM_DRAW);
+-	glBufferSubData(GL_ARRAY_BUFFER, 0, numVertices*sizeof(Im2DVertex), vertices);
++	streamData(GL_ELEMENT_ARRAY_BUFFER, im2DIbo, numIndices, STARTINDICES, 2, indices);
++	streamData(GL_ARRAY_BUFFER, im2DVbo, numVertices, STARTVERTICES, sizeof(Im2DVertex), vertices);
+ 
+ 	if(im2dOverrideShader)
+ 		im2dOverrideShader->use();
+ 	else
+ 		im2dShader->use();
+-#ifndef RW_GL_USE_VAOS
+-	setAttribPointers(im2dattribDesc, 3);
+-#endif
++	if(!useVaos)
++		setAttribPointers(im2dattribDesc, 3);
+ 
+ 	im2DSetXform();
+ 
+ 	flushCache();
+ 	glDrawElements(primTypeMap[primType], numIndices,
+ 	               GL_UNSIGNED_SHORT, nil);
+-#ifndef RW_GL_USE_VAOS
+-	disableAttribPointers(im2dattribDesc, 3);
+-#endif
++	if(!useVaos)
++		disableAttribPointers(im2dattribDesc, 3);
+ 	setIm2DActive(0);
+ }
+ 
+@@ -269,11 +291,18 @@ openIm3D(void)
+ 	glBindBuffer(GL_ARRAY_BUFFER, im3DVbo);
+ 	glBufferData(GL_ARRAY_BUFFER, STARTVERTICES*sizeof(Im3DVertex), nil, GL_STREAM_DRAW);
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glGenVertexArrays(1, &im3DVao);
+-	glBindVertexArray(im3DVao);
+-	setAttribPointers(im3dattribDesc, 4);
+-#endif
++	// TSSM port (perf11_cpu): as im2d's. And the stream switch, read here
++	// rather than in openIm2D because it is declared below that.
++	const char *e = getenv("TSSM_GL_STREAM");
++	streamExact = e == nil || *e == '\0' || atoi(e) != 0;
++	im3DVao = 0;
++	if(useVaos){
++		glGenVertexArrays(1, &im3DVao);
++		bindVertexArray(im3DVao);
++		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im3DIbo);
++		setAttribPointers(im3dattribDesc, 4);
++		bindDefaultVertexArray();
++	}
+ }
+ 
+ void
+@@ -281,9 +310,10 @@ closeIm3D(void)
+ {
+ 	glDeleteBuffers(1, &im3DIbo);
+ 	glDeleteBuffers(1, &im3DVbo);
+-#ifdef RW_GL_USE_VAOS
+-	glDeleteVertexArrays(1, &im3DVao);
+-#endif
++	if(im3DVao){
++		forgetVertexArray(im3DVao);
++		glDeleteVertexArrays(1, &im3DVao);
++	}
+ 	im3dShader->destroy();
+ 	im3dShader = nil;
+ }
+@@ -311,23 +341,26 @@ im3DTransform(void *vertices, int32 numVertices, Matrix *world, uint32 flags)
+ 	if((flags & im3d::VERTEXUV) == 0)
+ 		SetRenderStatePtr(TEXTURERASTER, nil);
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(im2DVao);
+-#endif
++	// TSSM port (perf11_cpu): im3d's own vertex array (upstream bound im2d's
++	// here), bound again by the draws in case something came in between.
++	if(useVaos)
++		bindVertexArray(im3DVao);
++	else
++		bindDefaultVertexArray();
+ 
+-	glBindBuffer(GL_ARRAY_BUFFER, im3DVbo);
+-	glBufferData(GL_ARRAY_BUFFER, streamSize(numVertices, STARTVERTICES)*sizeof(Im3DVertex), nil, GL_STREAM_DRAW);
+-	glBufferSubData(GL_ARRAY_BUFFER, 0, numVertices*sizeof(Im3DVertex), vertices);
+-#ifndef RW_GL_USE_VAOS
+-	setAttribPointers(im3dattribDesc, 4);
+-#endif
++	streamData(GL_ARRAY_BUFFER, im3DVbo, numVertices, STARTVERTICES, sizeof(Im3DVertex), vertices);
++	if(!useVaos)
++		setAttribPointers(im3dattribDesc, 4);
+ 	num3DVertices = numVertices;
+ }
+ 
+ void
+ im3DRenderPrimitive(PrimitiveType primType)
+ {
+-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im3DIbo);
++	if(useVaos)
++		bindVertexArray(im3DVao);
++	else
++		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im3DIbo);
+ 
+ 	flushCache();
+ 	glDrawArrays(primTypeMap[primType], 0, num3DVertices);
+@@ -336,9 +369,9 @@ im3DRenderPrimitive(PrimitiveType primType)
+ void
+ im3DRenderIndexedPrimitive(PrimitiveType primType, void *indices, int32 numIndices)
+ {
+-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im3DIbo);
+-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, streamSize(numIndices, STARTINDICES)*2, nil, GL_STREAM_DRAW);
+-	glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, numIndices*2, indices);
++	if(useVaos)
++		bindVertexArray(im3DVao);
++	streamData(GL_ELEMENT_ARRAY_BUFFER, im3DIbo, numIndices, STARTINDICES, 2, indices);
+ 
+ 	flushCache();
+ 	glDrawElements(primTypeMap[primType], numIndices,
+@@ -348,9 +381,8 @@ im3DRenderIndexedPrimitive(PrimitiveType primType, void *indices, int32 numIndic
+ void
+ im3DEnd(void)
+ {
+-#ifndef RW_GL_USE_VAOS
+-	disableAttribPointers(im3dattribDesc, 4);
+-#endif
++	if(!useVaos)
++		disableAttribPointers(im3dattribDesc, 4);
+ }
+ 
+ }
+diff --git a/src/gl/gl3pipe.cpp b/src/gl/gl3pipe.cpp
+index a34d726..0ce3932 100644
+--- a/src/gl/gl3pipe.cpp
++++ b/src/gl/gl3pipe.cpp
+@@ -30,9 +30,12 @@ freeInstanceData(Geometry *geometry)
+ 	geometry->instData = nil;
+ 	glDeleteBuffers(1, &header->ibo);
+ 	glDeleteBuffers(1, &header->vbo);
+-#ifdef RW_GL_USE_VAOS
+-	glDeleteBuffers(1, &header->vao);
+-#endif
++	// TSSM port (perf11_cpu): a vertex array, not a buffer (upstream deleted
++	// it with glDeleteBuffers).
++	if(header->vao){
++		forgetVertexArray(header->vao);
++		glDeleteVertexArrays(1, &header->vao);
++	}
+ 	rwFree(header->indexBuffer);
+ 	rwFree(header->vertexBuffer);
+ 	rwFree(header->attribDesc);
+@@ -87,11 +90,16 @@ instanceMesh(rw::ObjPipeline *rwpipe, Geometry *geo)
+ 	header->attribDesc = nil;
+ 	header->ibo = 0;
+ 	header->vbo = 0;
+-
+-#ifdef RW_GL_USE_VAOS
+-	glGenVertexArrays(1, &header->vao);
+-	glBindVertexArray(header->vao);
+-#endif
++	header->vao = 0;
++
++	// TSSM port (perf11_cpu): the index buffer binding is the vertex array's,
++	// so the geometry's own is bound before it. Without vertex arrays this
++	// binds the index buffer into the default one, as it always did.
++	if(useVaos){
++		glGenVertexArrays(1, &header->vao);
++		bindVertexArray(header->vao);
++	}else
++		bindDefaultVertexArray();
+ 	glGenBuffers(1, &header->ibo);
+ 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, header->ibo);
+ 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, header->totalNumIndex*2,
+@@ -310,17 +318,17 @@ defaultInstanceCB(Geometry *geo, InstanceDataHeader *header, bool32 reinstance)
+ 		}
+ 	}
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(header->vao);
+-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, header->ibo);
+-#endif
++	// TSSM port (perf11_cpu): the attributes are recorded in the geometry's
++	// vertex array, then the default one is bound again (bindVertexArray).
++	if(useVaos)
++		bindVertexArray(header->vao);
+ 	glBindBuffer(GL_ARRAY_BUFFER, header->vbo);
+ 	glBufferData(GL_ARRAY_BUFFER, header->totalNumVertex*attribs[0].stride,
+ 	             header->vertexBuffer, GL_STATIC_DRAW);
+-#ifdef RW_GL_USE_VAOS
+-	setAttribPointers(header->attribDesc, header->numAttribs);
+-	glBindVertexArray(0);
+-#endif
++	if(useVaos){
++		setAttribPointers(header->attribDesc, header->numAttribs);
++		bindDefaultVertexArray();
++	}
+ }
+ 
+ void
+diff --git a/src/gl/gl3render.cpp b/src/gl/gl3render.cpp
+index cb6d2f1..42ff489 100644
+--- a/src/gl/gl3render.cpp
++++ b/src/gl/gl3render.cpp
+@@ -90,24 +90,25 @@ disableAttribPointers(AttribDesc *attribDescs, int32 numAttribs)
+ 		glDisableVertexAttribArray(a->index);
+ }
+ 
++// TSSM port (perf11_cpu): with vertex array objects the geometry's own holds
++// its buffers and attributes (bindVertexArray in gl3device.cpp).
+ void
+ setupVertexInput(InstanceDataHeader *header)
+ {
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(header->vao);
+-#else
++	if(useVaos){
++		bindVertexArray(header->vao);
++		return;
++	}
+ 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, header->ibo);
+ 	glBindBuffer(GL_ARRAY_BUFFER, header->vbo);
+ 	setAttribPointers(header->attribDesc, header->numAttribs);
+-#endif
+ }
+ 
+ void
+ teardownVertexInput(InstanceDataHeader *header)
+ {
+-#ifndef RW_GL_USE_VAOS
+-	disableAttribPointers(header->attribDesc, header->numAttribs);
+-#endif
++	if(!useVaos)
++		disableAttribPointers(header->attribDesc, header->numAttribs);
+ }
+ 
+ int32
+diff --git a/src/gl/gl3skin.cpp b/src/gl/gl3skin.cpp
+index 72a7f13..83c9877 100644
+--- a/src/gl/gl3skin.cpp
++++ b/src/gl/gl3skin.cpp
+@@ -198,17 +198,16 @@ skinInstanceCB(Geometry *geo, InstanceDataHeader *header, bool32 reinstance)
+ 			  header->totalNumVertex, a->stride);
+ 	}
+ 
+-#ifdef RW_GL_USE_VAOS
+-	glBindVertexArray(header->vao);
+-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, header->ibo);
+-#endif
++	// TSSM port (perf11_cpu): as in gl3pipe.cpp's instance.
++	if(useVaos)
++		bindVertexArray(header->vao);
+ 	glBindBuffer(GL_ARRAY_BUFFER, header->vbo);
+ 	glBufferData(GL_ARRAY_BUFFER, header->totalNumVertex*attribs[0].stride,
+ 	             header->vertexBuffer, GL_STATIC_DRAW);
+-#ifdef RW_GL_USE_VAOS
+-	setAttribPointers(header->attribDesc, header->numAttribs);
+-	glBindVertexArray(0);
+-#endif
++	if(useVaos){
++		setAttribPointers(header->attribDesc, header->numAttribs);
++		bindDefaultVertexArray();
++	}
+ }
+ 
+ void
+diff --git a/src/gl/rwgl3.h b/src/gl/rwgl3.h
+index 9d188a3..2d6a9a5 100644
+--- a/src/gl/rwgl3.h
++++ b/src/gl/rwgl3.h
+@@ -90,6 +90,13 @@ struct InstanceData
+ 	uint32    offset;
+ };
+ 
++// TSSM port (perf11_cpu): every geometry gets a vertex array object where the
++// context has them. Whether they are used is decided at run time (useVaos), so
++// the field is always there.
++#ifndef RW_GL_USE_VAOS
++#define RW_GL_USE_VAOS
++#endif
++
+ struct InstanceDataHeader : rw::InstanceDataHeader
+ {
+ 	uint32      serialNumber;
+@@ -426,6 +433,12 @@ void setAttribPointers(AttribDesc *attribDescs, int32 numAttribs);
+ void disableAttribPointers(AttribDesc *attribDescs, int32 numAttribs);
+ void setupVertexInput(InstanceDataHeader *header);
+ void teardownVertexInput(InstanceDataHeader *header);
++// TSSM port (perf11_cpu): vertex array objects and their cached binding; see
++// bindVertexArray in gl3device.cpp.
++extern bool32 useVaos;
++void bindVertexArray(uint32 vao);
++void bindDefaultVertexArray(void);
++void forgetVertexArray(uint32 vao);
+ 
+ // Render state
+ 

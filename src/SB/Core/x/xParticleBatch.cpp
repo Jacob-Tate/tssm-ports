@@ -69,7 +69,19 @@ namespace
         {
             if (b1.texture != b2.texture)
             {
+#ifdef PLATFORM_PC
+                // The console's b1.texture - b2.texture is a real signed divide by
+                // sizeof(RwTexture), so for two real textures its sign is the order of the
+                // addresses. (Not for NULL: the console's addresses are above 0x80000000, so its
+                // wrapped difference sorts a NULL texture last; this sorts it first.) clang and gcc
+                // may assume a pointer difference divides exactly and, once optimizing, shift and
+                // multiply by the inverse: for two textures from a heap the sign comes out wrong,
+                // and differently each way round on a 32-bit build. quicksort then walks past its
+                // sentinels and off the array (a crash while a level loads).
+                return b1.texture < b2.texture ? -1 : 1;
+#else
                 return b1.texture - b2.texture;
+#endif
             }
 
             // Retail compares b1's sort flag with itself, so this never decides the order.

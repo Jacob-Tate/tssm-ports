@@ -1,6 +1,14 @@
 #include "xserializer.h"
 #include "xDebug.h"
 
+// PC port: a little-endian host writes multi-byte values into the bit stream in the console's
+// (big-endian) byte order, so saves stay interchangeable. The GameCube build is unchanged.
+#if defined(PLATFORM_PC) &&                                                                        \
+    ((defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) || defined(_M_IX86) || \
+     defined(_M_X64) || defined(_M_ARM64))
+#define XSER_ELEMENT_BYTE(data, elesize, byteidx)                                                  \
+    ((data) + ((byteidx) - (byteidx) % (elesize)) + ((elesize) - 1 - (byteidx) % (elesize)))
+#endif
 
 static S32 g_serinit;
 static st_XSERIAL_DATA_PRIV g_xserdata = { 0, NULL, 0, NULL, NULL, { NULL, 0, 0, 0 } };
@@ -150,7 +158,11 @@ S32 xSerial::Write(char* data, S32 elesize, S32 n)
         char* cptr = data;
         for (S32 i = 0; i < nbit; i++)
         {
+#ifdef XSER_ELEMENT_BYTE
+            wrbit(*XSER_ELEMENT_BYTE(data, elesize, i >> 3) & g_tbl_onbit[bidx]);
+#else
             wrbit(*cptr & g_tbl_onbit[bidx]);
+#endif
             bidx++;
             if (bidx == 8)
             {
@@ -232,6 +244,9 @@ S32 xSerial::Read(char* buf, S32 elesize, S32 n)
         for (S32 i = 0; i < nbit; i++)
         {
             S32 bitval = rdbit();
+#ifdef XSER_ELEMENT_BYTE
+            cptr = XSER_ELEMENT_BYTE(buf, elesize, i >> 3);
+#endif
             if (bitval)
             {
                 *cptr |= (char)g_tbl_onbit[bidx];

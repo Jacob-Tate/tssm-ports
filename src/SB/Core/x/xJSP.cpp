@@ -314,7 +314,10 @@ void xJSP_Destroy(xJSPHeader* jsp)
     while (cur != end)
     {
         apAtom = rwLLLinkGetData(cur, RpAtomic, inClumpLink);
+#ifndef PLATFORM_PC
+        // PC: librw's atomic has no world-sector list; xJSPNodeLightBuild did not link one.
         rwLinkListInitialize(&apAtom->llWorldSectorsInAtomic);
+#endif
         cur = rwLLLinkGetNext(cur);
     }
 
@@ -361,8 +364,12 @@ void xJSPNodeLightBuild(xJSPHeader* jsp)
 
         nlight->dummyTie.worldSector = &nlight->dummySector;
         rwLLLinkInitialize(&nlight->dummyTie.lWorldSectorInAtomic);
+#ifndef PLATFORM_PC
+        // PC: librw's atomic has no world-sector list, so the node's lights are not tied to the
+        // atomic; the port has to light JSP atomics another way.
         rwLinkListAddLLLink(&apAtom->llWorldSectorsInAtomic,
                             &nlight->dummyTie.lWorldSectorInAtomic);
+#endif
 
         rwLinkListInitialize(&nlight->dummySector.lightsInWorldSector);
 

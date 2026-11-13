@@ -32,7 +32,33 @@ compile_commands.json
 
 # Miscellaneous
 /*.txt
+# ...but not the PC port's build (/*.txt above would cover it)
+!/CMakeLists.txt
 *.exe
+
+# PC port build directories and output (CMakeLists.txt, build-*.bat)
+/build-*/
+/build-pc/
+/bin/
+CMakeUserPresets.json
+
+# Taken by CMake while it applies tools/librw/*.patch
+tools/librw/cmake.lock
+
+# App icon art (docs/ICON.md). The picture and everything tools/make_icons.ps1
+# makes from it stay outside the repository; these catch a copy made inside it
+# anyway. tools/check_icon_art.py checks what is staged.
+/local-assets/
+/icons/
+*.ico
+*.icns
+tssm-logo*
+ic_launcher_foreground.png
+tssm_icon.xml
+icon-64.png
+play-512.png
+preview.png
+/icon.jpg
 
 # Local assistant and editor-tool folders and notes: never part of the project
 .claude/

@@ -115,12 +115,23 @@ U8 xFXCameraTexture::create(S32 w, S32 h, bool need_zwrite, S32 bpp, S32 zbpp)
 
     if (need_zwrite)
     {
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: the console's camera draws into the EFB, which has depth of its own, so this
+        // raster only describes it. librw draws into the raster's own render target, which has no
+        // depth unless the camera is given a z raster: with none, whatever draws last is on top,
+        // and a model seen through the camera (SpongeBob in Neptune's scope) comes out inside-out.
+        zraster = RwRasterCreate(w, h, 0, rwRASTERTYPEZBUFFER);
+#else
         zraster = RwRasterCreate(w, h, zbpp, rwRASTERTYPECAMERATEXTURE | rwRASTERDONTALLOCATE);
+#endif
         if (zraster == NULL)
         {
             destroy();
             return FALSE;
         }
+#ifdef PLATFORM_PC
+        RwCameraSetZRaster(cam, zraster);
+#endif
     }
 
     max_tw = texture_bits(w);
@@ -142,6 +153,12 @@ void xFXCameraTexture::destroy()
 
     if (zraster != NULL)
     {
+#ifdef PLATFORM_PC
+        if (cam != NULL)
+        {
+            RwCameraSetZRaster(cam, NULL);
+        }
+#endif
         RwRasterDestroy(zraster);
     }
 

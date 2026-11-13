@@ -1,0 +1,24 @@
+diff --git a/src/d3d/xbox.cpp b/src/d3d/xbox.cpp
+index f972130..67ecb40 100644
+--- a/src/d3d/xbox.cpp
++++ b/src/d3d/xbox.cpp
+@@ -1035,9 +1035,17 @@ createNativeRaster(void *object, int32 offset, int32)
+ }
+ 
+ static void*
+-destroyNativeRaster(void *object, int32, int32)
++destroyNativeRaster(void *object, int32 offset, int32)
+ {
+-	// TODO:
++	// Free what rasterCreateTexture and readNativeTexture allocated.
++	// convertTexToCurrentPlatform destroys every Xbox raster right after
++	// converting it, so with an empty destructor each Xbox texture's texels
++	// and palette leaked at load.
++	XboxRaster *raster = PLUGINOFFSET(XboxRaster, object, offset);
++	rwFree(raster->texture);
++	raster->texture = nil;
++	rwFree(raster->palette);
++	raster->palette = nil;
+ 	return object;
+ }
+ 

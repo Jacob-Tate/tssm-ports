@@ -619,6 +619,11 @@ void zGameLoop()
             {
                 zSB04_BossPreRender();
             }
+
+#ifdef PLATFORM_PC
+            // PC: the shadows, before the scene's camera begins (zScene.cpp).
+            zScenePreRenderShadows();
+#endif
         }
 
         zCamBeginRender();

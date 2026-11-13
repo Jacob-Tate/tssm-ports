@@ -4,6 +4,10 @@
 
 #include <PowerPC_EABI_Support/MSL_C/MSL_Common/stdlib.h>
 
+#ifdef PLATFORM_PC
+#include "iDecalFilter.h"
+#endif
+
 struct _ProjectionParam
 {
     RwV3d at;
@@ -155,11 +159,20 @@ static inline RwCamera* ShadowCameraUpdate(RwCamera* shadowCamera, void* model,
 
     GCSaveFrameBuffer();
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: clear the whole raster. The console shrinks the camera by a texel each
+    // way around its clear; a host clear covers exactly that shrunk viewport, so the last
+    // row and column were never cleared. InvertRaster below then flipped them on every
+    // update, and the projection's CLAMP addressing spread that edge over every receiving
+    // triangle that reaches it: a dark patch on the ground that flickers at 30 Hz (BB02).
+    RwCameraClear(shadowCamera, &bgColor, rwCAMERACLEARIMAGE);
+#else
     shadowCamera->frameBuffer->width--;
     shadowCamera->frameBuffer->height--;
     RwCameraClear(shadowCamera, &bgColor, rwCAMERACLEARIMAGE);
     shadowCamera->frameBuffer->width++;
     shadowCamera->frameBuffer->height++;
+#endif
 
     RwFrameOrthoNormalize(RwCameraGetFrame(shadowCamera));
 
@@ -237,10 +250,209 @@ void xShadowSetLight(xVec3* target_pos, xVec3* in_vec, F32)
     RwFrameUpdateObjects(camFrame);
 }
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the shadow pre-pass (xShadowManager_PreRender below).
+//
+// xShadowManager_Render runs in the middle of the scene, and every shadow it
+// casts ends the scene's camera, draws the caster into the 128x128 shadow
+// raster, and begins the scene's camera again, after which the shadow's
+// receivers are drawn with that raster. A GPU that draws in tiles (every
+// phone's) writes the whole picture out to memory when the scene's camera is
+// left, and reads it all back in when it is entered again: three times a frame
+// with three casters, colour and depth, every sample of them with
+// anti-aliasing. On the console it is cheap, because the shadow is drawn into
+// a corner of the same frame buffer.
+//
+// So each shadow is drawn before the scene's camera begins, into a raster of
+// its own, by running xShadowManager_Render once beforehand with everything
+// but the shadow cameras switched off and the manager's state put back
+// afterwards. When the scene then reaches xShadowManager_Render, which runs as
+// it always has, each shadow camera update that asks for exactly what was
+// drawn early -- the same model in the same place, the same shadow camera, the
+// same render state -- takes that raster instead of drawing; anything else (a
+// caster that appeared during the scene, a state that differs) is drawn there
+// as before. The render state a shadow is drawn under is the one its update
+// met in the scene of the frame before, and the state the update leaves is the
+// one drawing it early left, so the scene carries on as it did. Same raster
+// size and filtering as the console's.
+#include "iGpuOpt.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#define XSHADOW_PRE_MAX 3
+
+struct xShadowPre
+{
+    void* model;
+    RpAtomic* data;
+    xModelInstance* next;
+    void (*renderCB)(void*);
+    S32 shadowMode;
+    xVec3 center;
+    F32 radius;
+    F32 nearPlane;
+    F32 farPlane;
+    RwV3d cam[4];
+    RwV3d mat[4];
+    U32 modelFlags;
+    iRenderStateSnap before;
+    iRenderStateSnap after;
+    S32 ready;
+};
+
+static xShadowPre sPre[XSHADOW_PRE_MAX];
+static RwRaster* sPreRaster[XSHADOW_PRE_MAX];
+static S32 sPreCount;
+static S32 sPrePassing;
+static S32 sInManagerRender;
+static S32 sCallIndex;
+static iRenderStateSnap sMetState[XSHADOW_PRE_MAX];
+static S32 sMetStateValid[XSHADOW_PRE_MAX];
+static S32 sEarly;
+static S32 sLate;
+
+static void xShadowPreKey(xShadowPre* p, void* model, void (*renderCB)(void*), xVec3* center,
+                          F32 radius, S32 shadowMode)
+{
+    xModelInstance* minst = (xModelInstance*)model;
+    RwMatrixTag* camMat = RwFrameGetMatrix(RwCameraGetFrame(ShadowCamera));
+
+    memset(p->cam, 0, sizeof(p->cam));
+    memset(p->mat, 0, sizeof(p->mat));
+    p->model = model;
+    p->data = minst->Data;
+    p->next = minst->Next;
+    p->renderCB = renderCB;
+    p->shadowMode = shadowMode;
+    p->center = *center;
+    p->radius = radius;
+    p->nearPlane = ShadowCamera->nearPlane;
+    p->farPlane = ShadowCamera->farPlane;
+    p->cam[0] = camMat->right;
+    p->cam[1] = camMat->up;
+    p->cam[2] = camMat->at;
+    p->cam[3] = camMat->pos;
+    p->mat[0] = minst->Mat->right;
+    p->mat[1] = minst->Mat->up;
+    p->mat[2] = minst->Mat->at;
+    p->mat[3] = minst->Mat->pos;
+    p->modelFlags = minst->Flags;
+}
+
+static S32 xShadowPreSameKey(const xShadowPre* a, const xShadowPre* b)
+{
+    return a->model == b->model && a->data == b->data && a->next == b->next &&
+           a->renderCB == b->renderCB && a->shadowMode == b->shadowMode &&
+           a->modelFlags == b->modelFlags &&
+           memcmp(&a->center, &b->center, sizeof(a->center)) == 0 &&
+           memcmp(&a->radius, &b->radius, sizeof(a->radius)) == 0 &&
+           memcmp(&a->nearPlane, &b->nearPlane, sizeof(a->nearPlane)) == 0 &&
+           memcmp(&a->farPlane, &b->farPlane, sizeof(a->farPlane)) == 0 &&
+           memcmp(a->cam, b->cam, sizeof(a->cam)) == 0 &&
+           memcmp(a->mat, b->mat, sizeof(a->mat)) == 0;
+}
+
+// The shadow camera update of a caster of the manager's, after
+// ShadowCameraSetSpherePersp has placed the shadow camera. Nonzero when it has
+// been taken care of here: drawn early (in the pre-pass), or taken from what
+// was drawn early (in the scene).
+static S32 xShadowPreCameraUpdate(void* model, void (*renderCB)(void*), xVec3* center, F32 radius,
+                                  S32 shadowMode)
+{
+    if (sPrePassing)
+    {
+        S32 k = sPreCount;
+        if (k >= XSHADOW_PRE_MAX || sPreRaster[k] == NULL)
+        {
+            // Not drawn early; the scene draws it.
+            return 1;
+        }
+
+        xShadowPre* p = &sPre[k];
+        xShadowPreKey(p, model, renderCB, center, radius, shadowMode);
+
+        // Under the state this update met in the scene last time.
+        if (sMetStateValid[k])
+        {
+            iRenderStateRestore(&sMetState[k], TRUE);
+        }
+        iRenderStateSave(&p->before);
+
+        RwCameraSetRaster(ShadowCamera, sPreRaster[k]);
+        ShadowCameraUpdate(ShadowCamera, model, renderCB, shadowMode);
+        RwCameraSetRaster(ShadowCamera, ShadowCameraRaster);
+
+        iRenderStateSave(&p->after);
+        p->ready = 1;
+        sPreCount++;
+        return 1;
+    }
+
+    if (!sInManagerRender)
+    {
+        RwCameraSetRaster(ShadowCamera, ShadowCameraRaster);
+        return 0;
+    }
+
+    S32 call = sCallIndex++;
+    iRenderStateSnap now;
+    iRenderStateSave(&now);
+    if (call < XSHADOW_PRE_MAX)
+    {
+        sMetState[call] = now;
+        sMetStateValid[call] = 1;
+    }
+
+    xShadowPre want;
+    xShadowPreKey(&want, model, renderCB, center, radius, shadowMode);
+
+    for (S32 k = 0; k < sPreCount; k++)
+    {
+        xShadowPre* p = &sPre[k];
+
+        // The bound texture is left out: the update sets its own before it
+        // draws anything.
+        if (p->ready && xShadowPreSameKey(p, &want) && iRenderStateSame(&p->before, &now, TRUE))
+        {
+            p->ready = 0;
+            if (iGpuOptVerify())
+            {
+                // Drawn here as well, as it always was, and compared.
+                RwCameraSetRaster(ShadowCamera, ShadowCameraRaster);
+                ShadowCameraUpdate(ShadowCamera, model, renderCB, shadowMode);
+                ShadowRenderRaster = ShadowCameraRaster;
+                iRenderStateSnap after;
+                iRenderStateSave(&after);
+                iGpuOptVerifyResult(iRenderStateSame(&after, &p->after, FALSE),
+                                    iGpuOptSameRaster(ShadowCameraRaster, sPreRaster[k]));
+                sEarly++;
+                return 1;
+            }
+            RwCameraSetRaster(ShadowCamera, sPreRaster[k]);
+            ShadowRenderRaster = sPreRaster[k];
+            iRenderStateRestore(&p->after, FALSE);
+            sEarly++;
+            return 1;
+        }
+    }
+
+    RwCameraSetRaster(ShadowCamera, ShadowCameraRaster);
+    sLate++;
+    return 0;
+}
+#endif
+
 void xShadowCameraUpdate(void* model, void (*renderCB)(void*), xVec3* center, F32 radius,
                          S32 shadowMode)
 {
     ShadowCameraSetSpherePersp(ShadowCamera, (RwV3d*)center, radius);
+#ifdef PLATFORM_PC
+    if (xShadowPreCameraUpdate(model, renderCB, center, radius, shadowMode))
+    {
+        return;
+    }
+#endif
     ShadowCameraUpdate(ShadowCamera, model, renderCB, shadowMode);
     ShadowRenderRaster = ShadowCameraRaster;
 }
@@ -287,6 +499,10 @@ void xShadowReceiveShadow(xEnt* ent, F32 shadowFactor, S32 shadowMode, RwMatrixT
         }
 
         RwCamera* shadowCamera = ShadowCamera;
+
+#ifdef PLATFORM_PC
+        RwTextureFilterMode stageFilter = iDecalFilterBegin(shadowRast);
+#endif
 
         if (shadowRast != NULL)
         {
@@ -547,6 +763,10 @@ void xShadowReceiveShadow(xEnt* ent, F32 shadowFactor, S32 shadowMode, RwMatrixT
             }
         }
 
+#ifdef PLATFORM_PC
+        iDecalFilterEnd(shadowRast, stageFilter);
+#endif
+
         if (ent->model->Scale.x)
         {
             *ent->model->Mat = oldroot;
@@ -739,9 +959,15 @@ static void ShadowRenderCachePolys(_ProjectionParam* param, xShadowPoly* poly, S
 // Plain (not inline) functions at their PS2 position (BfBB keeps the same order): auto-inlined
 // and stripped at link, but their copies here intern 572.95807f, 0.001745331f, 128.0f and
 // 0.00390625f where retail's .sdata2 has them.
+// PLATFORM_PC: the GameCube renders the shadow camera into the top-left corner of the EFB, the
+// same memory as the picture, so the corner is copied out first and drawn back afterwards. A host
+// gives the shadow camera its own render target and the picture is never touched, so there is
+// nothing to save, and drawing the never-filled copy back would cover the corner with black.
 static void GCSaveFrameBuffer()
 {
+#ifndef PLATFORM_PC
     RwGameCubeCameraTextureFlush(gc_saveraster, 0);
+#endif
 }
 
 static void GCRestoreFrameBuffer()
@@ -762,7 +988,11 @@ static void GCRestoreFrameBuffer()
     RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void*)rwFILTERNEAREST);
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, gc_saveraster);
 
+    // PLATFORM_PC: only the draw is skipped (see GCSaveFrameBuffer); the render states around it
+    // are set as on the console.
+#ifndef PLATFORM_PC
     Im2DRenderQuad(0.0f, 0.0f, size, size, RwIm2DGetFarScreenZ(), recipCamZ, uvOffset);
+#endif
 
     if (oldAlphaFunction >= rwALPHATESTFUNCTIONNEVER)
     {
@@ -1339,6 +1569,10 @@ void xShadowVertical_DrawCache(xShadowCache* cache, F32 shadowFactor, F32 fadeDi
     xVec3 B;
     S32 fogstate;
 
+#ifdef PLATFORM_PC
+    RwTextureFilterMode stageFilter = iDecalFilterBegin(shadowRast);
+#endif
+
     if (shadowRast != NULL)
     {
         RwRenderStateSet(rwRENDERSTATETEXTURERASTER, shadowRast);
@@ -1445,6 +1679,10 @@ void xShadowVertical_DrawCache(xShadowCache* cache, F32 shadowFactor, F32 fadeDi
 
         Im3DBufferPos = 0;
     }
+
+#ifdef PLATFORM_PC
+    iDecalFilterEnd(shadowRast, stageFilter);
+#endif
 
     RwRenderStateSet(rwRENDERSTATEFOGENABLE, (void*)fogstate);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
@@ -1629,6 +1867,16 @@ void xShadowManager_Render()
     old_xClumpColl_FilterFlags = xClumpColl_FilterFlags;
     xClumpColl_FilterFlags |= 0x20;
 
+#ifdef PLATFORM_PC
+    // The pre-pass (sPrePassing) runs this for the shadow cameras alone; the
+    // scene's own run counts its shadow camera updates.
+    if (!sPrePassing)
+    {
+        sInManagerRender = 1;
+        sCallIndex = 0;
+    }
+#endif
+
     for (i = 3; i < sMgrCount; i++)
     {
         sMgrList[i].cache = NULL;
@@ -1727,14 +1975,20 @@ void xShadowManager_Render()
             }
 
             sEntSelf = ep;
-            xShadowVertical_FillCache(mgr_best->cache, &center, radius, dst_depth, 0.0871557f);
+#ifdef PLATFORM_PC
+            if (!sPrePassing)
+#endif
+                xShadowVertical_FillCache(mgr_best->cache, &center, radius, dst_depth, 0.0871557f);
             sEntSelf = NULL;
             sCastEnvironment = 1;
 
             sMgrList[bestIndex].priority = 0;
             sMgrList[bestIndex].cacheReady = 1;
 
-            xShadow_PickEntForNPC(mgr_best);
+#ifdef PLATFORM_PC
+            if (!sPrePassing)
+#endif
+                xShadow_PickEntForNPC(mgr_best);
         }
     }
 
@@ -1804,6 +2058,13 @@ void xShadowManager_Render()
                 ent->model->Next = old_mnext;
             }
 
+#ifdef PLATFORM_PC
+            if (sPrePassing)
+            {
+                continue;
+            }
+#endif
+
             xShadowVertical_DrawCache(sMgrList[i].cache, shadow_strength, 0.0f, 0, NULL, NULL);
 
             if (i == 0 || sMgrList[i].ent->baseType == eBaseTypeBoulder)
@@ -1854,6 +2115,13 @@ void xShadowManager_Render()
         {
             F32 rad;
 
+#ifdef PLATFORM_PC
+            if (sPrePassing)
+            {
+                continue;
+            }
+#endif
+
             if (ent->baseType == eBaseTypeBoulder)
             {
                 rad = ent->model->Data->boundingSphere.radius;
@@ -1884,7 +2152,142 @@ void xShadowManager_Render()
     }
 
     xClumpColl_FilterFlags = old_xClumpColl_FilterFlags;
+
+#ifdef PLATFORM_PC
+    if (!sPrePassing)
+    {
+        sInManagerRender = 0;
+        // What was drawn early is for this run only.
+        sPreCount = 0;
+        iGpuOptShadowFrame(sEarly, sLate);
+        sEarly = 0;
+        sLate = 0;
+    }
+#endif
 }
+
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the shadow pre-pass (see xShadowPreCameraUpdate). Called with
+// no camera in an update, before the scene's camera begins (zGame.cpp); the
+// caller has the player's shadow model in place, as the scene does around
+// xShadowManager_Render. Runs the manager with sPrePassing set, which draws
+// each shadow camera into a raster of its own and skips the cache fill, the
+// receivers and the simple shadows, then puts back everything the run changed.
+void xShadowManager_PreRender(RwCamera* sceneCamera)
+{
+    static xShadowMgr* savedList;
+    static S32 savedCap;
+    static xEntShadow** savedShadow;
+    static xVec3* savedShadowPos;
+    static xVec3* savedShadowVec;
+
+    sPreCount = 0;
+
+    if (!iGpuOptOn(IGPUOPT_PREPASS) || sceneCamera == NULL || ShadowCamera == NULL ||
+        ShadowCameraRaster == NULL || sMgrList == NULL || sMgrCount <= 0 ||
+        RwCameraGetCurrentCamera() != NULL || xglobals->currWorld == NULL)
+    {
+        return;
+    }
+
+    for (S32 k = 0; k < XSHADOW_PRE_MAX; k++)
+    {
+        if (sPreRaster[k] == NULL)
+        {
+            sPreRaster[k] = ShadowRasterCreate(RwRasterGetWidth(ShadowCameraRaster));
+        }
+    }
+
+    if (savedCap < sMgrTotal)
+    {
+        free(savedList);
+        free(savedShadow);
+        free(savedShadowPos);
+        free(savedShadowVec);
+        savedList = (xShadowMgr*)malloc(sMgrTotal * sizeof(xShadowMgr));
+        savedShadow = (xEntShadow**)malloc(sMgrTotal * sizeof(xEntShadow*));
+        savedShadowPos = (xVec3*)malloc(sMgrTotal * sizeof(xVec3));
+        savedShadowVec = (xVec3*)malloc(sMgrTotal * sizeof(xVec3));
+        if (savedList == NULL || savedShadow == NULL || savedShadowPos == NULL ||
+            savedShadowVec == NULL)
+        {
+            savedCap = 0;
+            return;
+        }
+        savedCap = sMgrTotal;
+    }
+
+    // What the run changes: the list (it is compacted, sorted and given
+    // caches), the caches' counts, the casters' light, the light kit, the
+    // shadow camera, and the render state.
+    S32 savedCount = sMgrCount;
+    memcpy(savedList, sMgrList, savedCount * sizeof(xShadowMgr));
+    for (S32 i = 0; i < savedCount; i++)
+    {
+        savedShadow[i] = sMgrList[i].ent->entShadow;
+        if (savedShadow[i] != NULL)
+        {
+            savedShadowPos[i] = savedShadow[i]->pos;
+            savedShadowVec[i] = savedShadow[i]->vec;
+        }
+    }
+    S32 savedEntCount[3];
+    S32 savedPolyCount[3];
+    for (S32 j = 0; j < 3; j++)
+    {
+        savedEntCount[j] = sCacheList[j].entCount;
+        savedPolyCount[j] = sCacheList[j].polyCount;
+    }
+    xLightKit* savedKit = xLightKit_GetCurrent(xglobals->currWorld);
+    RwFrame* camFrame = RwCameraGetFrame(ShadowCamera);
+    RwMatrixTag savedCamMat = *RwFrameGetMatrix(camFrame);
+    F32 savedNear = ShadowCamera->nearPlane;
+    F32 savedFar = ShadowCamera->farPlane;
+    F32 savedRadius = gShadowObjectRadius;
+    RwV3d savedCamPos = gCamPos;
+    RwRaster* savedRenderRaster = ShadowRenderRaster;
+    RwRaster* savedCamRaster = RwCameraGetRaster(ShadowCamera);
+    iRenderStateSnap savedState;
+    iRenderStateSave(&savedState);
+
+    // The scene's camera is current while the manager runs (its culling reads
+    // the frustum); nothing is drawn into it here.
+    RwCameraBeginUpdate(sceneCamera);
+    sPrePassing = 1;
+    xShadowManager_Render();
+    sPrePassing = 0;
+    RwCameraEndUpdate(sceneCamera);
+
+    memcpy(sMgrList, savedList, savedCount * sizeof(xShadowMgr));
+    sMgrCount = savedCount;
+    for (S32 i = 0; i < savedCount; i++)
+    {
+        if (savedShadow[i] != NULL)
+        {
+            savedShadow[i]->pos = savedShadowPos[i];
+            savedShadow[i]->vec = savedShadowVec[i];
+        }
+    }
+    for (S32 j = 0; j < 3; j++)
+    {
+        sCacheList[j].entCount = savedEntCount[j];
+        sCacheList[j].polyCount = savedPolyCount[j];
+    }
+    xLightKit_Enable(savedKit, xglobals->currWorld);
+    *RwFrameGetMatrix(camFrame) = savedCamMat;
+    RwMatrixUpdate(RwFrameGetMatrix(camFrame));
+    RwFrameUpdateObjects(camFrame);
+    ShadowCamera->nearPlane = savedNear;
+    ShadowCamera->farPlane = savedFar;
+    RwCameraSetNearClipPlane(ShadowCamera, savedNear);
+    RwCameraSetFarClipPlane(ShadowCamera, savedFar);
+    gShadowObjectRadius = savedRadius;
+    gCamPos = savedCamPos;
+    ShadowRenderRaster = savedRenderRaster;
+    RwCameraSetRaster(ShadowCamera, savedCamRaster);
+    iRenderStateRestore(&savedState, FALSE);
+}
+#endif
 
 // Dead-stripped in retail; body from Ratatouille's GC builds, where it is live (defined there
 // next to xShadow_PickByBounds). Its later eBaseTypeNPCEntity case and its asserts are left out.

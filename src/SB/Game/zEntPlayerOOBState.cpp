@@ -1,4 +1,7 @@
 #include "zEntPlayerOOBState.h"
+#ifdef PLATFORM_PC
+#include "iScreen.h"
+#endif
 
 #include <types.h>
 #include <string.h>
@@ -138,7 +141,14 @@ namespace oob_state
 
             RwIm2DVertex vert[4];
             set_rect_verts(vert, 0.0f, 0.0f, FB_XRES, FB_YRES, color, rcz, nsz);
+#ifdef PLATFORM_PC
+            // PC: the fade covers the whole screen, not the 4:3 UI box (iScreen.h).
+            iScreen2DScreenSpaceBegin();
+#endif
             RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, vert, 4);
+#ifdef PLATFORM_PC
+            iScreen2DScreenSpaceEnd();
+#endif
         }
 
         static inline void render_hand()
@@ -184,7 +194,13 @@ namespace oob_state
             xVec3 sloc;
 
             xMat4x3Tolocal(&sloc, &mat, &loc);
+#ifdef PLATFORM_PC
+            // PC: the hand is drawn in the 4:3 UI box, so its drag uses the box's
+            // shape rather than the screen's (iScreen.h). The same at 4:3.
+            move_posAdjust += mat.right * x * sloc.z * (iScreenUIWidthF() / iScreenUIHeightF());
+#else
             move_posAdjust += mat.right * x * sloc.z * ((F32)FB_XRES / (F32)FB_YRES);
+#endif
         }
 
         static inline void update_max_out_time(const xSurface& surface)

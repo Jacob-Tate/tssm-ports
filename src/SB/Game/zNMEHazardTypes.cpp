@@ -1636,7 +1636,13 @@ void HAZBasic::Stuff_FriendlyFire(zNMEHazard* haz, S32 flg_hazcolf, const xSwept
         ((xBase*)swdata->optr)->baseType == eBaseTypeNPC)
     {
         xVec3 dir_hit = swdata->worldNormal;
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: optr is the xEnt that was hit; a host compiler puts an enemy's vptr ahead
+        // of its xEnt, so the cast goes through xEnt* (it adjusts) rather than from void*.
+        QueueFriendlyFire(haz, (zNMECommon*)(xEnt*)swdata->optr, &dir_hit, tymInFuture);
+#else
         QueueFriendlyFire(haz, (zNMECommon*)swdata->optr, &dir_hit, tymInFuture);
+#endif
     }
 }
 
@@ -8575,7 +8581,14 @@ void Reflect::HAZReflect::CollideResponse(zNMEHazard* haz, S32 flg_hazcolf,
         }
         else
         {
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: optr is the xEnt that was hit; a host compiler puts an enemy's vptr
+            // ahead of its xEnt, so the cast goes through xEnt* (it adjusts) rather than from void*,
+            // which would make the Damage call below jump through the xEnt's id.
+            zNMECommon* npc = (zNMECommon*)(xEnt*)swdata->optr;
+#else
             zNMECommon* npc = (zNMECommon*)swdata->optr;
+#endif
             xVec3 dir = swdata->worldNormal;
             dir.invert();
             npc->Damage(DMGTYP_REFLECTED, xglobals->___player_ent_dont_use_directly, &dir, -1,

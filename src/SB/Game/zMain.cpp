@@ -48,6 +48,10 @@
 #include "zUICustom.h"
 #include "zVar.h"
 
+#ifdef PLATFORM_PC
+#include "iBoot.h"
+#endif
+
 // Defined in other translation units, but not yet declared in any header.
 char* xTextFindString(const char* name, U32* size);
 void RenderText(const char* text, bool enabled);
@@ -190,6 +194,31 @@ int main(S32 argc, char** argv)
     var_init();
     xTRCInit();
     zMainReadINI(ini);
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: config.ini's [game] boot (iBoot.h), set by iSystemInit before this point.
+    // SB.INI's BOOT and ShowMenuOnBoot have been read; a boot= that is set wins over them, and
+    // means the same as BOOT=<scene> with ShowMenuOnBoot=0. "soak" is SB.INI's BOOT=Soak.
+    if (iBootScene()[0] != '\0')
+    {
+        if (xStricmp(iBootScene(), "soak") == 0)
+        {
+            gSoak = 1;
+            soaklevels = allsoaklevels;
+            strcpy(globals.sceneStart, allsoaklevels[0]);
+            globals.ForceAllCinematics = 1;
+        }
+        else
+        {
+            gSoak = 0;
+            strcpy(globals.sceneStart, iBootScene());
+            for (char* c = globals.sceneStart; *c != '\0'; c++)
+            {
+                *c = toupper(*c);
+            }
+        }
+        sShowMenuOnBoot = 0;
+    }
+#endif
     zFX_GameInit();
     xFMVSetPauseSoundCB(SB04FMVPauseSoundCB);
     iSystemInitGraphics();
@@ -678,6 +707,17 @@ static void zMainLoop()
         {
             sShowMenuOnBoot = 1;
             globals.firstStartPressed = TRUE;
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: only the menu and game loops count frames, so a boot straight into a
+            // scene (SB.INI ShowMenuOnBoot=0, or config.ini's game.boot) reaches the scene's
+            // first cutscene with gFrameCount still 0, and zCutsceneMgrFinishLoad calls itself
+            // for as long as it is 0 -- until the stack overflows. Retail ships
+            // ShowMenuOnBoot=1, so the menu always ran first there.
+            if (gFrameCount == 0)
+            {
+                gFrameCount = 1;
+            }
+#endif
             zGameModeSwitch(eGameMode_Game);
             zGameStateSwitch(0);
         }

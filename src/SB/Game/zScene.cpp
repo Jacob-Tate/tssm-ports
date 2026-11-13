@@ -345,7 +345,14 @@ namespace
         if (d.size)
         {
             dyn_size = s.baseCount[d.type] * d.size;
+#ifdef PLATFORM_PC
+            // A host compiler puts a polymorphic type's vptr at offset 0, ahead of its xBase, and
+            // the load functions build each object where its xBase is the slot (xRumble::*::Init,
+            // zUI*_Init), so the first object starts before the array. Room for it.
+            s.baseList[d.type] = (xBase*)((U8*)xMemAllocSize(dyn_size + 16) + 16);
+#else
             s.baseList[d.type] = (xBase*)xMemAllocSize(dyn_size);
+#endif
             xASSERT(s.baseList[d.type]);
         }
 
@@ -1225,6 +1232,12 @@ void zSceneExit(S32 beginReload)
     RpWorld* world;
     // Not in DWARF order (it lists i after ps); declaring it there changes the generated code.
     S32 i;
+
+#ifdef PLATFORM_PC
+    // The scene's HIP (the credits' CRDT among them) is released below, on a reload as well;
+    // credits still running must not outlive it.
+    xCMSceneExit();
+#endif
 
     if (globals.cmgr)
     {
@@ -3457,6 +3470,87 @@ static void zSceneRenderPostFX()
     }
 }
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the shadows drawn before the scene's camera begins, so the scene
+// is drawn without leaving its frame buffer for each one (xShadow.cpp,
+// xShadowManager_PreRender). Called from the game loop beside the other
+// pre-render work, before zCamBeginRender. The player's shadow model is put in
+// place as zSceneRenderPreFX does around xShadowManager_Render, and what
+// putting it there changes (the player's bounds) is put back, so the scene
+// sees the player as it would have.
+void zScenePreRenderShadows()
+{
+    if (globals.sceneCur == NULL || !globals.sceneCur->enableDrawing || globals.screen == NULL)
+    {
+        return;
+    }
+
+    enum
+    {
+        MAX_PARTS = 32
+    };
+    xModelInstance* parts[MAX_PARTS];
+    xBox bounds[MAX_PARTS];
+    U16 flags[MAX_PARTS];
+    S32 count = 0;
+    xModelInstance* head = xglobals->___player_ent_dont_use_directly != NULL ?
+                               xglobals->___player_ent_dont_use_directly->model :
+                               NULL;
+    xBox combined;
+
+    if (head != NULL)
+    {
+        combined = head->combinedAnimBound;
+    }
+    for (xModelInstance* m = head; m != NULL; m = m->Next)
+    {
+        if (count == MAX_PARTS)
+        {
+            return;
+        }
+        parts[count] = m;
+        bounds[count] = m->animBound;
+        flags[count] = m->Flags;
+        count++;
+    }
+    // The shadow model and the body (zEntPlayer_ShadowModelEnable) need not be
+    // in the chain the player draws.
+    xModelInstance* extra[2] = { globals.player.sb_models[0], globals.player.sb_models[10] };
+    xBox extraBounds[2];
+    U16 extraFlags[2];
+    for (S32 i = 0; i < 2; i++)
+    {
+        if (extra[i] != NULL)
+        {
+            extraBounds[i] = extra[i]->animBound;
+            extraFlags[i] = extra[i]->Flags;
+        }
+    }
+
+    zEntPlayer_ShadowModelEnable();
+    xShadowManager_PreRender(globals.screen->icam);
+    zEntPlayer_ShadowModelDisable();
+
+    for (S32 i = 0; i < 2; i++)
+    {
+        if (extra[i] != NULL)
+        {
+            extra[i]->animBound = extraBounds[i];
+            extra[i]->Flags = extraFlags[i];
+        }
+    }
+    for (S32 i = 0; i < count; i++)
+    {
+        parts[i]->animBound = bounds[i];
+        parts[i]->Flags = flags[i];
+    }
+    if (head != NULL)
+    {
+        head->combinedAnimBound = combined;
+    }
+}
+#endif
+
 void zSceneRender()
 {
     zRenderStateBegin();
@@ -3877,6 +3971,15 @@ bool zSceneLoadPackFile(U32 id, S32 options, bool noLocalized, const char* filen
 
     if (!versionNumber && (options & 3))
     {
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: a HIP or HOP the game cannot do without (only the localized pack, 3, is
+        // optional). Retail carries on and crashes in zTransient::scene_enter; a disc always
+        // has the file, a copied file set may not.
+        if ((options & 3) != 3)
+        {
+            iFileMissingPackage(id, options, filename);
+        }
+#endif
         return false;
     }
 

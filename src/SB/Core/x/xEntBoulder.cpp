@@ -526,7 +526,15 @@ void xEntBoulder_Update(xEntBoulder* ent, xScene* sc, F32 dt)
 
         for (i = ent->collis->npc_sidx; i < ent->collis->npc_eidx; i++)
         {
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: optr is the xEnt that was hit (xEntCollide stores the xEnt*). A host
+            // compiler puts an enemy's vptr at offset 0, ahead of its xEnt, so the enemy is reached
+            // by a cast through xEnt* that adjusts, not one from void*: that one reads the vptr
+            // out of the xEnt's id and the Damage call below jumps through it.
+            zNMECommon* npc = (zNMECommon*)(xEnt*)ent->collis->colls[i].optr;
+#else
             zNMECommon* npc = (zNMECommon*)ent->collis->colls[i].optr;
+#endif
 
             if (ent->basset->flags & 0x1)
             {

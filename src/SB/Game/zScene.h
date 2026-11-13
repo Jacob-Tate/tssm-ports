@@ -72,6 +72,9 @@ void zSceneLoad(zScene* ent);
 void zSceneSetup();
 void zSceneUpdate(F32 dt);
 void zSceneRender();
+#ifdef PLATFORM_PC
+void zScenePreRenderShadows();
+#endif
 void zSceneRenderPreFX();
 xBase* zSceneFindObject(U32 gameID);
 xBase* zSceneGetObject(S32 type, S32 idx);

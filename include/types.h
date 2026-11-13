@@ -20,7 +20,7 @@ typedef unsigned long long U64;
 typedef float F32;
 typedef double F64;
 #elif !defined(__MWERKS__)
-// Host builds: the GameCube widths the game code assumes, from <stdint.h>.
+// Host (PC port) builds: the GameCube widths the game code assumes, from <stdint.h>.
 #include <stdint.h>
 typedef int8_t S8;
 typedef int16_t S16;
@@ -60,9 +60,9 @@ typedef intptr_t SPtr;
 #endif
 #define FALSE 0
 
-// The stub is for tools that parse CodeWarrior-only sources (clangd). A host build keeps the host's
+// The stub is for tools that parse CodeWarrior-only sources (clangd). A PC build keeps the host's
 // __declspec: the Windows CRT headers need dllimport/selectany.
-#if !defined(__MWERKS__)
+#if !defined(__MWERKS__) && !defined(PLATFORM_PC)
 #define __declspec(x)
 // #define asm
 #endif

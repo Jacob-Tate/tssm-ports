@@ -57,7 +57,14 @@ void zUIModel::InitModel()
         if (asset->animationList && zAnimListGetNumUsed(asset->animationList) > 0)
         {
             atbl = zAnimListGetTable(asset->animationList);
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: the animation callbacks read their object as an xBase/xEnt
+            // (soundEffectCB reads baseType). A host compiler puts zUI's vptr at offset 0,
+            // ahead of the xBase, so a plain 'this' would be read through the vptr.
+            xAnimPoolAlloc(&globals.sceneCur->mempool, (xBase*)this, atbl, model);
+#else
             xAnimPoolAlloc(&globals.sceneCur->mempool, this, atbl, model);
+#endif
 
             state = xAnimTableGetState(atbl, "idle");
             if (state)

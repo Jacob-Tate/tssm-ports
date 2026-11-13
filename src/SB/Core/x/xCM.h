@@ -108,4 +108,9 @@ void xCMstart(xCreditsData* data, F32, xBase* parent);
 void xCMstop();
 void xCMsetDest(F32 x, F32 y, F32 width, F32 height);
 
+#ifdef PLATFORM_PC
+// Forgets credits still running when their scene unloads (called from zSceneExit).
+void xCMSceneExit();
+#endif
+
 #endif

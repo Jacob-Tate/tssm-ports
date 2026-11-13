@@ -10,6 +10,9 @@
 #include "zPlayerSB.h"
 
 #include <string.h>
+#ifdef PLATFORM_PC
+#include "iScreen.h"
+#endif
 
 extern _tagGameVidMode gVidMode;
 extern S32 g_flg_chEnabled;
@@ -1537,12 +1540,23 @@ void UpgradeSparkleEffect::Update(F32 dt)
 
             // scale first holds the screen-space end x: retail computes it before startX and
             // does not fuse it into the subtraction, as a re-assigned variable does.
+#ifdef PLATFORM_PC
+            // PC: the menu is in the 4:3 UI box, which is this share of the view
+            // window (iScreen.h). The same at 4:3.
+            scale = 2.0f * currentCamera->viewWindow.x * iScreenUIFracXF() *
+                    (1.0f - sparkleScale.z * (sparkleEnd.x / 640.0f));
+            startX = 2.0f * currentCamera->viewWindow.x * iScreenUIFracXF() *
+                     (1.0f - sparkleScale.z * (sparkleStart.x / 640.0f));
+            startY = 2.0f * currentCamera->viewWindow.y * iScreenUIFracYF() *
+                     (1.0f - sparkleScale.z * (sparkleStart.y / 480.0f));
+#else
             scale = 2.0f * currentCamera->viewWindow.x *
                     (1.0f - sparkleScale.z * (sparkleEnd.x / 640.0f));
             startX = 2.0f * currentCamera->viewWindow.x *
                      (1.0f - sparkleScale.z * (sparkleStart.x / 640.0f));
             startY = 2.0f * currentCamera->viewWindow.y *
                      (1.0f - sparkleScale.z * (sparkleStart.y / 480.0f));
+#endif
             vel[i].x = (scale - startX) / totalTimeForEffect;
 
             scale = sparkleScale.x * (sparkleTime * vel[i].x + startX);

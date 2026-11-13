@@ -1,0 +1,428 @@
+diff --git a/src/gl/gl3device.cpp b/src/gl/gl3device.cpp
+index da299a4..aec8554 100644
+--- a/src/gl/gl3device.cpp
++++ b/src/gl/gl3device.cpp
+@@ -2805,6 +2805,9 @@ blitVirtualScreen(Raster *raster)
+ 	currentFramebuffer = 0;
+ }
+ 
++// TSSM port: the frame metrics' GPU counters (TSSM_PERF).
++#include "gl3perf.inc"
++
+ static void
+ showRaster(Raster *raster, uint32 flags)
+ {
+@@ -2812,6 +2815,7 @@ showRaster(Raster *raster, uint32 flags)
+ //		raster->width, raster->height);
+ 
+ 	blitVirtualScreen(raster);
++	perf::endQuery();	// TSSM port: the frame metrics' GPU time ends here
+ 
+ #ifdef LIBRW_SDL2
+ 	if(flags & Raster::FLIPWAITVSYNCH)
+diff --git a/src/gl/gl3perf.inc b/src/gl/gl3perf.inc
+new file mode 100644
+index 0000000..b1fca6e
+--- /dev/null
++++ b/src/gl/gl3perf.inc
+@@ -0,0 +1,366 @@
++// TSSM port: per-frame GPU counters and GPU time, for the port's frame
++// metrics (TSSM_PERF, src/SB/Core/pc/iPerf.h). Included by gl3device.cpp
++// inside rw::gl3, after the virtual screen's framebuffers are declared.
++//
++// Nothing here runs until perfStart. Then:
++//
++// - The counters wrap glad's function pointers (every call librw makes goes
++//   through them), so a build that never calls perfStart pays nothing.
++//   A "pass" is a run of draws or clears into one draw framebuffer; on a GPU
++//   that draws in tiles each one is a load and store of its attachments.
++//   "screen passes" are the passes into the virtual screen the scene is drawn
++//   in (its multisampled framebuffer when there is one).
++// - GPU time is a GL_TIME_ELAPSED query (EXT_disjoint_timer_query on GLES)
++//   from the frame's first camera (perfFrameBegin) to the end of the blit
++//   to the window, just before the swap (perf::endQuery in showRaster), so
++//   neither the pacer's sleep and the game's update before it nor a wait
++//   for the display in the swap is in it. A query's time runs from when the
++//   GPU reaches its start to when it reaches its end, idle or not. Results
++//   are read only when the driver says
++//   they are available (GL_QUERY_RESULT_AVAILABLE), never waited for; a query
++//   still pending when its slot comes round again is dropped and counted.
++
++namespace perf {
++
++static bool on;
++static bool timers;
++static PerfCounts cur;
++static uint32 drawFbo;
++static uint32 passFbo = ~0u;
++
++static PFNGLDRAWELEMENTSPROC o_DrawElements;
++static PFNGLDRAWARRAYSPROC o_DrawArrays;
++static PFNGLBINDFRAMEBUFFERPROC o_BindFramebuffer;
++static PFNGLBLITFRAMEBUFFERPROC o_BlitFramebuffer;
++static PFNGLCLEARPROC o_Clear;
++static PFNGLTEXIMAGE2DPROC o_TexImage2D;
++static PFNGLTEXSUBIMAGE2DPROC o_TexSubImage2D;
++static PFNGLCOMPRESSEDTEXIMAGE2DPROC o_CompressedTexImage2D;
++static PFNGLBUFFERDATAPROC o_BufferData;
++static PFNGLBUFFERSUBDATAPROC o_BufferSubData;
++static PFNGLUSEPROGRAMPROC o_UseProgram;
++static PFNGLBINDTEXTUREPROC o_BindTexture;
++
++static void
++notePass(void)
++{
++	if(drawFbo == passFbo)
++		return;
++	passFbo = drawFbo;
++	cur.passes++;
++	uint32 screen = virtualScreenMSFbo ? virtualScreenMSFbo : virtualScreenFbo;
++	if(drawFbo != 0 && drawFbo == screen)
++		cur.screenPasses++;
++}
++
++static void APIENTRY
++w_DrawElements(GLenum m, GLsizei c, GLenum t, const void *i)
++{
++	notePass();
++	cur.draws++;
++	cur.tris += c/3;
++	o_DrawElements(m, c, t, i);
++}
++
++static void APIENTRY
++w_DrawArrays(GLenum m, GLint f, GLsizei c)
++{
++	notePass();
++	cur.draws++;
++	cur.tris += c/3;
++	o_DrawArrays(m, f, c);
++}
++
++static void APIENTRY
++w_BindFramebuffer(GLenum t, GLuint f)
++{
++	if(t == GL_FRAMEBUFFER || t == GL_DRAW_FRAMEBUFFER)
++		drawFbo = f;
++	o_BindFramebuffer(t, f);
++}
++
++static void APIENTRY
++w_BlitFramebuffer(GLint a, GLint b, GLint c, GLint d, GLint e, GLint f, GLint g, GLint h,
++                  GLbitfield m, GLenum fl)
++{
++	cur.blits++;
++	// A blit is a pass of its own on a tiler, and the target's next draw
++	// starts another.
++	passFbo = ~0u;
++	o_BlitFramebuffer(a, b, c, d, e, f, g, h, m, fl);
++}
++
++static void APIENTRY
++w_Clear(GLbitfield m)
++{
++	notePass();
++	cur.clears++;
++	o_Clear(m);
++}
++
++static void APIENTRY
++w_TexImage2D(GLenum t, GLint l, GLint ifmt, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty,
++             const void *p)
++{
++	if(p){
++		cur.texUploads++;
++		cur.texBytes += (uint32)w*h*4;
++	}
++	o_TexImage2D(t, l, ifmt, w, h, b, f, ty, p);
++}
++
++static void APIENTRY
++w_TexSubImage2D(GLenum t, GLint l, GLint x, GLint y, GLsizei w, GLsizei h, GLenum f, GLenum ty,
++                const void *p)
++{
++	cur.texUploads++;
++	cur.texBytes += (uint32)w*h*4;
++	o_TexSubImage2D(t, l, x, y, w, h, f, ty, p);
++}
++
++static void APIENTRY
++w_CompressedTexImage2D(GLenum t, GLint l, GLenum ifmt, GLsizei w, GLsizei h, GLint b, GLsizei sz,
++                       const void *p)
++{
++	cur.texUploads++;
++	cur.texBytes += sz;
++	o_CompressedTexImage2D(t, l, ifmt, w, h, b, sz, p);
++}
++
++static void APIENTRY
++w_BufferData(GLenum t, GLsizeiptr s, const void *d, GLenum u)
++{
++	cur.bufUploads++;
++	cur.bufBytes += (uint32)s;
++	o_BufferData(t, s, d, u);
++}
++
++static void APIENTRY
++w_BufferSubData(GLenum t, GLintptr o, GLsizeiptr s, const void *d)
++{
++	cur.bufUploads++;
++	cur.bufBytes += (uint32)s;
++	o_BufferSubData(t, o, s, d);
++}
++
++static void APIENTRY
++w_UseProgram(GLuint p)
++{
++	cur.programs++;
++	o_UseProgram(p);
++}
++
++static void APIENTRY
++w_BindTexture(GLenum t, GLuint x)
++{
++	cur.textureBinds++;
++	o_BindTexture(t, x);
++}
++
++// GPU time: a ring of queries, one per frame in flight.
++enum { RING = 8 };
++static GLuint query[RING];
++static uint32 queryFrame[RING];
++static bool queryPending[RING];
++static int32 queryNext;		// the slot the open query uses
++static int32 queryOldest;	// the oldest slot that may be pending
++static bool queryOpen;
++static int32 queryEnded = -1;	// the slot endQuery closed, its frame not yet known
++static uint32 dropped;
++
++static bool
++hasExtension(const char *name)
++{
++	GLint n = 0;
++	glGetIntegerv(GL_NUM_EXTENSIONS, &n);
++	for(GLint i = 0; i < n; i++){
++		const char *e = (const char*)glGetStringi(GL_EXTENSIONS, i);
++		if(e && strcmp(e, name) == 0)
++			return true;
++	}
++	return false;
++}
++
++static void
++beginQuery(void)
++{
++	if(!timers)
++		return;
++	int32 s = queryNext;
++	if(queryPending[s]){
++		// RING frames on and still not available: give it up.
++		queryPending[s] = false;
++		dropped++;
++		if(queryOldest == s)
++			queryOldest = (s + 1) % RING;
++	}
++	glBeginQuery(GL_TIME_ELAPSED, query[s]);
++	queryOpen = true;
++}
++
++// The frame's drawing is all in: called by showRaster after the blit to the
++// window, before the swap.
++static void
++endQuery(void)
++{
++	if(!on || !timers || !queryOpen)
++		return;
++	glEndQuery(GL_TIME_ELAPSED);
++	queryOpen = false;
++	queryEnded = queryNext;
++	queryFrame[queryNext] = ~0u;
++	queryPending[queryNext] = true;
++	queryNext = (queryNext + 1) % RING;
++}
++
++}	// namespace perf
++
++bool32
++perfStart(void)
++{
++	using namespace perf;
++	if(on)
++		return true;
++	if(glGlobals.window == nil)
++		return false;
++	on = true;
++
++#define PERF_WRAP(n) o_##n = glad_gl##n; glad_gl##n = w_##n
++	PERF_WRAP(DrawElements);
++	PERF_WRAP(DrawArrays);
++	PERF_WRAP(BindFramebuffer);
++	PERF_WRAP(BlitFramebuffer);
++	PERF_WRAP(Clear);
++	PERF_WRAP(TexImage2D);
++	PERF_WRAP(TexSubImage2D);
++	PERF_WRAP(CompressedTexImage2D);
++	PERF_WRAP(BufferData);
++	PERF_WRAP(BufferSubData);
++	PERF_WRAP(UseProgram);
++	PERF_WRAP(BindTexture);
++#undef PERF_WRAP
++	drawFbo = currentFramebuffer;
++
++	// Desktop GL has had GL_TIME_ELAPSED since 3.3; GLES needs the extension.
++	timers = gl3Caps.gles ? hasExtension("GL_EXT_disjoint_timer_query")
++	                      : (gl3Caps.glversion >= 33 || hasExtension("GL_ARB_timer_query"));
++	if(glad_glBeginQuery == nil || glad_glGetQueryObjectuiv == nil)
++		timers = false;
++	if(timers){
++		glGenQueries(RING, query);
++		if(gl3Caps.gles){
++			// Reading GPU_DISJOINT clears it.
++			GLint d = 0;
++			glGetIntegerv(0x8FBB /* GL_GPU_DISJOINT_EXT */, &d);
++		}
++	}
++	return true;
++}
++
++bool32
++perfTimers(void)
++{
++	return perf::timers;
++}
++
++void
++perfInfo(PerfInfo *info)
++{
++	info->renderer = (const char*)glGetString(GL_RENDERER);
++	info->version = (const char*)glGetString(GL_VERSION);
++	info->gles = gl3Caps.gles;
++	info->timers = perf::timers;
++	info->samplesWanted = virtualScreenSamplesWanted;
++	info->samples = virtualScreenSamples;
++	info->screenWidth = virtualScreenWidth;
++	info->screenHeight = virtualScreenHeight;
++	int w = 0, h = 0;
++#ifdef LIBRW_SDL3
++	SDL_GetWindowSizeInPixels(glGlobals.window, &w, &h);
++#elif defined(LIBRW_SDL2)
++	SDL_GL_GetDrawableSize(glGlobals.window, &w, &h);
++#endif
++	info->windowWidth = w;
++	info->windowHeight = h;
++}
++
++void
++perfFrame(uint32 frame, PerfCounts *out)
++{
++	using namespace perf;
++	if(!on){
++		memset(out, 0, sizeof(*out));
++		return;
++	}
++	*out = cur;
++	memset(&cur, 0, sizeof(cur));
++	passFbo = ~0u;
++
++	if(!timers)
++		return;
++	endQuery();	// a frame whose showRaster did not (no window)
++	if(queryEnded >= 0){
++		queryFrame[queryEnded] = frame;
++		queryEnded = -1;
++	}
++	if(gl3Caps.gles){
++		// The GPU's clock jumped (a power state change): every result in
++		// flight is meaningless.
++		GLint disjoint = 0;
++		glGetIntegerv(0x8FBB /* GL_GPU_DISJOINT_EXT */, &disjoint);
++		if(disjoint){
++			for(int32 i = 0; i < RING; i++){
++				if(queryPending[i]){
++					queryPending[i] = false;
++					dropped++;
++				}
++			}
++			queryOldest = queryNext;
++		}
++	}
++}
++
++void
++perfFrameBegin(void)
++{
++	using namespace perf;
++	if(on && timers && !queryOpen)
++		beginQuery();
++}
++
++bool32
++perfGpuPoll(uint32 *frame, float32 *ms)
++{
++	using namespace perf;
++	if(!timers)
++		return false;
++	for(int32 n = 0; n < RING; n++){
++		int32 s = queryOldest;
++		if(s == queryNext && queryOpen)
++			return false;	// the open one
++		if(!queryPending[s]){
++			if(s == queryNext)
++				return false;
++			queryOldest = (s + 1) % RING;
++			continue;
++		}
++		GLuint avail = 0;
++		glGetQueryObjectuiv(query[s], GL_QUERY_RESULT_AVAILABLE, &avail);
++		if(!avail)
++			return false;
++		GLuint ns = 0;
++		glGetQueryObjectuiv(query[s], GL_QUERY_RESULT, &ns);
++		queryPending[s] = false;
++		queryOldest = (s + 1) % RING;
++		*frame = queryFrame[s];
++		*ms = ns / 1.0e6f;
++		return true;
++	}
++	return false;
++}
++
++uint32
++perfGpuDropped(void)
++{
++	return perf::dropped;
++}
+diff --git a/src/gl/rwgl3.h b/src/gl/rwgl3.h
+index 2e307a1..9d188a3 100644
+--- a/src/gl/rwgl3.h
++++ b/src/gl/rwgl3.h
+@@ -669,5 +669,29 @@ extern int32 nativeRasterOffset;
+ void registerNativeRaster(void);
+ #define GETGL3RASTEREXT(raster) PLUGINOFFSET(Gl3Raster, raster, rw::gl3::nativeRasterOffset)
+ 
++// TSSM port: per-frame GPU counters and GPU time (gl3perf.inc). Nothing is
++// counted or timed until perfStart, called once the window and context exist.
++struct PerfCounts
++{
++	uint32 draws, tris, passes, screenPasses, blits, clears, programs, textureBinds;
++	uint32 texUploads, texBytes, bufUploads, bufBytes;
++};
++struct PerfInfo
++{
++	const char *renderer, *version;
++	int32 gles, timers, samplesWanted, samples;
++	int32 screenWidth, screenHeight, windowWidth, windowHeight;
++};
++bool32 perfStart(void);
++bool32 perfTimers(void);
++void perfInfo(PerfInfo *info);
++// The frame's first camera: its GPU query opened.
++void perfFrameBegin(void);
++// After the swap of `frame`: its counters, and its GPU query closed.
++void perfFrame(uint32 frame, PerfCounts *out);
++// One finished GPU time, oldest first, without waiting; false when none is ready.
++bool32 perfGpuPoll(uint32 *frame, float32 *ms);
++uint32 perfGpuDropped(void);
++
+ }
+ }

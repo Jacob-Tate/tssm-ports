@@ -299,6 +299,7 @@ static S32 zCameraFlyUpdate(xCamera* cam, F32 dt)
     flyIdx = numKeys + 2 < (S32)(zcam_flysize >> 6) ? numKeys + 2 : numKeys + 1;
     keys[3] = *((zFlyKey*)zcam_flydata + flyIdx);
 
+#ifndef PLATFORM_PC
     // Reverses the byte order (endianness) of 64 4-byte blocks
     data = (U8*)&keys[0].frame;
     for (i = 64; i > 0; i--)
@@ -312,6 +313,15 @@ static S32 zCameraFlyUpdate(xCamera* cam, F32 dt)
 
         data += 4;
     }
+#else
+    // PLATFORM_PC: the fly keys ('FLY ' assets, the level fly-throughs) are little-endian in the
+    // files, which is why the console swaps them here. The port reads the Xbox files on a
+    // little-endian host, so they are already in the host's order; swapping them made every key
+    // garbage and threw the fly-through camera to random places (into the floor, out of the world).
+    (void)data;
+    (void)tmpA;
+    (void)tmpB;
+#endif
 
     if (0 < numKeys)
     {

@@ -6,6 +6,9 @@
 #include <dolphin/gx.h>
 #include <dolphin/mtx.h>
 
+#ifdef PLATFORM_PC
+#include "iScreenWarp.h"
+#endif
 
 #include "iMath.h"
 #include "iMemMgr.h"
@@ -742,6 +745,11 @@ namespace
 
     void render_uvmap(RwCamera* cam)
     {
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: the body below copies the EFB into a texture with GX and draws it back
+        // through the uv map's 16x16 grid; iScreenWarpRender does the same with a render target.
+        iScreenWarpRender(cam, &uvmap_buffer->x, 16);
+#else
         void* frame_buffer_raw = iMemPushTemp(FB_XRES * FB_YRES * 2 + 31);
         if (frame_buffer_raw == NULL)
         {
@@ -823,5 +831,6 @@ namespace
 
         GXDrawDone();
         iMemPopTemp(frame_buffer_raw);
+#endif
     }
 } // namespace

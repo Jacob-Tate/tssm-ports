@@ -12,6 +12,10 @@
 #include <dolphin/gx/GXCpu2Efb.h>
 #include <dolphin/mtx.h>
 
+#ifdef PLATFORM_PC
+#include "iHDRGlow.h"
+#include "iScreen.h"
+#endif
 
 U8 HDR_brightening;
 
@@ -105,7 +109,15 @@ void xFXHighDynamicRangeStartRender()
     set_vert(verts[1], 0.0f, FB_YRES, nsz, color);
     set_vert(verts[2], FB_XRES, 0.0f, nsz, color);
     set_vert(verts[3], FB_XRES, FB_YRES, nsz, color);
+#ifdef PLATFORM_PC
+    // PC: the glow's alpha covers the whole screen, not the 4:3 UI box
+    // (iScreen.h); boxed, the sides of the picture would get no glow.
+    iScreen2DScreenSpaceBegin();
+#endif
     RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, verts, 4);
+#ifdef PLATFORM_PC
+    iScreen2DScreenSpaceEnd();
+#endif
 
     iDrawSetFBMSK(mask, 0xFFFFFFFF, true);
     zRenderState(SDRS_HDRBeginRender);
@@ -121,6 +133,14 @@ void xFXHighDynamicRangeRender(RwCamera* camera)
 
     zRenderState(SDRS_Fill);
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the body below is GX -- copies out of the EFB, a bright pass drawn in the
+    // EFB's top-left corner through five TEV stages, and the result added back over the frame --
+    // which a host does not have. iHDRGlowRender draws the same passes with render targets.
+    iHDRGlowRender(camera, tweak::overbrighten, tweak::downsamples, hdr_down_src, hdr_down_dst,
+                   hdr_src, hdr_dst);
+    hdr_dump_efb = 0;
+#else
     U16 curSizeX = FB_XRES / 2;
     U16 curSizeY = FB_YRES / 2;
 
@@ -330,6 +350,7 @@ void xFXHighDynamicRangeRender(RwCamera* camera)
     GXEnd();
 
     hdr_dump_efb = 0;
+#endif
 }
 
 U32 xFXHighDynamicRangeBrightenPtank(RpAtomic* ptank, bool bright)

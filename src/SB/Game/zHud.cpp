@@ -9,6 +9,9 @@
 #include "zGame.h"
 #include "zGameState.h"
 #include "zGlobals.h"
+#ifdef PLATFORM_PC
+#include "iScreen.h"
+#endif
 
 RwCamera* zHud::HudCamera;
 xLightKit* zHud::HudLightKit;
@@ -34,6 +37,12 @@ void zHud::hud_system::startup()
     HudCamera = iCameraRwCreate();
     RwCameraSetFrame(HudCamera, RwFrameCreate());
     RwV2d vw = { 1.0f, 1.0f };
+#ifdef PLATFORM_PC
+    // (1, 1) is the 4:3 UI box; on a wider or taller screen the window reaches
+    // past it, so a HUD model keeps its shape (iCamera.cpp, iCameraCreate).
+    vw.x /= iScreenUIFracXF();
+    vw.y /= iScreenUIFracYF();
+#endif
     RwCameraSetViewWindow(HudCamera, &vw);
     RwCameraSetProjection(HudCamera, rwPARALLEL);
     RwCameraSetNearClipPlane(HudCamera, 0.3f);

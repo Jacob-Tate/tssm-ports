@@ -247,7 +247,15 @@ zNPC::base* zNPCMgr::FindNPC(U32 aid)
 S32 zNPCMgr_OrdTest_npcid(const void* vkey, void* vitem)
 {
     S32 rc;
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: npclist holds whole enemies (CreateDynNME appends the zNPC::base*). A host
+    // compiler puts their vptr at offset 0, ahead of the xBase, so the first word is the vptr,
+    // not the id: FindNPC found nothing (the Frogfish's tongue, the bat and its boss) and
+    // messages sent to one enemy were lost. The id is read through the class.
+    U32 key = ((zNPC::base*)vitem)->id;
+#else
     U32 key = *(U32*)vitem;
+#endif
 
     if ((U32)(UPtr)vkey < key)
     {
@@ -271,8 +279,15 @@ S32 zNPCMgr_OrdComp_npcid(void* vkey, void* vitem)
     U32 item;
     U32 key;
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the ids, read through the class (zNPCMgr_OrdTest_npcid says why); sorting by
+    // the first word sorted by vptr.
+    key = ((zNPC::base*)vkey)->id;
+    item = ((zNPC::base*)vitem)->id;
+#else
     key = *(U32*)vkey;
     item = *(U32*)vitem;
+#endif
     if (key < item)
     {
         rc = -1;

@@ -65,6 +65,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef PLATFORM_PC
+#include "iDecalFilter.h"
+#endif
+
 struct zNMEHazard;
 
 static F32 CATCH_CAPSULE_RAD = 0.45f;
@@ -5507,6 +5511,65 @@ static void zEntPlayer_BoulderVehicleMove(xEnt*, xScene*, F32, xEntFrame* frame)
     frame->mode = 0x30000;
 }
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC, a deliberate difference from the original: the SpongeBall keeps its full speed on
+// a device that cannot keep about 45 fps. xEntBoulder_Update stops a move longer than half the
+// ball's radius at the floor and rebuilds the velocity from the distance moved, so on the ground
+// the ball covers at most 0.5 * 0.458 = 0.229 units a frame. At 60 fps (the GameCube's rate in
+// the SpongeBall levels) its top speed of 10 units a second is 0.167 a frame and the limit never
+// acts; at 30 fps the ball reached 7 units a second and at 20 about 5, while the breakaway
+// platforms keep counting real time, so the player fell through them. A frame longer than 1/48 s
+// is therefore run as the fewest equal steps of at most 1/60 s (2 at 30 fps, 4 at 15, 6 at the
+// game's 0.1 s clamp), each one the steering push and xEntBoulder_Update as one 60 fps frame
+// does them. Up to 1/48 s it is one step with the whole dt, exactly as before: 60 Hz frames run
+// a few ms either side of 16.7 (at most 18.7 measured in BL01 and BL02) and 50 Hz ones at 20,
+// all below it, and in one 1/48 s step the ball moves at most 0.21 units, so the limit cannot
+// act there anyway. Only the ball's own physics are stepped: the platform and damage checks
+// after it read the last step's contacts, and the timers, triggers and camera run once a frame
+// with the whole dt, as everything else in the level does. So at full speed on a slow frame
+// those checks see a longer move between two looks (0.67 units at 15 fps, against 0.17 at 60):
+// a trigger thinner than that, or a breakaway block touched only in an earlier step, can be
+// missed, as on foot at that frame rate. The ball itself collides in every step.
+static void zEntPlayer_BoulderVehicleSteps(xScene* sc, F32 dt, xEntCollis* collis,
+                                           const xVec3* right, const xVec3* at,
+                                           const xVec2* inputDefl)
+{
+    S32 steps = 1;
+    if (dt > 1.0f / 48.0f)
+    {
+        steps = (S32)(dt * 60.0f - 0.001f) + 1;
+    }
+
+    // the steady pushes given to the ball this frame (the vents add theirs once a frame, before
+    // this update); xEntBoulder_Update applies them over its dt and clears them, so every step
+    // gets them again, and the frame's push is the same as at 60 fps. instForce, a one-off kick
+    // not scaled by dt, is applied by the first step only.
+    xVec3 force = boulderVehicle->force;
+
+    F32 stepDt = dt / steps;
+    for (S32 step = 0; step < steps; step++)
+    {
+        if (step != 0)
+        {
+            memset(collis, 0, sizeof(*collis));
+            boulderVehicle->collis = collis;
+            xVec3AddTo(&boulderVehicle->force, &force);
+        }
+
+        xVec3AddScaled(&boulderVehicle->vel, right, 60.0f * (-0.3f * inputDefl->x) * stepDt);
+        xVec3AddScaled(&boulderVehicle->vel, at, 60.0f * (-0.3f * inputDefl->y) * stepDt);
+        xEntBoulder_Update(boulderVehicle, sc, stepDt);
+
+        // a step that took the controls away (an event from a contact) ends the ball's movement,
+        // as the next 60 fps frame would not move it either
+        if (globals.player.ControlOff)
+        {
+            break;
+        }
+    }
+}
+#endif
+
 static void zEntPlayer_BoulderVehicleUpdate(xEnt* ent, xScene* sc, F32 dt)
 {
     if (dt == 0.0f)
@@ -5589,8 +5652,10 @@ static void zEntPlayer_BoulderVehicleUpdate(xEnt* ent, xScene* sc, F32 dt)
             xVec3Copy(&tempAt, &pCameraMat->up);
         }
 
+#ifndef PLATFORM_PC
         xVec3AddScaled(&boulderVehicle->vel, &tempRight, 60.0f * (-0.3f * inputDefl.x) * dt);
         xVec3AddScaled(&boulderVehicle->vel, &tempAt, 60.0f * (-0.3f * inputDefl.y) * dt);
+#endif
 
         if (globals.player.Visible)
         {
@@ -5604,7 +5669,12 @@ static void zEntPlayer_BoulderVehicleUpdate(xEnt* ent, xScene* sc, F32 dt)
         xEntCollis collis = { 0 };
 
         boulderVehicle->collis = &collis;
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: the steering push and the update, in steps on a slow frame (above).
+        zEntPlayer_BoulderVehicleSteps(sc, dt, &collis, &tempRight, &tempAt, &inputDefl);
+#else
         xEntBoulder_Update(boulderVehicle, sc, dt);
+#endif
 
         U8 collisionWithPlat = FALSE;
         for (S32 i = collis.dyn_sidx; i < collis.dyn_eidx; i++)
@@ -9236,7 +9306,13 @@ void zEntPlayer_CheckCritterContact(xEnt* player, F32 dt)
             continue;
         }
 
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: optr is the xEnt that was hit; a host compiler puts an enemy's vptr ahead
+        // of its xEnt, so the cast goes through xEnt* (it adjusts) rather than from void*.
+        zNMECommon* npc = (zNMECommon*)(xEnt*)colrec->optr;
+#else
         zNMECommon* npc = (zNMECommon*)colrec->optr;
+#endif
 
         if (npc->baseType != eBaseTypeNPC)
         {
@@ -9564,6 +9640,9 @@ static void zEntPlayer_BubbleBowlLaneRender(zEnt* ent)
         }
 
         zRenderState(SDRS_NPCVisual);
+#ifdef PLATFORM_PC
+        RwTextureFilterMode stageFilter = iDecalFilterBegin(sBowlingLaneRast);
+#endif
         RwRenderStateSet(rwRENDERSTATETEXTURERASTER, sBowlingLaneRast);
 
         if (RwIm3DTransform(vtxbuf, 4, Mat, rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
@@ -9572,6 +9651,9 @@ static void zEntPlayer_BubbleBowlLaneRender(zEnt* ent)
             RwIm3DEnd();
         }
 
+#ifdef PLATFORM_PC
+        iDecalFilterEnd(sBowlingLaneRast, stageFilter);
+#endif
         zRenderState(old_rendstat);
     }
 }
@@ -11510,6 +11592,10 @@ static void SlideTrackUpdate(xEnt* p)
             {
                 frame = RpAtomicGetFrame(trackEnt->model->Data);
                 frame->ltm = *trackEnt->model->Mat;
+#ifdef PLATFORM_PC
+                // The port's RpAtomicForAllIntersections reads the modelling matrix, not the ltm.
+                RwFrameTransform(frame, trackEnt->model->Mat, rwCOMBINEREPLACE);
+#endif
 
                 tpoly.mat = (xMat4x3*)trackEnt->model->Mat;
                 tpoly.testEnt = trackEnt;

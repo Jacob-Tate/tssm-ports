@@ -1,0 +1,292 @@
+#ifndef ISAVEGAME_H
+#define ISAVEGAME_H
+
+// PC isavegame.h: treedome's (a directory per save target, atomic writes)
+// with TSSM's interface -- iSGCheckForCorruptFiles returns U8 and
+// iSGIsGameCorrupt is added. Game code treats st_ISGSESSION as opaque, so the
+// layout is the host's to choose.
+
+// Saves on the GameCube live on a memory card, and the whole of this interface
+// is shaped by that: cards are inserted and removed, formatted, run out of
+// blocks, and are addressed by slot. A host filesystem has none of those
+// states, but the game's save UI asks about every one of them, so the shape
+// stays and each question gets the answer that is true on a host.
+//
+// The one structural difference from the gc header is st_ISG_MEMCARD_DATA,
+// which is CARDFileInfo and CARDStat there. Both are runtime types; neither is
+// ever overlaid on save data, so the layout is free.
+//
+// The PS2 DWARF for st_ISG_MEMCARD_DATA and st_ISGSESSION is reproduced in
+// src/SB/Core/gc/isavegame.h; it is the reference for what each field meant.
+
+#include <types.h>
+// gc/isavegame.h includes the Dolphin SDK for CARD; this is the PC subset
+// (compat/dolphin.h), which zSaveLoad.cpp's autosave probe reaches through it.
+#include <dolphin.h>
+
+enum en_ISG_IOMODE
+{
+    ISG_IOMODE_READ = 0x1,
+    ISG_IOMODE_WRITE,
+    ISG_IOMODE_APPEND
+};
+
+enum en_ISGMC_ERRSTATUS
+{
+    ISGMC_ERR_NONE,
+    ISGMC_ERR_NOMEMCARD,
+    ISGMC_ERR_MKDIR,
+    ISGMC_ERR_OPEN,
+    ISGMC_ERR_CLOSE,
+    ISGMC_ERR_READ,
+    ISGMC_ERR_WRITE
+};
+
+enum en_ASYNC_OPCODE
+{
+    ISG_OPER_NOOP,
+    ISG_OPER_INIT,
+    ISG_OPER_SAVE,
+    ISG_OPER_LOAD
+};
+
+// This enum might be incorrect. The tooling choked on the enum values
+// being 0xFFFFFFFF
+enum en_ASYNC_OPSTAT
+{
+    ISG_OPSTAT_FAILURE = 0xFFFFFFFF,
+    ISG_OPSTAT_INPROG = 0,
+    ISG_OPSTAT_SUCCESS
+};
+
+enum en_ASYNC_OPERR
+{
+    ISG_OPERR_NONE,
+    ISG_OPERR_NOOPER,
+    ISG_OPERR_MULTIOPER,
+    ISG_OPERR_INITFAIL,
+    ISG_OPERR_GAMEDIR,
+    ISG_OPERR_NOCARD,
+    ISG_OPERR_NOROOM,
+    ISG_OPERR_DAMAGE,
+    ISG_OPERR_CORRUPT,
+    ISG_OPERR_OTHER,
+    ISG_OPERR_SVNOSPACE,
+    ISG_OPERR_SVINIT,
+    ISG_OPERR_SVWRITE,
+    ISG_OPERR_SVOPEN,
+    ISG_OPERR_LDINIT,
+    ISG_OPERR_LDREAD,
+    ISG_OPERR_LDOPEN,
+    ISG_OPERR_TGTERR,
+    ISG_OPERR_TGTREM,
+    ISG_OPERR_TGTPREP,
+    ISG_OPERR_UNKNOWN,
+    ISG_OPERR_NOMORE
+};
+
+enum en_CHGCODE
+{
+    ISG_CHG_NONE,
+    ISG_CHG_TARGET,
+    ISG_CHG_GAMELIST
+};
+
+// One save "device". On the GameCube this wraps a CARDFileInfo and a CARDStat
+// for the card in a slot; here it is a directory on disk playing the same
+// role, so iSGTgtCount, iSGTgtState and the rest still have something to
+// report on.
+struct st_ISG_MEMCARD_DATA
+{
+    S32 inuse;
+    S32 chan;
+    S32 sectorSize;
+
+    // Where this device's saves live. Slot 0 is the save directory itself and
+    // slot 1 a "second" subdirectory of it, each holding its own three game
+    // slots -- the two the save and load screens have always offered.
+    char root[512];
+
+    // Filled in by iSGTgtState, read by the save UI.
+    S32 present;
+    S32 formatted;
+    S32 freeBytes;
+    S32 freeFiles;
+};
+
+#define ISG_NUM_SLOTS 2
+#define ISG_NUM_FILES 3
+
+// The most save folders ("targets") there can be, each with ISG_NUM_FILES
+// games. Retail's two -- the save directory and "second" -- are all the retail
+// menus reach; the PC save screen (code_menu on) reaches the rest. See
+// iSGTargetMax below.
+#define ISG_MAX_TARGETS 10
+
+// Nothing outside isavegame touches a field of this -- xsavegame.cpp only
+// passes the pointer along -- so the host build uses the names the PS2 DWARF
+// gives them rather than carrying the GameCube's unk_ offsets forward.
+struct st_ISGSESSION
+{
+    st_ISG_MEMCARD_DATA mcdata[ISG_MAX_TARGETS];
+
+    // Index into mcdata, or -1 when no target has been selected.
+    S32 slot;
+
+    en_ASYNC_OPCODE as_curop;
+    en_ASYNC_OPSTAT as_opstat;
+    en_ASYNC_OPERR as_operr;
+
+    en_CHGCODE chgcode;
+    void (*chgfunc)(void*, en_CHGCODE);
+    void* cltdata;
+
+    // Set for the autosave session, which watches its target rather than
+    // saving through it.
+    S32 monitor;
+};
+
+enum en_NAMEGEN_TYPE
+{
+    ISG_NGTYP_GAMEDIR,
+    ISG_NGTYP_GAMEFILE,
+    ISG_NGTYP_CONFIG,
+    ISG_NGTYP_ICONTHUM
+};
+
+// config.ini's game.save_folder, pushed by iSystem before xSaveGameInit calls
+// iSGStartup. Empty leaves the host's per-user data folder in place;
+// TSSM_SAVE_DIR still wins over both. PC-only -- there is no folder to choose
+// on a console, where this is a memory card slot.
+void iSGSetSaveRoot(const char* dir);
+
+S32 iSGStartup();
+S32 iSGShutdown();
+char* iSGMakeName(en_NAMEGEN_TYPE type, const char* base, S32 idx);
+st_ISGSESSION* iSGSessionBegin(void* cltdata, void (*chgfunc)(void*, en_CHGCODE), S32 monitor);
+void iSGSessionEnd(st_ISGSESSION* isgdata);
+S32 iSGTgtCount(st_ISGSESSION* isgdata, S32* max);
+S32 iSGTgtPhysSlotIdx(st_ISGSESSION* isgdata, S32 tidx);
+U32 iSGTgtState(st_ISGSESSION* isgdata, S32 tgtidx, const char* dpath);
+S32 iSGTgtFormat(st_ISGSESSION* isgdata, S32 tgtidx, S32 async, S32* canRecover);
+S32 iSGTgtSetActive(st_ISGSESSION* isgdata, S32 tgtidx);
+S32 iSGTgtHaveRoom(st_ISGSESSION* isgdata, S32 tidx, S32 fsize, const char* dpath,
+                   const char* fname, S32* bytesNeeded, S32* availOnDisk, S32* needFile);
+S32 iSGTgtHaveRoomStartup(st_ISGSESSION* isgdata, S32 tidx, S32 fsize, const char* dpath,
+                          const char* fname, S32* bytesNeeded, S32* availOnDisk, S32* needFile);
+U8 iSGCheckMemoryCard(st_ISGSESSION* isgdata, S32 index);
+S32 iSGFileSize(st_ISGSESSION* isgdata, const char* fname);
+char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname);
+char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname, S32* sec, S32* min, S32* hr,
+                     S32* mon, S32* day, S32* yr);
+en_ASYNC_OPSTAT iSGPollStatus(st_ISGSESSION* isgdata, en_ASYNC_OPCODE* curop, S32 block);
+en_ASYNC_OPERR iSGOpError(st_ISGSESSION* isgdata, char* errmsg);
+S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 numbytes,
+                  S32 async);
+S32 iSGSelectGameDir(st_ISGSESSION* isgdata, const char* dname);
+void iSGMakeTimeStamp(char* str);
+S32 iSGSetupGameDir(st_ISGSESSION* isgdata, const char* dname, S32 force_iconfix);
+S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S32 async, char*);
+S32 iSGLoadFile(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 async);
+S32 iSG_mcidx2slot(S32 param1, S32* out_slot, S32* param3);
+void iSGAutoSave_Startup();
+st_ISGSESSION* iSGAutoSave_Connect(S32 idx_target, void* cltdata, void (*chg)(void*, en_CHGCODE));
+void iSGAutoSave_Disconnect(st_ISGSESSION* isg);
+S32 iSGAutoSave_Monitor(st_ISGSESSION* isg, S32 idx_target);
+S32 iSGCheckForWrongDevice();
+U8 iSGCheckForCorruptFiles(st_ISGSESSION*, char files[][64]);
+U8 iSGIsGameCorrupt(st_ISGSESSION* isgdata, S32 idx);
+
+// PC-only, and not part of the interface the GameCube implements.
+//
+// A number of bytes, written the way a person reads one: "348 KB", "1.9 GB".
+// The save UI was designed against a memory card and counts everything in the
+// card's 8 KB blocks -- the size of a save file, the room left on the card, the
+// room a save still needs. A host has no blocks, and the figures reaching that
+// UI here are plain byte counts, so "348 blocks" was both the wrong unit and
+// the wrong number. Every one of them comes through this instead; see
+// zSaveLoad.cpp's BuildIt and the space variables in zVar.cpp.
+//
+// KB is the smallest unit it will name. A save file is tens of kilobytes and a
+// disk with bytes rather than kilobytes free is not a state worth wording.
+// Rounds up, so nothing is ever reported as needing less room than it does.
+//
+// `outsize` of 16 is always enough for either of these.
+void iSGFormatSize(S32 bytes, char* out, U32 outsize);
+
+// The room left where saves go, worded the same way.
+//
+// Separate from iSGFormatSize because it does NOT come off the figure the game
+// is carrying: iSG_have_room clamps that to 2 GB so it fits the signed 32-bit
+// int the game compares a save size against, which is right for the comparison
+// and would make the save screen's free-space line read "2.0 GB" on every disk
+// ever made. This asks the host.
+void iSGFormatFreeSpace(char* out, U32 outsize);
+
+// How many save folders a target index may name: ISG_MAX_TARGETS with the
+// PC menus on, retail's two with them off.
+//
+// iSGTgtCount still answers two either way. Every retail switch on the count
+// (CardtoTgt, zMenuCardCheckStartup, format) knows 0, 1 and 2 and nothing
+// else, and CardtoTgt's two-target arm passes an index straight through -- so
+// an index past 1 reaches here intact and the retail save and load code works
+// on it unchanged.
+S32 iSGTargetMax();
+
+// Whether the save folders past retail's two are reachable. Pushed from
+// iSystem.cpp's ApplyConfig with [assets] code_menu.
+void iSGSetPCTargets(S32 on);
+
+// Make target `tgt`'s folder, so a first save into it has somewhere to go.
+S32 iSGMakeTarget(S32 tgt);
+
+// The one folder of the two the load screen offers as Memory Card Slot 1 and
+// 2 that holds a save; -1 when neither does or both do. zSaveLoad_CardPick
+// (PLATFORM_PC) goes straight to that folder's saves instead of asking which
+// card: the Xbox release, whose files the port plays, has one hard disk and
+// never asks, and asking let a player pick the empty folder and be told "NO
+// GAME SAVES PRESENT ON THE XBOX HARD DISK" with every save in the other.
+S32 iSGOnlyTargetWithGames();
+
+// Called by iSGSelectGameDir when the target it was asked about holds no save
+// -- which is what the load screen asks just before it says so -- with that
+// target and the first of the two that does hold one (-1: neither). The game
+// sets it to iSaveTextNoGames (iSaveText.h), which makes the message name the
+// slot; the save tests set their own. With iSGOnlyTargetWithGames skipping the
+// choice whenever one folder holds saves, the message is seen when neither
+// does, and names the slot instead of the Xbox's hard disk.
+void iSGSetNoGamesHook(void (*hook)(S32 target, S32 otherWithSaves));
+
+// The save stills (iSaveThumb.h), with the PC menus on. A save file written
+// with iSGSaveFile gets a still beside it, taken per the source set here:
+//
+//   ISG_THUMB_NOW   take one now. The default, and right for an autosave,
+//                   which happens with the game on screen.
+//   ISG_THUMB_KEPT  the one iSGCaptureThumb kept when the game paused; the pause
+//                   menu is on screen by the time anyone saves from it.
+//   ISG_THUMB_NONE  none: a save made from the title screen, before there is a
+//                   game to take a picture of.
+enum
+{
+    ISG_THUMB_NOW,
+    ISG_THUMB_KEPT,
+    ISG_THUMB_NONE
+};
+void iSGSetThumbSource(S32 source);
+
+// Keep a still of the frame on screen, for a save made from the pause menu.
+// zGamePause calls it as the game stops; gc/isavegame.h makes it nothing.
+void iSGCaptureThumb();
+
+// Where the still for folder `tgt`, slot `game` is. 0 for no such slot.
+S32 iSGThumbPath(S32 tgt, S32 game, char* out, U32 outsize);
+
+// The save and load screens. The GameCube's are zSaveLoad_LoadLoop and
+// zSaveLoad_SaveLoop; gc/isavegame.h names them. Here they are the same
+// functions with the PC menus off, and the PC save screen with them on:
+// one list of every save, newest first, instead of a folder and then three
+// slots. See src/SB/Core/pc/menu/iSaveScreen.cpp.
+U32 iSGLoadLoop();
+U32 iSGSaveLoop();
+
+#endif

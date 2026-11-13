@@ -1,0 +1,23 @@
+diff --git a/src/d3d/d3d11device.cpp b/src/d3d/d3d11device.cpp
+index ee1c7b3..d17a4f4 100644
+--- a/src/d3d/d3d11device.cpp
++++ b/src/d3d/d3d11device.cpp
+@@ -464,7 +464,17 @@ startD3D11(void)
+ 
+ 	// The presenter's own alt-enter would swap the chain to a display mode
+ 	// behind the engine's back. Video modes are the engine's to set.
+-	d3d11Globals.factory->MakeWindowAssociation(d3d11Globals.window, DXGI_MWA_NO_ALT_ENTER);
++	//
++	// On the factory that made the swap chain: D3D11CreateDeviceAndSwapChain
++	// makes a factory of its own, and a window association belongs to the
++	// factory it is made on, so making it on d3d11Globals.factory (the one the
++	// mode list came from) left DXGI's own alt-enter switched on.
++	IDXGIFactory *chainFactory = nil;
++	if(SUCCEEDED(d3d11Globals.swapChain->GetParent(__uuidof(IDXGIFactory), (void**)&chainFactory)) && chainFactory){
++		chainFactory->MakeWindowAssociation(d3d11Globals.window, DXGI_MWA_NO_ALT_ENTER);
++		chainFactory->Release();
++	}else
++		d3d11Globals.factory->MakeWindowAssociation(d3d11Globals.window, DXGI_MWA_NO_ALT_ENTER);
+ 
+ 	if(!acquireBackBuffer()){
+ 		RWERROR((ERR_GENERAL, "could not view the back buffer"));

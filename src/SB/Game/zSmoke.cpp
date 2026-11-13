@@ -43,7 +43,13 @@ namespace
     {
         S32 operator()(RwTexture* const& texture, const smoke_type& type) const
         {
+#ifdef PLATFORM_PC
+            // Address order, as the console's divide gives for two real textures: see
+            // compare_buckets in xParticleBatch.cpp.
+            return texture == type.texture ? 0 : texture < type.texture ? -1 : 1;
+#else
             return texture - type.texture;
+#endif
         }
     };
 

@@ -1,0 +1,49 @@
+# Shared files the PC layer stands in for or was adapted from, as they were
+# when the PC file was last reconciled with them (tools/pcimport.py
+# --record-shadowed). `--check` names any that have changed since.
+#
+# sha1  shared file  ->  pc file
+d87c03b917cf8e77cc7bfb885b9bad9d30c6cdf8  include/types.h  ->  compat/types.h
+0557d00b20a461dcf989c9e6d7cd990a5e37ab84  include/rwsdk/rpcollis.h  ->  rwsdk/rpcollis.h
+4d76dea4fdd874f9157b197e4642c395daad2978  include/rwsdk/rphanim.h  ->  rwsdk/rphanim.h
+ce336cf204a13d816e37d1e2b56968fd437008ba  include/rwsdk/rpmatfx.h  ->  rwsdk/rpmatfx.h
+e0e1a7d305fcaafa4b98f892458f2fc9706d8ebd  include/rwsdk/rpptank.h  ->  rwsdk/rpptank.h
+cdcd817c0e09196c7ac9e93bff2fe9bc2dbf740a  include/rwsdk/rpskin.h  ->  rwsdk/rpskin.h
+855ac0ad604bd3c2d8be6f1281b68e739c48aa6a  include/rwsdk/rpusrdat.h  ->  rwsdk/rpusrdat.h
+e38f53cb1f5282d549ba8a645d10b8e85c110bf9  include/rwsdk/rpworld.h  ->  rwsdk/rpworld.h
+fa74205e5f1883cc9c1a9f55a5118bd043379e12  include/rwsdk/rtanim.h  ->  rwsdk/rtanim.h
+9ce2d5da61f9d1c35ea25cb2c8c443fbfc1333ef  include/rwsdk/rtintsec.h  ->  rwsdk/rtintsec.h
+255081d7704f5a769f329168eb6ca20f1f58ab8a  include/rwsdk/rtquat.h  ->  rwsdk/rtquat.h
+94f405d8ed4a82bc8eb9a712a18a7fc033f1f8a4  include/rwsdk/rtskinsp.h  ->  rwsdk/rtskinsp.h
+1425b2c3c34d8dd14aeee3ef8204bee68bc23fec  include/rwsdk/rtslerp.h  ->  rwsdk/rtslerp.h
+b393428bcc8c84a4338841fe713b500ac005a0e5  include/rwsdk/rwcore.h  ->  rwsdk/rwcore.h
+6f28e80baa33bed7cd05e7f6b63b78430ffc60fc  include/rwsdk/rwplcore.h  ->  rwsdk/rwplcore.h
+7b8cc7e0a68614affd56f02c2a430a6fb36bd860  src/SB/Core/gc/iAnimSKB.h  ->  iAnimSKB.h
+313eab5bc63ff1bcf98f11efc34b98889b8b2bd6  src/SB/Core/gc/iWad.h  ->  iWad.h
+bc08c5c6a7ff03b927eef579a3cfb8ecf219a7de  src/SB/Core/gc/iWad.cpp  ->  iWad.cpp
+f6bd9c16fc9639471ab69ef0946309a59fbbce92  src/SB/Core/gc/iCamera.cpp  ->  iCamera.cpp
+d94dc6de83e77e2d0be529a600c994bd3ab635c6  src/SB/Core/gc/iModel.cpp  ->  iModel.cpp
+8b12d3887874ee122a53e431a4dcbe0311f28ab3  src/SB/Core/gc/iCutscene.cpp  ->  iCutscene.cpp
+5fbdfaa79c17ceaeec19f75d70056d8165967129  src/SB/Core/gc/iScrFX.cpp  ->  iScrFX.cpp
+7d5dacb761000c0dd154f3175fb7481fd6188faf  src/SB/Core/gc/iSnd.h  ->  iSnd.h
+d2cc81f74e178f6f74d758d1a40b849993ae1903  src/SB/Core/gc/iSnd.cpp  ->  iSnd.cpp
+6d46c1cc62c869b2550967ddc3edd9eb10b37e64  src/SB/Core/gc/iFMV.h  ->  iFMV.h
+d4888174622b5eb00d804e439ab9e9d2ce38b9a5  src/SB/Core/gc/iFMV.cpp  ->  iFMV.cpp
+225fd15a48312879539b8fc318ab2619faeb5c24  src/SB/Core/gc/isavegame.h  ->  isavegame.h
+d74bccf51dd0d0d86216957a10d9f352a0beeaae  src/SB/Core/gc/isavegame.cpp  ->  isavegame.cpp
+b489babc9dc92d8ce6b3a63eca8ad62a866fc8d7  src/SB/Core/gc/iTRC.h  ->  iTRC.h
+3e92d213951cca5ed20d6cd3fa081dd2c3e6beba  src/SB/Core/gc/iTRC.cpp  ->  iTRC.cpp
+b61086a47e8ba2e80b28d1702c9be3f99aee4a3b  src/SB/Core/gc/iDraw.h  ->  iDraw.h
+0d5db98dc6cf31284ff350573f457b060bf191f1  src/SB/Core/gc/iDraw.cpp  ->  iDraw.cpp
+a12d8c100d577d1bc005c4f02604e565287d4509  src/SB/Core/gc/iPad.cpp  ->  iPad.cpp
+f535e5afd8767dcfd2f75287ece0bc83741a18e4  src/SB/Core/gc/iSystem.h  ->  iSystem.h
+be3d080dfb1ae85eec70dc67b8117fe1740b1f0b  src/SB/Core/gc/iSystem.cpp  ->  iSystem.cpp
+5b05b369f1b1c1d0ad9e1e7a8e600b54d0cdaf8e  src/SB/Core/gc/iMemMgr.cpp  ->  iMemMgr.cpp
+5e8f2d3ae122ac964d4a2fcdbad4c32e7bb60cbc  src/SB/Core/gc/iTime.h  ->  iTime.h
+8894b49aa5c3ab6e2ff6fd44befa8a322cf0cf6e  src/SB/Core/gc/iTime.cpp  ->  iTime.cpp
+ebab023437e07d6cef88b98fb5179287b219d8f0  src/SB/Core/gc/iFile.h  ->  iFile.h
+7db1ae7943d2c5d1f9251ec054b4862616754514  src/SB/Core/gc/iFile.cpp  ->  iFile.cpp
+9f56d034acb1382cc3aa0dc585363106a6320206  src/SB/Core/gc/iARAMTmp.cpp  ->  iARAMTmp.cpp
+9b447b52b4101702b012057e92f1ca10e6331ce1  src/SB/Core/gc/iAsync.cpp  ->  iAsync.cpp
+a0bdd2515be0bf3b4e16e23534e52c3640d484cb  src/SB/Core/gc/iException.h  ->  iException.h
+0e1e405be43425de89e5d4f41c3c5d559cfd14dc  src/SB/Core/gc/iException.cpp  ->  iException.cpp

@@ -483,6 +483,20 @@ void xCMstop()
     }
 }
 
+#ifdef PLATFORM_PC
+void xCMSceneExit()
+{
+    // PLATFORM_PC: credits_data points into the running scene's CRDT asset. On the port that is
+    // a widened copy (iAssetHooks) which the scene's unload frees, so credits still rolling
+    // when their scene goes away would be read from freed memory by the next scene's
+    // xCMupdate and xCMrender. Forget them as xCMstop does, but send no stop event: its
+    // receiver belongs to the scene being torn down.
+    credits_time = 10000.0f;
+    credits_data = NULL;
+    credits_parentID = 0;
+}
+#endif
+
 void xCMsetDest(F32 x, F32 y, F32 width, F32 height)
 {
     destX = x;

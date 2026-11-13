@@ -59,9 +59,18 @@ void xRenderStateSetAlphaDiscard(S32 value)
 void xRenderStateResetAlphaDiscard()
 {
     alphaDiscardCurrentlySet = false;
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: a pointer cast straight to a byte is an error for clang in GNU mode (the
+    // Android NDK); MSVC-mode clang only warns. The same low byte, through size_t.
+    // RwRenderStateGet stores the reference as 4 bytes into the zero-initialised static.
+    RwGameCubeSetAlphaCompare(6, (RwUInt8)(size_t)old_alpha_discard_value_gc, 0, 6,
+                              (RwUInt8)(size_t)old_alpha_discard_value_gc);
+    if ((RwUInt8)(size_t)old_alpha_discard_value_gc > 0)
+#else
     RwGameCubeSetAlphaCompare(6, (RwUInt8)old_alpha_discard_value_gc, 0, 6,
                               (RwUInt8)old_alpha_discard_value_gc);
     if ((RwUInt8)old_alpha_discard_value_gc > 0)
+#endif
     {
         _rwDlRenderStateSetZCompLoc(FALSE);
     }
