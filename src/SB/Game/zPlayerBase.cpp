@@ -8,6 +8,9 @@
 #include "zGlobals.h"
 #include "zScene.h"
 #include "zPlayerSB.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 #include <string.h>
 
@@ -138,6 +141,24 @@ void zPlayerLoadMultipleHIPs(U32 sceneID)
         playerOrderCount++;
         zSceneLoadPackFile(tagPlayer, 1, false, NULL);
     }
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 7.5): the partner's outfits too, so
+    // it can be drawn in them; they go with the level like the player's own.
+    // 0 at once when co-op is off.
+    {
+        U32 extra[2];
+        S32 room = 8 - playerOrderCount;
+        S32 n = iCoopExtraPlayerPacks(sceneID, globals.playerLoadOrder, playerOrderCount, extra,
+                                      room < 2 ? room : 2);
+        for (S32 k = 0; k < n; k++)
+        {
+            globals.playerLoadOrder[playerOrderCount] = extra[k];
+            playerOrderCount++;
+            zSceneLoadPackFile(extra[k], 1, false, NULL);
+        }
+    }
+#endif
 
     globals.playerLoaded = playersToLoad;
 }

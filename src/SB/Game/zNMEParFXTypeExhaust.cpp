@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include "xRand.h"
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 // Size: 0x40 (PS2 DWARF)
 struct ExhaustParticle
 {
@@ -514,6 +518,31 @@ S32 Exhaust::ExhaustSysUpdate(U8* mem, S32 count, ptank_pool& apool, F32 dt, voi
         worldsph.center.z = par->pos.z;
         worldsph.radius = par->size;
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): on the host, the particle hurts the
+        // guest too, wherever this player's camera looks (its alpha as worked out
+        // below). FALSE at once when co-op is off.
+        if (iCoopParticleWanted() && emitter->flags.doDamage &&
+            rat_rev > emitter->dmg.pam_collide[0] && rat_rev < emitter->dmg.pam_collide[1])
+        {
+            xColor_tag c = node_eval.color;
+            U8 a = CLAMP(emitter->curve.alf_master * c.a, 0.0f, 255.0f);
+            switch (emitter->useNPARtype)
+            {
+            case NPAR_TYP_NOTES:
+            case NPAR_TYP_NOTES_UPGRADE:
+                a = CLAMP(((F32)c.r + (F32)c.g + (F32)c.b) / 3.0f, 0.0f, 255.0f);
+                break;
+            default:
+                break;
+            }
+            if (a > emitter->dmg.alf_collide)
+            {
+                iCoopParticleHit((const F32*)&par->pos,
+                                 emitter->dmg.rad_collide * emitter->dmg.rad_collide);
+            }
+        }
+#endif
         if (RwCameraFrustumTestSphere(xglobals->screen->icam, &worldsph) != rwSPHEREOUTSIDE)
         {
             systemUsesHDR = 0;
@@ -667,6 +696,31 @@ S32 Exhaust::ExhaustSysUpdate_noRot(U8* mem, S32 count, ptank_pool& apool, F32 d
         worldsph.center.z = par->pos.z;
         worldsph.radius = par->size;
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): on the host, the particle hurts the
+        // guest too, wherever this player's camera looks (its alpha as worked out
+        // below). FALSE at once when co-op is off.
+        if (iCoopParticleWanted() && emitter->flags.doDamage &&
+            rat_rev > emitter->dmg.pam_collide[0] && rat_rev < emitter->dmg.pam_collide[1])
+        {
+            xColor_tag c = node_eval.color;
+            U8 a = CLAMP(emitter->curve.alf_master * c.a, 0.0f, 255.0f);
+            switch (emitter->useNPARtype)
+            {
+            case NPAR_TYP_NOTES:
+            case NPAR_TYP_NOTES_UPGRADE:
+                a = CLAMP(((F32)c.r + (F32)c.g + (F32)c.b) / 3.0f, 0.0f, 255.0f);
+                break;
+            default:
+                break;
+            }
+            if (a > emitter->dmg.alf_collide)
+            {
+                iCoopParticleHit((const F32*)&par->pos,
+                                 emitter->dmg.rad_collide * emitter->dmg.rad_collide);
+            }
+        }
+#endif
         if (RwCameraFrustumTestSphere(xglobals->screen->icam, &worldsph) != rwSPHEREOUTSIDE)
         {
             systemUsesHDR = 0;

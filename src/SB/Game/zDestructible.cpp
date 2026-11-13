@@ -21,6 +21,10 @@
 #include "zScene.h"
 #include "zShrapnel.h"
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 namespace
 {
     F32 DEG_TO_RAD = 0.017460316f;
@@ -782,6 +786,15 @@ void zDestructibleAsset_EventCB(xBase* from, xBase* root_base, zDestructible* to
     case eEventHit_Throw:
     case eEventHit_Cruise:
     case eEventHit_Cartwheel:
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): on the guest, a hit on a
+        // breakable the host owns is a claim; the host's break comes back.
+        // FALSE at once when co-op is off.
+        if (iCoopGuestBreakableHit(from, toEvent, toParam))
+        {
+            break;
+        }
+#endif
         if (dest->active)
         {
             U32 hit_source_flag;

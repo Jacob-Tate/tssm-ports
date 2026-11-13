@@ -241,6 +241,15 @@ bool iSaveStoreRecover(S32 target, S32 game, char* report, size_t reportsize);
 // until the process ends, a crash included.
 S32 iSaveStoreClaimFolder(U32* holder);
 
+// Held for the length of a call that changes the folder. On Android, in the
+// co-op app, its start marks the shared saves' copy as not yet sent and its
+// end sends what changed (android/iAndroidSaves.h); elsewhere it does nothing.
+struct iSaveStoreChange
+{
+    iSaveStoreChange();
+    ~iSaveStoreChange();
+};
+
 // --- the game in progress ------------------------------------------------------------
 
 // The slot the running game autosaves to: the one it last saved to or loaded

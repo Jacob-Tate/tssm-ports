@@ -162,6 +162,7 @@ static bool iSG_path(st_ISGSESSION* isgdata, const char* fname, char* out, size_
 // what the game itself found.
 static void iSG_check_saves()
 {
+    iSaveStoreChange change; // a repair
     for (S32 t = 0; t < ISG_MAX_TARGETS; t++)
     {
         char dir[512];
@@ -896,6 +897,7 @@ static void iSG_write_still(const char* savePath)
 S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S32 async,
                 char* label)
 {
+    iSaveStoreChange change; // the save and its still
     char path[512];
 
     if (isgdata->slot < 0 || !iSG_path(isgdata, fname, path, sizeof(path)))

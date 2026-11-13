@@ -422,6 +422,25 @@ U32 zUICustomExtrasManager::IsCostumeEnabled(eSNDCurrentPlayer player)
     return 0;
 }
 
+#ifdef PLATFORM_PC
+// Online co-op's costumes (docs/MULTIPLAYER.md 7.4): whether the extras
+// screen's costume `id` (1-4) is unlocked in this save, as the extras screen
+// itself decides (its treasure chests found). Nothing is changed.
+U32 zMenuSB_PcCostumeUnlocked(U32 id)
+{
+    U32 i;
+
+    for (i = 0; i < sNumExtras; i++)
+    {
+        if (sExtrasList[i].type == 4 && sExtrasList[i].id == id)
+        {
+            return sExtrasList[i].chestsNeeded <= globals.player.InvTreasureChestTotal;
+        }
+    }
+    return 0;
+}
+#endif
+
 U32 zUICustomExtrasManager::IsCheatEnabled(eExtrasScreenCheats cheat)
 {
     return GetExtraStatus(5, cheat);

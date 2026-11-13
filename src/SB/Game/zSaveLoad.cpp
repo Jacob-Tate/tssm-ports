@@ -17,6 +17,10 @@
 
 #include <dolphin/os.h>
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 U32 saveSuccess;
 static F32 saveload_time_last;
 static F32 saveload_time_current;
@@ -38,6 +42,16 @@ namespace
 // saves (iSGOnlyTargetWithGames), so backing out of the saves leaves the load
 // screen.
 static S32 sCardPickSkipped;
+
+// PLATFORM_PC: a test's save by hand (TSSM_TEST_SAVE, iTestEvents.cpp): the
+// next save screen goes straight to saving into this slot of the first
+// folder, as if the player had picked them; -1: none asked.
+static S32 sPcTestSaveGame = -1;
+
+void zSaveLoad_PcTestSaveByHand(S32 game)
+{
+    sPcTestSaveGame = game;
+}
 #endif
 
 U8 preAutoSaving;
@@ -1725,6 +1739,17 @@ void zSaveLoadAutoSaveUpdate()
     {
         return;
     }
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.7): a joined guest does not
+    // autosave, nor does it in a level it followed the host to until it
+    // leaves it, so levels it only visited with the host stay out of its
+    // save. FALSE at once when co-op is off.
+    if (iCoopNoAutoSave())
+    {
+        preAutoSaving = 0;
+        return;
+    }
+#endif
 
     S32 physicalSlot = xSGAutoSave_GetCache()->LastPhysicalSlot();
     if (physicalSlot >= 0)
@@ -1875,6 +1900,18 @@ S32 zSaveLoad_SaveGame()
     S32 use_tgt = CardtoTgt(currentCard);
     S32 use_game = currentGame;
     autoSaveCard = currentCard;
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 7.6): only the host's game saves while
+    // a guest is in the session; a guest's save by hand is not written.
+    // zSaveLoad_SaveLoop already closes a guest's save screen at once; this
+    // catches a session joined while the screen was open (the game's own
+    // failure prompt, and a co-op notice saying why). FALSE at once when
+    // co-op is off.
+    if (iCoopNoSave())
+    {
+        return 9;
+    }
+#endif
 
     st_XSAVEGAME_DATA* xsgdata = zSaveLoadSGInit(XSG_MODE_SAVE);
     if (xSGCheckMemoryCard(xsgdata, currentCard) == 0)
@@ -2220,6 +2257,24 @@ U32 zSaveLoad_SaveLoop()
     sIsLoading = 0;
     saveSuccess = 0;
     saveState = 0;
+#ifdef PLATFORM_PC
+    if (sPcTestSaveGame >= 0)
+    {
+        currentCard = 0;
+        currentGame = sPcTestSaveGame;
+        sPcTestSaveGame = -1;
+        saveState = 10;
+    }
+    // Online co-op (docs/MULTIPLAYER.md 7.6): a co-op guest's game does not
+    // save. Its save screen closes at once, back to play, as a cancel does
+    // (state 11), and a co-op notice says why; the game's own failure prompt
+    // would blame the memory card ("not enough free blocks"). FALSE at once
+    // when co-op is off.
+    if (iCoopNoSave())
+    {
+        saveState = 11;
+    }
+#endif
 
     while (saveState != 6)
     {
@@ -2485,6 +2540,18 @@ void zSaveLoad_TriggerAutoSave()
 {
     S32 result;
     xBase* sendTo;
+
+#ifdef PLATFORM_PC
+    // Online co-op (5.7): an autosave asked for in the same frame as its
+    // pickup, before zSaveLoadAutoSaveUpdate could drop it. FALSE at once
+    // when co-op is off.
+    if (preAutoSaving && iCoopNoAutoSave())
+    {
+        zSaveLoadPreAutoSave(false);
+        printf("tssm: coop: autosave skipped (a co-op guest's game)\n");
+        return;
+    }
+#endif
 
     if (preAutoSaving)
     {

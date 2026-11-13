@@ -28,6 +28,7 @@
 #include "gui/iGuiRender.h"
 
 #include "iConfig.h"
+#include "iCoop.h"
 #include "iPadControls.h"
 #include "iPadHost.h"
 #include "iScreen.h"
@@ -49,12 +50,13 @@ namespace
         TAB_CONTROLS,
         TAB_SAVES,
         TAB_MODS,
+        TAB_COOP,
         TAB_ABOUT,
         TAB_COUNT
     };
 
-    const char* const kTabNames[TAB_COUNT] = { "settings", "controls", "saves", "mods", "about" };
-    const char* const kTabLabels[TAB_COUNT] = { "Settings", "Controls", "Saves", "Mods", "About" };
+    const char* const kTabNames[TAB_COUNT] = { "settings", "controls", "saves", "mods", "coop", "about" };
+    const char* const kTabLabels[TAB_COUNT] = { "Settings", "Controls", "Saves", "Mods", "Co-op", "About" };
 
     ImGuiContext* sContext;
     SDL_Window* sWindow;
@@ -81,6 +83,9 @@ namespace
     const U64 kFingerWindowNs = 250000000ull;
 
     float sScale;
+
+    // The co-op HUD layer's own clock, for the frames it draws alone.
+    U64 sHudLastNs;
 
     // Buttons held when the overlay closed, hidden from the game until let go.
     U32 sLatch[IPAD_MAX_CONTROLLERS];
@@ -110,6 +115,19 @@ namespace
     bool sCapturing;
     bool sCapturesFinished;
     bool sExitWhenCaptured;
+    // TSSM_GUI_CLOSE=1: close the overlay once its captures are written, so
+    // the game goes on in view (tools/coop_test.py).
+    bool sCloseWhenCaptured;
+    // TSSM_GUI_HUD_CAPTURE=<n>:<file.png>: the window with the co-op HUD layer
+    // (overlay closed) at present n.
+    S32 sHudCaptureAt;
+    char sHudCapturePath[480];
+    // iGuiTestShot: one picture at a time, a few frames after it is asked
+    // for, so what the test just did is on screen.
+    char sShotPath[480];
+    bool sShotHud;
+    bool sShotArmed;
+    S32 sShotWait;
 
     // Events queued on a thread other than the main one, kept for the next
     // Frame. On Android that is every touch, key and mouse event: SDL's Java
@@ -305,11 +323,50 @@ namespace
 
         const char* exitWhen = getenv("TSSM_GUI_EXIT");
         sExitWhenCaptured = exitWhen != NULL && atoi(exitWhen) != 0;
+        const char* closeWhen = getenv("TSSM_GUI_CLOSE");
+        sCloseWhenCaptured = closeWhen != NULL && atoi(closeWhen) != 0;
+
+        const char* hud = getenv("TSSM_GUI_HUD_CAPTURE");
+        const char* colon = hud != NULL ? strchr(hud, ':') : NULL;
+        if (colon != NULL && atoi(hud) > 0 && colon[1] != '\0')
+        {
+            sHudCaptureAt = atoi(hud);
+            snprintf(sHudCapturePath, sizeof(sHudCapturePath), "%s", colon + 1);
+        }
 
         if (sCaptureTab >= 0)
         {
             sSelectTab = sCaptureTab;
         }
+    }
+
+    // Before a frame is drawn (`hud`: with the overlay closed): arms the test
+    // shot that is due, and lets it go once written.
+    void ShotStep(bool hud)
+    {
+        if (sShotArmed)
+        {
+            if (iGuiRenderCaptureDone())
+            {
+                sShotArmed = false;
+                sShotPath[0] = '\0';
+                iGuiRenderRequestCapture(NULL);
+            }
+            return;
+        }
+        // Not over another capture: the debug one waits for its frame.
+        if (sShotPath[0] == '\0' || sShotHud != hud || sHudCaptureAt < 0 ||
+            (!hud && sCapturing && !sCapturesFinished))
+        {
+            return;
+        }
+        if (sShotWait > 0)
+        {
+            sShotWait--;
+            return;
+        }
+        iGuiRenderRequestCapture(sShotPath);
+        sShotArmed = true;
     }
 
     // After each frame the overlay drew: take the capture that is due, move to
@@ -340,6 +397,12 @@ namespace
                     printf("tssm: gui: captures written; TSSM_GUI_EXIT set, exiting\n");
                     fflush(stdout);
                     exit(0);
+                }
+                if (sCloseWhenCaptured)
+                {
+                    printf("tssm: gui: captures written; TSSM_GUI_CLOSE set, closing the overlay\n");
+                    fflush(stdout);
+                    sToggle = sOpen;
                 }
             }
             return;
@@ -474,6 +537,9 @@ namespace
                         case TAB_MODS:
                             DrawPanel(IGUI_PANEL_MODS, iGui::DrawMods);
                             break;
+                        case TAB_COOP:
+                            iGui::DrawCoop();
+                            break;
                         default:
                             iGui::DrawAbout();
                             break;
@@ -540,6 +606,62 @@ namespace
         return total;
     }
 
+    // With the overlay closed: the co-op HUD layer alone, while co-op is on
+    // (iCoop.h). Nothing else, and no input: the SDL backend is left alone (it
+    // would capture the mouse and change the cursor under the game's mouse
+    // camera), so the display size and the time step are set here.
+    bool HudFrame()
+    {
+        if (!iCoopHudActive())
+        {
+            return false;
+        }
+
+        ImGui::SetCurrentContext(sContext);
+        UpdateScale();
+        ImGuiIO& io = ImGui::GetIO();
+        int w = 0, h = 0, pw = 0, ph = 0;
+        SDL_GetWindowSize(sWindow, &w, &h);
+        SDL_GetWindowSizeInPixels(sWindow, &pw, &ph);
+        if (w <= 0 || h <= 0)
+        {
+            return false;
+        }
+        io.DisplaySize = ImVec2((float)w, (float)h);
+        io.DisplayFramebufferScale = ImVec2((float)pw / (float)w, (float)ph / (float)h);
+        const U64 now = SDL_GetTicksNS();
+        io.DeltaTime = sHudLastNs != 0 && now > sHudLastNs ? (float)((now - sHudLastNs) / 1e9) : 1.0f / 60.0f;
+        if (io.DeltaTime <= 0.0f || io.DeltaTime > 1.0f)
+        {
+            io.DeltaTime = 1.0f / 60.0f;
+        }
+        sHudLastNs = now;
+
+        if (sHudCaptureAt > 0 && sPresents >= sHudCaptureAt && !sShotArmed)
+        {
+            sHudCaptureAt = -1;
+            iGuiRenderRequestCapture(sHudCapturePath);
+        }
+        else if (sHudCaptureAt < 0 && iGuiRenderCaptureDone())
+        {
+            // Written: cleared, so TSSM_GUI_CAPTURE's own capture later does
+            // not take this one for its own.
+            sHudCaptureAt = 0;
+            iGuiRenderRequestCapture(NULL);
+        }
+        else
+        {
+            ShotStep(true);
+        }
+
+        iGuiRenderNewFrame();
+        ImGui::NewFrame();
+        iGuiRenderBackground();
+        iGui::DrawCoopHud();
+        ImGui::Render();
+        return true;
+    }
+
     // One frame, at the present. See iGuiRender.h.
     bool Frame()
     {
@@ -561,6 +683,7 @@ namespace
         }
 
         sPresents++;
+        iGui::CoopFrame();
         if (sOpenAt > 0 && sPresents == sOpenAt)
         {
             printf("tssm: gui: TSSM_GUI_OPEN_AT=%d reached\n", (int)sOpenAt);
@@ -574,13 +697,14 @@ namespace
         }
         if (!sOpen)
         {
-            return false;
+            return HudFrame();
         }
 
         ImGui::SetCurrentContext(sContext);
         ReadConfig();
         UpdateGamepads();
         UpdateScale();
+        ShotStep(false);
 
         iGuiRenderNewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -588,6 +712,10 @@ namespace
 
         iGuiRenderBackground();
         DrawOverlay();
+        if (iCoopHudActive())
+        {
+            iGui::DrawCoopHud();
+        }
 
         ImGui::Render();
 
@@ -1040,6 +1168,14 @@ void iGuiInit()
         SetOpen(true);
     }
 
+    // Started to join with no password ([coop] mode = join, --join): the
+    // overlay opens on the Co-op tab to ask for it.
+    if (iCoopNeedsPassword() && !sOpen)
+    {
+        sSelectTab = TAB_COOP;
+        SetOpen(true);
+    }
+
     const char* selftest = getenv("TSSM_GUI_SELFTEST");
     if (selftest != NULL && atoi(selftest) > 0)
     {
@@ -1085,6 +1221,17 @@ bool iGuiIsOpen()
 void iGuiSetOpen(bool open)
 {
     SetOpen(open);
+}
+
+void iGuiTestShot(const char* path, bool hud)
+{
+    if (path == NULL || sShotArmed)
+    {
+        return;
+    }
+    snprintf(sShotPath, sizeof(sShotPath), "%s", path);
+    sShotHud = hud;
+    sShotWait = 4;
 }
 
 const iPadHostState* iGuiFilterPad(S32 port, const iPadHostState* host)

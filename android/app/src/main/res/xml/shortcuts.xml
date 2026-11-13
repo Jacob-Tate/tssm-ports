@@ -4,12 +4,12 @@
     <shortcut
         android:shortcutId="import_files"
         android:enabled="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_coop"
         android:shortcutShortLabel="@string/import_short"
         android:shortcutLongLabel="@string/import_long">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="io.github.tssmport.game"
+            android:targetPackage="io.github.tssmport.game.coop"
             android:targetClass="io.github.tssmport.game.LauncherActivity">
             <extra android:name="import" android:value="true" />
         </intent>

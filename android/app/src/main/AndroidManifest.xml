@@ -34,17 +34,35 @@
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
-    <!-- The co-op app (its own package, the same signing key) plays on this
-         app's saves through SaveShareProvider. It declares this permission
-         too, so either app can be installed first. -->
+    <!-- Co-op (docs/MULTIPLAYER.md): sockets; Wi-Fi or mobile data, for the
+         Co-op tab; the multicast lock a visible host needs to receive the
+         questions of devices looking for games; the low-latency Wi-Fi lock
+         during a session (CoopNet.java). All granted at install. Android 17's
+         local-network permission is declared for when it is enforced. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <!-- This co-op app plays on the saves of the normal app
+         (io.github.tssmport.game) through its SaveShareProvider, which only
+         an app signed with the same key may reach. Both apps declare the
+         permission, so either can be installed first. -->
     <permission
         android:name="io.github.tssmport.permission.SHARED_SAVES"
         android:protectionLevel="signature" />
+    <uses-permission android:name="io.github.tssmport.permission.SHARED_SAVES" />
+
+    <!-- To see the normal app on Android 11 and later. -->
+    <queries>
+        <package android:name="io.github.tssmport.game" />
+    </queries>
 
     <application
         android:label="@string/app_name"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_coop"
+        android:roundIcon="@mipmap/ic_launcher_coop"
         android:allowBackup="false"
         android:requestLegacyExternalStorage="true"
         android:theme="@style/AppTheme"
@@ -71,6 +89,14 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- What co-op needs from the normal app and cannot get: its saves
+             or its game-files folder. -->
+        <activity
+            android:name=".CoopNoticeActivity"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:exported="false" />
 
         <!-- Copies the game's files in from a folder the player picks, or
              remembers that folder to use where it is. -->
@@ -106,15 +132,8 @@
             </intent-filter>
         </activity>
 
-        <!-- The saves, settings and one-copy lock, for the co-op app only.
-             call() is not covered by android:permission; the provider checks
-             every caller's signature itself. -->
-        <provider
-            android:name=".SaveShareProvider"
-            android:authorities="io.github.tssmport.game.saves"
-            android:exported="true"
-            android:grantUriPermissions="false"
-            android:permission="io.github.tssmport.permission.SHARED_SAVES" />
+        <!-- No SaveShareProvider here: the normal app serves the saves, and
+             two apps cannot both hold its authority. -->
     </application>
 
 </manifest>

@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
+import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -78,9 +79,24 @@ public class GameActivity extends SDLActivity {
 
             // A test launch from adb (TestLaunch): its settings, for this
             // process only. Empty for a normal launch.
-            for (java.util.Map.Entry<String, String> e
-                    : TestLaunch.settings(this, getIntent()).entrySet()) {
-                Log.i(TAG, "test launch: " + e.getKey() + "=" + e.getValue());
+            java.util.Map<String, String> test = TestLaunch.settings(this, getIntent());
+
+            // "Play without saving" (CoopNoticeActivity): a folder emptied
+            // at each start, so nothing is kept and no other save is touched.
+            // A test launch has its own folder and never shares the saves.
+            if (test.isEmpty() && CoopSaves.noSaves()) {
+                File unsaved = new File(getCacheDir(), "no-saves");
+                deleteTree(unsaved);
+                unsaved.mkdirs();
+                nativeSetenv("TSSM_SAVE_DIR", unsaved.getPath());
+            }
+
+            for (java.util.Map.Entry<String, String> e : test.entrySet()) {
+                // A code or password never goes to logcat.
+                boolean secret = e.getKey().equals("TSSM_COOP_PASSWORD")
+                        || e.getKey().equals("TSSM_TEST_COOP_CODE");
+                Log.i(TAG, "test launch: " + e.getKey() + "="
+                        + (secret ? "(hidden)" : e.getValue()));
                 nativeSetenv(e.getKey(), e.getValue());
                 if (e.getKey().equals("TSSM_ANDROID_ACCEL")) {
                     sAccelerometer = e.getValue().equals("1");
@@ -89,6 +105,90 @@ public class GameActivity extends SDLActivity {
         } catch (UnsatisfiedLinkError e) {
             // libmain.so did not load; SDLActivity has already said so.
             Log.w(TAG, "could not pass the assets folder", e);
+        }
+    }
+
+    private static void deleteTree(File f) {
+        File[] children = f.listFiles();
+        if (children != null) {
+            for (File c : children) {
+                deleteTree(c);
+            }
+        }
+        f.delete();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        CoopNet.resumed(this, true);
+    }
+
+    @Override
+    protected void onPause() {
+        CoopNet.resumed(this, false);
+        super.onPause();
+    }
+
+    // --- co-op: called by native code on the game's thread -------------------
+    //
+    // src/SB/Core/pc/android/iAndroidNet.cpp and iAndroidSaves.cpp.
+
+    /** The Wi-Fi locks co-op wants now (CoopNet). */
+    public static void coopLan(boolean multicast, boolean lowLatency) {
+        Activity activity = mSingleton;
+        if (activity != null) {
+            CoopNet.want(activity, multicast, lowLatency);
+        }
+    }
+
+    /** The network Android sends through (CoopNet.kind). */
+    public static int coopNetKind() {
+        Activity activity = mSingleton;
+        return activity != null ? CoopNet.kind(activity) : 4;
+    }
+
+    /** The normal app's save-folder lock as a descriptor, or -1 (CoopSaves.claim). */
+    public static int coopSavesClaim() {
+        Activity activity = mSingleton;
+        return activity != null ? CoopSaves.claim(activity) : -1;
+    }
+
+    /** The real saves copied into `root`; null when done, else why not. */
+    public static String coopSavesMirror(String root) {
+        return CoopSaves.mirror(root);
+    }
+
+    /** Before the save store changes its copy: marked as not sent (CoopSaves.begin). */
+    public static void coopSavesBegin() {
+        CoopSaves.begin();
+    }
+
+    /** What the save store changed, to the real saves. */
+    public static void coopSavesPush() {
+        CoopSaves.push();
+    }
+
+    /**
+     * "Play without saving", chosen in the game when the saves could not be
+     * shared: the same empty folder as CoopNoticeActivity's, or null.
+     */
+    public static String coopNoSavesFolder() {
+        Activity activity = mSingleton;
+        if (activity == null) {
+            return null;
+        }
+        CoopSaves.chooseNoSaves();
+        File unsaved = new File(activity.getCacheDir(), "no-saves");
+        deleteTree(unsaved);
+        return unsaved.mkdirs() ? unsaved.getPath() : null;
+    }
+
+    /** A line for the player, over the game. */
+    static void coopToast(final String text) {
+        final Activity activity = mSingleton;
+        if (activity != null) {
+            activity.runOnUiThread(() -> Toast.makeText(activity, text, Toast.LENGTH_LONG).show());
         }
     }
 

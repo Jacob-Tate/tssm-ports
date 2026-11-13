@@ -86,4 +86,12 @@ struct zNMEFogger : zNMEStandard
     }
 };
 
+#ifdef PLATFORM_PC
+// Online co-op (docs/MULTIPLAYER.md 13.1), the guest: a fogger copy the host
+// owns posed in its breath attack's loop (`anim`), and its breath shown
+// there without harm.
+bool zNMEFogger_PcBreathAnim(xEnt* ent, U32 anim);
+void zNMEFogger_PcBreathShown(xEnt* ent);
+#endif
+
 #endif

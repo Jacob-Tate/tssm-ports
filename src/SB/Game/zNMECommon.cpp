@@ -18,6 +18,9 @@
 #include "xstransvc.h"
 #include "xScreenFade.h"
 #include "zEntTeleportBox.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 #include <string.h>
 
@@ -347,6 +350,16 @@ void zMODEnemy::Timestep(F32 dt)
     {
         nme = (zNMECommon*)nmelist.list[i];
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 5.5): on the guest, an enemy the
+        // host owns is posed from the host's snapshots instead of thinking.
+        // FALSE at once when co-op is off.
+        if (iCoopWorldGuestPose((xBase*)nme, dt))
+        {
+            continue;
+        }
+#endif
+
         if (!(nme->baseFlags & 0x1) || (nme->baseFlags & 0x40))
         {
             continue;
@@ -359,6 +372,13 @@ void zMODEnemy::Timestep(F32 dt)
         {
             continue;
         }
+
+#ifdef PLATFORM_PC
+        // Online co-op (5.4): on the host, when the guest is this enemy's
+        // nearer player, the host's player stands in at the guest's place for
+        // this one update. Nothing when co-op is off.
+        iCoopStandInBegin((xBase*)nme);
+#endif
 
         nt = nme->SelfType();
         if (nt >= NME_TYPE_TIKI && nt <= NME_TYPE_TIKI_STONE)
@@ -374,6 +394,10 @@ void zMODEnemy::Timestep(F32 dt)
         {
             nme->NewTime(dt);
         }
+
+#ifdef PLATFORM_PC
+        iCoopStandInEnd();
+#endif
     }
 
     zNMETiki_Timestep(dt);
@@ -391,6 +415,15 @@ void zMODEnemy::PostTimestep(F32 dt)
     for (i = 0; i < num_nme; i++)
     {
         nme = (zNMECommon*)nmelist.list[i];
+
+#ifdef PLATFORM_PC
+        // Online co-op (5.5): the guest's copy of a host-owned enemy does not
+        // run its own after-update either.
+        if (iCoopWorldGuestOwns((xBase*)nme))
+        {
+            continue;
+        }
+#endif
 
         if (!nme->flg_postproc)
         {
@@ -1114,6 +1147,32 @@ void zNMECommon::Damage(en_npcdmg dmgtype, const xBase* who, const xVec3* vec_hi
     S32 doAlways = 0;
     NMEDamageInfo* dmg;
 
+#ifdef PLATFORM_PC
+    // Online co-op (5.5, 6.1): on the guest, an attack does nothing to an
+    // enemy the host owns; one of this player's own goes to the host as a
+    // claim (the host decides), and the enemy's "ouch" plays here at once.
+    // FALSE at once when co-op is off.
+    if (iCoopWorldNoDamage((xBase*)this))
+    {
+        if (iCoopGuestHit((xBase*)this, (S32)dmgtype, (const F32*)vec_hit))
+        {
+            switch (dmgtype)
+            {
+            case DMGTYP_SLIDE:
+            case DMGTYP_HITBYTOSS:
+            case DMGTYP_CARTWHEEL:
+            case DMGTYP_CRUISEBUBBLE:
+            case DMGTYP_BUBBOWL:
+            case DMGTYP_BELOW:
+            case DMGTYP_SIDE:
+                SndPlayFromTable(5); // eNMESound_Ouch
+                break;
+            }
+        }
+        return;
+    }
+#endif
+
     switch (dmgtype)
     {
     case DMGTYP_INSTAKILL:
@@ -1124,7 +1183,16 @@ void zNMECommon::Damage(en_npcdmg dmgtype, const xBase* who, const xVec3* vec_hi
         break;
     }
 
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 13): on the host, each player's hits
+    // have their own invulnerability. As below when co-op is off.
+    if (doAlways ||
+        (!runtimeData.flg_takeNoDamage &&
+         iCoopEnemyHittable((xBase*)this, tmr_invuln, IsPresent(), (S32)dmgtype, (const F32*)vec_hit,
+                            amt_dmgCaller, (S32)pup_fromCaller)))
+#else
     if (doAlways || (!runtimeData.flg_takeNoDamage && tmr_invuln < 0.0f && IsPresent()))
+#endif
     {
         tmr_invuln = cfg_common->damage.tym_invuln;
 
@@ -2105,6 +2173,11 @@ void zNMEFragCB(zFrag* frag, zFragAsset* asset)
 
 void zNMECommon::DeathFXKick()
 {
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.5): on the host, counted for the
+    // guest, whose copy plays it too. Nothing when co-op is off.
+    iCoopWorldDeathFx((xBase*)this);
+#endif
     zShrapnelAsset* shrp = shrapnelAsset;
 
     if (shrp == NULL)

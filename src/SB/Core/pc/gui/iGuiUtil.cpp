@@ -320,8 +320,17 @@ void iGui::SetupContext()
     io.LogFilename = NULL;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
 #ifdef __ANDROID__
-    io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+    const bool touch = true;
+#else
+    // TSSM_GUI_TOUCH=1: the phone's touch sizes on a desktop, to look at a
+    // layout at a phone's size there (docs/GUI.md).
+    const char* touchEnv = getenv("TSSM_GUI_TOUCH");
+    const bool touch = touchEnv != NULL && strcmp(touchEnv, "1") == 0;
 #endif
+    if (touch)
+    {
+        io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+    }
 
     // The scalable default font, so text is drawn at its size rather than
     // scaled up from 13 pixels.
@@ -340,9 +349,10 @@ void iGui::SetupContext()
     style.FramePadding = ImVec2(8.0f, 5.0f);
     style.ItemSpacing = ImVec2(10.0f, 7.0f);
     style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
-#ifdef __ANDROID__
-    style.TouchExtraPadding = ImVec2(6.0f, 6.0f);
-#endif
+    if (touch)
+    {
+        style.TouchExtraPadding = ImVec2(6.0f, 6.0f);
+    }
 
     // Deep water with a sponge-yellow accent.
     ImVec4* c = style.Colors;

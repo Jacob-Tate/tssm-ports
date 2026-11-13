@@ -7,6 +7,9 @@
 #include "xFXHighDynamicRange.h"
 #include "zRenderState.h"
 #include "xDebug.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 #include <string.h>
 
@@ -188,7 +191,20 @@ void zMODHazard::Timestep(F32 dt)
                 haz->TypData_RotMatApply(&haz->custdata.typical.mat_rotDelta);
             }
 
+#ifdef PLATFORM_PC
+            // Online co-op (6.2): on the host, a hazard nearer the guest moves
+            // and hits with the host's player standing in at the guest's
+            // place, so a projectile can hit the guest. Nothing at once when
+            // co-op is off.
+            bool coopStood = iCoopStandInNear((const F32*)&haz->pos_hazard);
+#endif
             GlobalData::haztypeHandlers[haz->typ_hazard]->Update(haz, dt);
+#ifdef PLATFORM_PC
+            if (coopStood)
+            {
+                iCoopStandInEnd();
+            }
+#endif
 
             if (haz->mdl_hazard != NULL)
             {

@@ -1,4 +1,5 @@
 #include "iPadHost.h"
+#include "iCoop.h"
 #include "iPadPrompts.h"
 #include "iPadTest.h"
 
@@ -28,6 +29,10 @@ void iPadHostExit()
 
 void iPadHostPoll()
 {
+    // Every frame, menus and movies included: co-op's I/O thread tells the
+    // partner when this stops for a while (docs/MULTIPLAYER.md 5.11).
+    iCoopGameBeat();
+
 }
 
 const iPadHostState* iPadHostGet(S32 port)

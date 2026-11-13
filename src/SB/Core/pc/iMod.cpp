@@ -625,10 +625,22 @@ namespace
             fclose(sLogFile);
             sLogFile = NULL;
         }
-        if (!sFolder.empty())
+        if (sFolder.empty())
         {
-            sLogFile = fopen((sFolder + "/mods.log").c_str(), append ? "a" : "w");
+            return;
         }
+        std::string path = sFolder + "/mods.log";
+        const char* own = getenv("TSSM_CONFIG_READONLY");
+        if (iConfigReadOnly() && own != NULL)
+        {
+            // Local co-op's Player 2 reads Player 1's mods and writes nothing
+            // there: its log goes in its own folder, beside its settings file.
+            std::string dir = Slashes(own);
+            size_t slash = dir.rfind('/');
+            path = (slash == std::string::npos ? std::string(".") : dir.substr(0, slash)) +
+                   "/mods.log";
+        }
+        sLogFile = fopen(path.c_str(), append ? "a" : "w");
     }
 
     // --- package lookups -------------------------------------------------------------
@@ -997,6 +1009,12 @@ bool iModMove(S32 index, S32 newIndex)
 
 bool iModSaveList()
 {
+    if (iConfigReadOnly())
+    {
+        iModLogf(
+            "local co-op's Player 2 does not write mods.ini; the new order lasts until this game closes");
+        return false;
+    }
     std::string folder = sFolder.empty() ? sDefaultFolder : sFolder;
     if (!IsDir(folder) && !iHostMakeDir(folder.c_str()))
     {

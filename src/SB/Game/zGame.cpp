@@ -51,6 +51,10 @@
 
 #include <dolphin/os.h>
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 #include <stdio.h>
 #include <string.h>
 
@@ -555,6 +559,12 @@ void zGameLoop()
                 xglobals->___player_ent_dont_use_directly, globals.sceneCur, sTimeElapsed);
         }
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md): this player's state out, the
+        // partner's placed. Returns at once when co-op is off.
+        iCoopFrame(sTimeElapsed, isPaused);
+#endif
+
         xAntennaUpdate(sTimeElapsed);
 
         if (!isPaused)
@@ -846,6 +856,12 @@ static void zGameUpdateMode()
         zGameExit();
         xTextureManager::Get().FreeMemory();
         zGameInit(nextSceneID);
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 7.2): when the other player's
+        // game goes to this level too, both start it together. Returns at
+        // once when co-op is off.
+        iCoopLevelStartBarrier(nextSceneID);
+#endif
         zGameSetup();
         globals.sceneCur->enableDrawing = TRUE;
         if (globals.cmgr != NULL)

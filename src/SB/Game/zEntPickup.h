@@ -63,6 +63,11 @@ void zEntPickupEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase
 void zEntPickup_FlyToInterface(zEntPickup*, F32);
 void zEntPickup_CheckAllPickupsAgainstPlayer(xScene* sc, F32 dt);
 void zEntPickup_DoPickup(zEntPickup* ent, bool instant);
+#ifdef PLATFORM_PC
+// Online co-op: a token the host gave the guest's player, taken as one its
+// player touched (the token's own links run during its reward).
+void zEntPickup_PcTakeTouched(zEntPickup* ent);
+#endif
 void zEntPickup_GivePickup(zEntPickup* ent);
 void zEntPickup_GiveAllRewardsNow();
 void zEntPickup_Update(zEntPickup* ent, xScene* sc, F32 dt);

@@ -1,4 +1,7 @@
 #include "zCutsceneMgr.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 #include "zCineFX.h"
 #include "xTextureManager.h"
 #include "iTRC.h"
@@ -169,6 +172,11 @@ void zCutsceneMgrEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBa
                 xCutscene_LoadStart(t->csn);
                 globals.cmgr = t;
                 t->oldfov = globals.screen->fov;
+#ifdef PLATFORM_PC
+                // Online co-op (docs/MULTIPLAYER.md 7.3): the host's cutscene
+                // plays on the guest too. Nothing when co-op is off.
+                iCoopShowCutsceneStart(t, toParam);
+#endif
                 if (toParam == NULL || toParam[1] != 0.0f)
                 {
                     zCutsceneMgrFinishLoad(t);
@@ -367,6 +375,10 @@ void zCutsceneMgrUpdate(xBase* to, xScene* sc, F32 dt)
             {
                 zMusicUnpause();
             }
+#ifdef PLATFORM_PC
+            // Online co-op (7.3): the host's cutscene ended (or was skipped).
+            iCoopShowCutsceneEnd(t);
+#endif
 
             zEntEvent(xglobals->___player_ent_dont_use_directly, 9);
             zEntEvent(xglobals->___player_ent_dont_use_directly, 3);
@@ -399,7 +411,13 @@ void zCutsceneMgrUpdate(xBase* to, xScene* sc, F32 dt)
         else
         {
             skipButtons = 0x50000;
+#ifdef PLATFORM_PC
+            // Online co-op (7.3): a guest does not skip the host's cutscene
+            // (the host does, for both). TRUE at once when co-op is off.
+            if (t->csn->Time > 0.5f && globals.pad0->pressed & skipButtons && iCoopMaySkipShow())
+#else
             if (t->csn->Time > 0.5f && globals.pad0->pressed & skipButtons)
+#endif
             {
                 t->stop = 1;
             }

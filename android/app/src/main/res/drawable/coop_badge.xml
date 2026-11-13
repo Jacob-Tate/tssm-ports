@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The co-op app's badge: two players in a red disc, bottom right, inside
+     the adaptive icon's safe zone (the middle 66 of 108), so the two apps are
+     told apart on the home screen. Drawn over either icon (the default one or
+     the one tssm.icon gives, build.gradle). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,55 a13,13 0 1 1 0,26 a13,13 0 1 1 0,-26 z" />
+    <path
+        android:fillColor="#D23C2A"
+        android:pathData="M68,56.6 a11.4,11.4 0 1 1 0,22.8 a11.4,11.4 0 1 1 0,-22.8 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M64.4,61.6 a2.7,2.7 0 1 1 0,5.4 a2.7,2.7 0 1 1 0,-5.4 z M71.6,61.6 a2.7,2.7 0 1 1 0,5.4 a2.7,2.7 0 1 1 0,-5.4 z M59.7,74.6 a4.7,4.9 0 0 1 9.4,0 z M66.9,74.6 a4.7,4.9 0 0 1 9.4,0 z" />
+</vector>

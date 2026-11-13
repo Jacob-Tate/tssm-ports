@@ -1768,3 +1768,27 @@ void zNMEGoalFogAttack::BreathAttack()
     FogAttack::foggyPain.SpewVolume(&pos_emit, (xMat3x3*)npc->model->Mat);
     FogAttack::foggyChunks.SpewVolume(&pos_emit, (xMat3x3*)npc->model->Mat);
 }
+
+#ifdef PLATFORM_PC
+bool zNMEFogger_PcBreathAnim(xEnt* ent, U32 anim)
+{
+    U32 t = (U32)((zNMENPCWrapper*)ent)->SelfType();
+    return t >= NME_TYPE_FOGGER_V1 && t <= NME_TYPE_FOGGER_V3 &&
+           anim == g_hash_stananim[STAN_ANIM_ATTACK_LOOP];
+}
+
+void zNMEFogger_PcBreathShown(xEnt* ent)
+{
+    // BreathAttack's breath, from copies that hurt nobody: the host's game
+    // sends this player the hits of its own.
+    static FogBreathEmitter pain = FogAttack::foggyPain;
+    static FogBreathEmitter chunks = FogAttack::foggyChunks;
+    pain.doDamage = 0;
+    chunks.doDamage = 0;
+    xVec3 pos_emit = FogAttack::vec_boneOffset;
+    xMat4x3Toworld(&pos_emit, (xMat4x3*)&ent->model->Mat[4], &pos_emit);
+    xMat4x3Toworld(&pos_emit, (xMat4x3*)ent->model->Mat, &pos_emit);
+    pain.SpewVolume(&pos_emit, (xMat3x3*)ent->model->Mat);
+    chunks.SpewVolume(&pos_emit, (xMat3x3*)ent->model->Mat);
+}
+#endif

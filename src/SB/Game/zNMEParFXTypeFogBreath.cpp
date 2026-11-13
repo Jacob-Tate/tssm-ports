@@ -8,6 +8,10 @@
 #include <stdio.h>
 #include "xRand.h"
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 // Size: 0x40 (PS2 DWARF)
 struct FogParticle
 {
@@ -174,6 +178,16 @@ S32 FogBreath::FogSysUpdate(U8* mem, S32 count, ptank_pool& apool, F32 dt, void*
         arch = ARCH(rat_rev);
         dim = LERP(arch, emitter->siz_base[0], emitter->siz_base[1]);
         par->size = dim;
+
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): on the host, the particle hurts the
+        // guest too, wherever this player's camera looks. Nothing when co-op is off.
+        if (emitter->doDamage && rat_rev > Update::seg_allowCollide[0] &&
+            rat_rev < Update::seg_allowCollide[1] && arch * emitter->colr_base.a > 0x20)
+        {
+            iCoopParticleHit((const F32*)&par->pos, 0.25f);
+        }
+#endif
 
         RwSphere sph;
         sph.center = par->pos.m_RwV3d;

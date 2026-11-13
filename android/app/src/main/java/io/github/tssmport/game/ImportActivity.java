@@ -101,7 +101,7 @@ public class ImportActivity extends Activity {
         return path;
     }
 
-    private static boolean canReadStorage(Context context) {
+    static boolean canReadStorage(Context context) {
         if (Build.VERSION.SDK_INT >= 30) {
             return Environment.isExternalStorageManager();
         }
@@ -109,7 +109,7 @@ public class ImportActivity extends Activity {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    private static boolean containsGame(File dir) {
+    static boolean containsGame(File dir) {
         String[] names = dir.list();
         if (names == null) {
             return false;
@@ -158,6 +158,9 @@ public class ImportActivity extends Activity {
         mChoose.setOnClickListener(v -> startActivityForResult(
                 new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER));
         layout.addView(mChoose);
+        // The co-op app uses the game's files where they are, never a second
+        // copy of its own.
+        mChoose.setVisibility(View.GONE);
 
         mLink = new Button(this);
         mLink.setText(R.string.link_choose);

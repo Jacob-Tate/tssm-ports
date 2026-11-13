@@ -1,4 +1,4 @@
-# The SpongeBob SquarePants Movie: Android port
+# The SpongeBob SquarePants Movie: Android port with co-op
 
 *The SpongeBob SquarePants Movie* game as an Android app, built from the matching
 decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
@@ -12,6 +12,12 @@ game files.
   on one phone so far; the 32-bit one is build-checked only.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
 
+**This branch adds co-op for two players:** online over the internet (one player hosts and
+forwards one UDP port on their router), on the same home network (games are found
+automatically and joined with a short code), and, on Windows, two copies on one PC. Co-op is
+host-authoritative: the host's game runs the world for both players. The players' guides
+are `docs/HOSTING.txt`, `docs/JOINING.txt` and `docs/LAN.txt`.
+
 This repository and its branches
 --------------------------------
 
@@ -23,11 +29,11 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 | Branch | What it is for |
 |---|---|
 | `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
-| `android` (this one) | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
+| `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
 | `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
 | `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
 | `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
-| `coop-android` | The co-op app for Android, a second app beside the normal one. Built on `android`. |
+| `coop-android` (this one) | The co-op app for Android, a second app beside the normal one. Built on `android`. |
 | `coop-switch` | The co-op Switch program, `tssm-coop.nro`. Built on `switch`. |
 
 Every branch builds from source; you bring your own game files.
@@ -47,7 +53,7 @@ You need the Android SDK (platform 35, build-tools 35, the SDK's CMake 3.22.1), 
 (28.2.13676358), Gradle 8.9 or newer (8.14.3 tested), JDK 17 or 21, and git. No Gradle
 wrapper is included.
 
-    git clone --branch android <this repository's address> tssm
+    git clone --branch coop-android <this repository's address> tssm
     cd tssm
     git submodule update --init --depth 1
     cd android
@@ -64,11 +70,12 @@ skipped. `docs/ANDROID.md` has every option and the details.
 Playing
 -------
 
-1. Install the APK for your phone (`app-arm64-v8a-debug.apk` on almost every phone made in
-   the last years).
-2. On the first start the app asks for the game files: pick the folder that holds
-   `boot.HIP` (copied onto the phone or an SD card). It can copy them into the app, or
-   read them where they are.
+1. Install the normal app first (the `android` branch), open it once and give it the game
+   files. Then install this branch's APK for your phone: the co-op app, "TSSM co-op",
+   is a second app beside the normal one and plays on the normal app's game files and
+   saves. Build both on the same computer: they must be signed with the same key.
+2. On its first start the co-op app finds the normal app's game files; if they were
+   copied into the normal app, it asks for the folder they came from.
 3. On-screen touch controls are on by default; a Bluetooth or USB controller works too.
    `docs/ANDROID.md` ("Playing") shows the touch layout and how to open the settings
    window.
@@ -83,6 +90,8 @@ More documentation:
 | `docs/MODDING.md` | mods |
 | `docs/ICON.md` | using your own picture as the app's icon |
 | `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |
+| `docs/HOSTING.txt`, `docs/JOINING.txt`, `docs/LAN.txt` | co-op: the players' guides |
+| `docs/MULTIPLAYER.md` | co-op: the design and the network protocol |
 
 The GameCube build still works here
 -----------------------------------

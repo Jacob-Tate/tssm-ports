@@ -5,6 +5,9 @@ Android layer (the BfBB PC port, CC0), adapted to TSSM.
 
 - App name: **SpongeBob Movie Port**
 - Package (application id): `io.github.tssmport.game`
+- This branch builds the **co-op app** instead: **TSSM co-op**,
+  `io.github.tssmport.game.coop`, installed beside the normal app and playing
+  on its saves and game files ([The co-op app](#the-co-op-app)).
 - No game data in the APK. The player supplies the files from their own copy
   of the Xbox release of The SpongeBob SquarePants Movie (about 1 GB).
 
@@ -569,6 +572,172 @@ holds those checks and the writes, without Android classes, and
 them on a desktop JVM (the offline Gradle cache has no test framework, so it is
 a plain program; its header has the two commands).
 
+## The co-op app
+
+This branch (`coop-android`) builds the co-op app, a second app beside
+the normal one. Co-op is never part of the normal app (the `android` branch).
+
+| | Normal app | Co-op app |
+| --- | --- | --- |
+| Name on the home screen | SpongeBob Movie Port | TSSM co-op (the icon has a red two-player badge) |
+| Application id | `io.github.tssmport.game` | `io.github.tssmport.game.coop` |
+| Version | `versionCode` 15, `0.9` | `versionCode` 15, `0.9-` and the co-op version code (`0.9-ec459113`, say), as the Switch's |
+| Saves | its own `files/tssm/saves` | the normal app's, through `SaveShareProvider` |
+| Game files | where the player put them | the normal app's folder, read where it is |
+| `config.ini` | its own | the normal app's: taken at every start, changes sent back |
+
+Both are signed with the same key (the debug keystore of the machine that
+builds them), which `SaveShareProvider` requires. The Java classes keep the
+package `io.github.tssmport.game` (`namespace`); only `applicationId`
+differs, so `adb shell am start` names the component as
+`io.github.tssmport.game.coop/io.github.tssmport.game.LauncherActivity`.
+
+**Starting.** `LauncherActivity` asks the normal app first (`CoopSaves.probe`,
+off the UI thread): installed, `versionCode` 14 or newer, the same signing
+certificate, the provider in that package, the permission granted, `hello`
+answered. Then it takes the normal app's game-files folder (`settings`): with
+All files access for the co-op app it is used where it is, as the normal app
+uses it; without, `CoopNoticeActivity` asks for it, and once it is granted
+starts `LauncherActivity` again with the launch's `TSSM_` extras (so a test
+launch stays one; `TestLaunch` still decides whether they are taken). The
+notice keeps clear of the system bars and the camera cutout and wraps a long
+folder path. The import screen only
+links a folder; it never copies the game in. If the normal app copied its
+files into itself, that copy is in its own `Android/data` folder, which no
+other app can read, and the import screen asks for the folder they came from.
+
+| What the probe finds | What co-op does |
+| --- | --- |
+| No normal app, or one older than 14 | "Co-op uses the saves and game files of the SpongeBob Movie Port app. Install or update it (version 0.9, build 14 or newer), open it once, then open co-op again." with **Play without saving** and **Close** |
+| A normal app with another key | says so; **Play without saving**, **Close** |
+| The permission missing (should not happen: co-op declares it itself) | "Install both apps again from the same place"; **Play without saving**, **Close** |
+| No answer | the reason; **Try again**, **Play without saving**, **Close** |
+
+**Play without saving** points the save folder at `cache/no-saves`, emptied at
+every start, for that process only (a static field, so no intent from another
+app can choose it). The game offers it too, in a box with **Close**, when the
+saves cannot be reached after all, Android refuses the lock, or the copy
+fails. Without a mod, co-op keeps no saves of its own: it plays on the normal
+app's or on none. A mod is the exception (below).
+
+**The saves** (`CoopSaves.java`, `src/SB/Core/pc/android/iAndroidSaves.cpp`).
+`iSystem.cpp`'s `ClaimSaveFolder` runs before any save is read. With the
+default save folder (no mod, no test launch, not "without saving"):
+1. `coopSavesClaim` opens `content://io.github.tssmport.game.saves/claim`
+   and hands the descriptor to C, which `flock`s it and keeps it open. That
+   is the lock the normal game's own claim takes, so it lasts exactly as long
+   as the co-op process. Co-op writes its process id into the lock file, as
+   the game's claim does, for the normal game's log. While the normal game holds it (open, or kept in
+   the background), co-op says "SpongeBob Movie Port is open, and co-op plays
+   on its saves. Close it (swipe it away in Recent apps), then open TSSM co-op
+   again." and closes without changing anything.
+2. `coopSavesMirror` copies every file `list` names into co-op's own
+   `files/tssm/saves`, checking each against its SHA-256, and removes what a
+   last session left there. The unchanged save code then plays on that copy.
+3. Before each change the save store makes (a save and its still, the Saves
+   tab's restore, delete and import, the start-up repair, any file it writes:
+   `iSaveStoreChange` in `iSaveStore.h`), `coopSavesBegin` marks the copy as
+   not sent (`files/tssm/coop-unsent`, with the SHA-256 of each real file as
+   co-op last saw it). After the change, `coopSavesPush` compares co-op's files with what the
+   real folder was last seen to hold and sends the differences: slots first,
+   `write` with `backup` for a slot (the normal app keeps the old file as
+   backup 1, as the game does), `remove` for a deleted one. Backups are never
+   sent; the normal app makes its own. Each carries `expect`, so a file there
+   that co-op has not seen is never replaced.
+
+The mark goes only when a push has sent everything; a file co-op cannot read
+keeps it. If a write is refused because the real file changed, co-op stops
+sending for that session and says so (a toast); if the normal app cannot be
+reached, or is being opened, the next save tries again. Either way co-op's
+copy keeps the save. At the next start a marked copy is compared file by file
+with the real folder and with what co-op last saw there: a file co-op changed
+stays (with its `.tmp` leftover) when the real one is still the one co-op last
+saw, a file it did not change is copied in from the real folder, and the first
+push (the start-up repair's) sends what stayed. So a save made just before
+co-op was swiped away or crashed is not lost. If a file changed on both sides
+(or a `.tmp` leftover's file changed in the normal app), the real saves win:
+the marked copy is kept in co-op's `files/tssm/unsent/<time>/` (the toast says
+so) and the real saves are copied in. Nothing in the apps restores a kept copy
+yet; `adb shell run-as` reaches it on a debuggable APK.
+
+**A mod in the co-op app** uses that mod's own save folder, as the normal game
+does per mod (`files/tssm/mods/<mod>/saves`), and that folder is co-op's own:
+those saves are not shared with the normal app, and the normal app's mod saves
+are not seen by co-op.
+
+**Settings.** `config.ini` is shared as on the PC and the Switch: the normal
+app keeps lines it does not know when it saves it (`iConfigEdit.h`), so co-op's
+`[coop]` lines survive it, and the save folder's lock lets only one app run at
+a time. At every start that shares the saves, `LauncherActivity` makes co-op's
+`files/config.ini` the normal app's (`settings`; none when it has none). When
+the game saves its settings (`iConfigSave`) and at every push, a changed file
+goes back with `config` over the one co-op started from (`expect`), written as
+the game writes it. If the normal app's file changed meanwhile, co-op stops
+sending it for that session and says so; a change not sent is lost at the next
+start, which takes the normal app's file again. Without shared saves (a test
+launch, "Play without saving") co-op uses its own file and sends nothing.
+
+**Quitting.** When the game ends (Quit in its menu), the app's process ends
+with it (`GameActivity.onDestroy`), as in the normal app, so the lock is free
+at once and the other app can be opened straight away. A fatal message box
+(a missing level file, out of memory) ends it with `_exit`, which skips
+`atexit` and so `iCoopShutdown`: first `iAndroidEndProcess` stops hosting or
+joining through the I/O thread, which says goodbye to a partner, and waits
+for that at most half a second (`Farewell` in `iAndroidNet.cpp`), so the
+partner sees "left" instead of a lost connection.
+
+**The network.** The manifest asks for `INTERNET`, `ACCESS_NETWORK_STATE`,
+`CHANGE_WIFI_MULTICAST_STATE` and `WAKE_LOCK` (all granted at install) and
+declares `ACCESS_LOCAL_NETWORK` (Android 17's; not enforced for an app that
+targets SDK 35, which the first phone test confirms). `CoopNet.java`:
+- the multicast lock while hosting visibly on the home network (many phones'
+  Wi-Fi drops broadcast questions without it; a joiner needs none, the answers
+  are unicast);
+- the low-latency Wi-Fi lock (`WIFI_MODE_FULL_LOW_LATENCY`, high-performance
+  below Android 10) during a session, while hosting (visible or not: a join
+  by address too) and while the list searches (its minute): in power save the phone lost 60 to 85% of what
+  a PC sent it while it waited for a player, and answered none of its
+  questions, until a session started;
+- both only while the game is in front (`onPause` releases them; Android
+  also drops the low-latency lock with the screen off), never in single
+  player.
+
+What it costs: the Wi-Fi radio stays out of power save for those minutes. That
+is an estimate of 0.1 to 0.3 W more, about 1% of a large phone's battery an
+hour, small beside the game itself (several watts while it plays).
+`iAndroidNetFrame` (each frame, from `iGui::CoopFrame`) asks for them when
+what co-op needs changes. The Co-op tab asks `coopNetKind` every two seconds:
+on mobile data or with no network it says so and "Host on this network" is
+off; joining by address still works. Finding games skips the mobile-data
+interfaces (`rmnet`, `ccmni`, `seth`, `wwan`, `pdp`, and clat's `v4-`) even
+when they have a private address (`iNetSockPosix.cpp`).
+
+**Away.** `WatchBackground` (`iPadHostSDL.cpp`) only sets a flag
+(`iNet::net_note_away`). Back in front, the co-op I/O thread reads each
+socket's pending error at its next wait and logs the count. The session's
+socket is bound to any address and outlives a Wi-Fi drop; the finder makes
+its sockets again for each search. What the partner sees in between comes
+from co-op's stall rules: "waiting", then "no word", then joining again for up
+to a minute. Android freezes a backgrounded app after some seconds.
+
+**Local co-op** (two copies on one PC) is Windows only: `iCoopLocalAvailable`
+is false here, `TSSM_LOCAL_COOP` is not a test-launch key, and the Co-op tab
+never shows its section.
+
+**The Co-op tab by touch.** The list's rows are 2.5 lines tall and the code
+pad's keys 2.6, and a finger opens the pad by itself. The name field asks for
+a name keyboard (words capitalised, no autocorrect), the code field for a
+visible-password one (no learning), the two password fields for a hidden
+password one. A text field the keyboard opens for is
+scrolled into the top third of the panel, above the keyboard. While a visible
+host waits, the HUD's join code is drawn a third larger than on a desktop,
+bottom right, below the touch controls' face buttons and right stick.
+
+**On the PC, the phone's layout:** `TSSM_GUI_TOUCH=1` gives a desktop build
+the phone's touch sizes, and a window of half the phone's pixels with
+`[gui] scale` at half the phone's scale lays the overlay out as the phone
+does (1440x3120: 1560x720 at 1.125).
+
 ## Test launches and benchmarks
 
 A test launch starts the game from adb with test settings for that launch
@@ -591,7 +760,19 @@ adb shell am start -n io.github.tssmport.game/.LauncherActivity \
   and `TSSM_ANDROID_ACCEL` ("Heat, battery and frame drops"), and the GPU's
   `TSSM_GPU_OPT`, `TSSM_GPU_POST`, `TSSM_GPU_FIXEDSIZE`, `TSSM_GPU_LOG`,
   `TSSM_GPU_VERIFY`, `TSSM_GPU_MSRTT` and `TSSM_GPU_MSDISCARD`
-  (docs/RENDERING.md). Anything else is logged and ignored.
+  (docs/RENDERING.md). In the co-op app also co-op's: `TSSM_COOP`,
+  `TSSM_COOP_PORT`, `TSSM_COOP_NAME`, `TSSM_COOP_PASSWORD`, `TSSM_COOP_ADDR`,
+  `TSSM_COOP_BIND`, `TSSM_COOP_LOG`, `TSSM_COOP_FOLLOW`, `TSSM_COOP_RECONNECT`,
+  `TSSM_COOP_SYNC_CAPTURE`, `TSSM_COOP_LAN_PORT`, `TSSM_COOP_LAN_TARGET`, the
+  test actions `TSSM_TEST_COOP_CODE`, `_GO`, `_KICK`, `_LOOK`, `_TAB`,
+  `_BUILD_SALT`, `_ASSET_SALT`, `TSSM_TEST_SCENE`, `TSSM_TEST_WARP`,
+  `TSSM_TEST_EVENT`, `TSSM_TEST_STALL`, `TSSM_TEST_QUIT`, `TSSM_TEST_SAVE`,
+  `TSSM_TEST_PLACE_ON`, `TSSM_TEST_HEALTH`, and the overlay's `TSSM_GUI_OPEN`,
+  `TSSM_GUI_OPEN_AT`, `TSSM_GUI_TAB`, `TSSM_GUI_CAPTURE` (a path key),
+  `TSSM_GUI_CAPTURE_FRAMES` and `TSSM_GUI_CLOSE`. A test launch never shares
+  the normal app's saves: its save folder is its own. The log shows
+  `TSSM_COOP_PASSWORD` and `TSSM_TEST_COOP_CODE` as `(hidden)`. Anything else is logged
+  and ignored.
 - They are taken only when `files/perf-test/armed` exists in the app's private
   storage. Only the app and `adb shell run-as` (a debuggable APK) can make it,
   so no other app can steer a launch. Without it the extras are ignored and

@@ -145,6 +145,59 @@ These settings take effect at the next start, and are tagged **restart**:
   conflicts (what, which mod is used, over which) and the mod log, with a filter, **Copy** and
   **Open mods.log**. Every change is written to `mods/mods.ini` at once. The single mod folder of
   `[assets] mod` is kept at the bottom. `docs/MODDING.md` is the modder's guide.
+- **Co-op:** co-op for two players (`docs/MULTIPLAYER.md`). With co-op off: your name; **Join a
+  game**, with the list **Games on this network** (`docs/MULTIPLAYER.md` 14.3; it searches by itself
+  when the tab opens and again when a host or join ends, for a minute, **Search again** for more):
+  each row the host's name, device, level, "waiting" or "has a player", and **Ready** or why not
+  ("Different version" and "Different game files" with both codes, "Full"); after 5 s with nothing
+  found, a checklist, with **Join by address** opened beside it the first time; when a search that
+  listed games ends, a line saying so. A click, a tap or A on a controller picks a row (the
+  headers are not cursor stops); **Join** (on a controller, Start; or a double click) opens the
+  code entry, which keeps working after the search ends: the code
+  large, a field for a keyboard, and the **code pad** (32 keys in 4 rows of 8, **Delete**,
+  **Clear**, **Keyboard**, **Join**), which opens by itself when the row was picked with a
+  controller or a finger; on a controller the d-pad moves, A types, B deletes (on an empty code it
+  closes the pad), Y opens the keyboard, Start joins. After a refused join from the list, **Try
+  again** opens the code entry again, empty. The search stops once the tab is no longer shown.
+  The code field asks the system keyboard for a
+  visible password, capitals and no autocorrect. **Join by address** (folded) is the internet's
+  form: the host's numeric address and the code, **Join**. **Host a game**: **Host on this
+  network** (one press: a new code, visible on the network) or **Host over the internet** (the
+  port, join code or your own password, **Start hosting**; not visible until ticked). While
+  hosting: the join code in large letters, who others on the network see ("NAME (Windows)"),
+  **Visible on this network**, this device's addresses on its networks with the port, the address
+  to forward on the router (internet hosting), wrong code attempts, **Kick**, **Stop hosting**.
+  While joining: **Leave**. Below: the status in plain words (a refusal or failure says what to
+  check; after a dropped connection, "joining again by itself (N s left)"), the partner (name, ping,
+  the connection's quality and lost packets, character, level, whether they are in yours), whether
+  the level's enemies and objects are shared right now, the traffic, **Go to the host's level** when
+  joined and the host is elsewhere, and the switches for the name tag, for following the host
+  (`[coop] follow`), for joining again by itself after a drop (`[coop] reconnect`) and for the
+  connection-quality dot on screen (`[coop] quality`) and for the join code on screen
+  (`[coop] show_code`). The name, port and address of the last host
+  or join are kept in `config.ini`, never the password; the address only once that join's session is
+  up (`docs/MULTIPLAYER.md` 14.2). At the bottom, the co-op version both
+  players must share (`docs/MULTIPLAYER.md` 8). **Customize** (M4,
+  `docs/MULTIPLAYER.md` 7.4): the character (**Automatic**, **SpongeBob**, **Patrick**; switches at
+  once where the level has both, and says why not when it cannot), what you play now, a costume for
+  each character from the ones your own save has unlocked (locked ones are shown greyed; a new
+  costume is worn from the next level), and the other player's costumes (with "NAME's costume shows
+  here from the next level" while this game draws them in another outfit, as in the first level of a
+  session; `docs/MULTIPLAYER.md` 7.5). A controller reaches it
+  with Back+Start and the d-pad; in play, a tap of LB (Z on the keyboard) switches the character and
+  a hold changes the costume. While co-op is on, a HUD layer is drawn
+  over the game even with the overlay closed: the partner's name above their head (at the edge of
+  the picture when they are off screen), a dot in the connection's colour with the ping at the top
+  right (green good, yellow fair, red poor, or "no signal"), "no word from NAME" while nothing has
+  come for 2 seconds, "joining the host's game again" after a drop, short notices when they join or
+  leave, and while the
+  partner's game has stopped for 2 seconds or more (its window held, a hitch, a load) "waiting for
+  NAME's game" until it runs again (the tab's partner line says so from 1 second;
+  `docs/MULTIPLAYER.md` 5.11), and while a host on the home network waits for a player, "Join
+  code: K7QX-M2PD-9TRW" large at the bottom right, to be read off the TV (`[coop] show_code`; only
+  while "Visible on this network" is ticked; never for local co-op or a host only this PC can join,
+  never a typed password; hidden while the overlay is open). The notices go at the bottom of the picture while the overlay is
+  open, so they are not drawn over its window. It takes no input.
 - **About:** the version, the renderer and library versions in use, and the full license text of
   every third-party component.
 
@@ -197,6 +250,7 @@ All of the GUI is under `src/SB/Core/pc/gui/` and is port-only. The table below 
 | `iGuiControls.cpp` | the Controls tab, on the input layer's binding API (`iPadControls.h`) |
 | `iGuiSaves.cpp` | the Saves tab, on the save store (`iSaveStore.h`) |
 | `iGuiMods.cpp` | the Mods tab, on the mod system (`iMod.h`) |
+| `iGuiCoop.cpp` | the Co-op tab and the co-op HUD layer (name tag, notices), on the co-op service (`iCoop.h`). The HUD layer is drawn at every present while co-op is on: with the overlay closed, `iGui.cpp` builds an ImGui frame for it alone without the SDL backend (no input, no cursor change) |
 | `iGuiTabs.cpp` | the About tab |
 | `iGuiUtil.cpp` | the look, scaling, the system's folder and file dialogs, whole-file reads and writes through SDL, the asset-folder check and the PNG writer |
 | `iGuiSelfTest.cpp` | `TSSM_GUI_SELFTEST` |
@@ -299,7 +353,8 @@ are handled.
   `window height / 1080`, and caps it so a window of about 900x620 units fits. The result is rounded to
   eighths. `[gui] scale` overrides it.
 - The overlay's font is ImGui's scalable default (`AddFontDefaultVector`) at 16 px times the scale.
-- On Android, `ImGuiConfigFlags_IsTouchScreen` and larger touch padding are set.
+- On Android, `ImGuiConfigFlags_IsTouchScreen` and larger touch padding are set. `TSSM_GUI_TOUCH=1` sets
+  them on a desktop too, to look at a layout at a phone's size there (docs/ANDROID.md, "The co-op app").
 
 ### Panels other modules fill
 
@@ -394,12 +449,14 @@ All of these are environment variables.
 | Variable | What it does |
 |---|---|
 | `TSSM_GUI_OPEN=1` | open the overlay at the first frame |
-| `TSSM_GUI_TAB=<settings\|controls\|saves\|mods\|about\|all>` | bring that tab to the front. `all` steps through every tab, one capture each; a list (`saves,mods`) steps through those. |
+| `TSSM_GUI_TAB=<settings\|controls\|saves\|mods\|coop\|about\|all>` | bring that tab to the front. `all` steps through every tab, one capture each; a list (`saves,mods`) steps through those. |
 | `TSSM_GUI_OPEN_AT=<n>` | open the overlay at the n-th present instead of at startup, so a capture shows it over the game (with `TSSM_INPUT` to get there) |
 | `TSSM_GUI_IMPORT=<file>` | open the Saves tab's import dialog for that file the first time the tab is drawn, as if it had been picked |
 | `TSSM_GUI_CAPTURE=<file.png>` | write the window's back buffer, with the game's picture and the overlay exactly as presented, after the overlay has been open for N frames. A `%s` in the name becomes the tab's name, or `launcher`. Also opens the overlay. |
 | `TSSM_GUI_CAPTURE_FRAMES=<n>` | N for the capture above. Default 30. |
+| `TSSM_GUI_HUD_CAPTURE=<n>:<file.png>` | write the window at present n with the overlay closed: the game's picture and the co-op HUD layer (name tag, notices) exactly as presented. Only while co-op is on (the HUD layer is what draws then). |
 | `TSSM_GUI_EXIT=1` | exit with code 0 once the captures are written |
+| `TSSM_GUI_CLOSE=1` | close the overlay once the captures are written, so the game goes on in view (`tools/coop_test.py`) |
 | `TSSM_GUI_SELFTEST=<frames>` | right after `iGuiInit`, present that many frames of a test picture through `RwCameraShowRaster` with the overlay open, then exit |
 | `TSSM_GUI_SELFTEST_RESIZE=<w>x<h>` | resize the window a third of the way into the selftest. Under D3D9 this is a device reset with the overlay open; with a different shape it shows the letterbox. |
 | `TSSM_GUI_SELFTEST_PAD=1` | attach an SDL virtual controller and play a scripted set of presses through the input backend and `iGuiFilterPad`, logging what the game would see |

@@ -7,6 +7,10 @@
 
 #include <stdio.h>
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 // Size: 0x28 (PS2 DWARF)
 struct DUMMY_PAREMITTER
 {
@@ -125,6 +129,15 @@ S32 DUMMY_NAMESPACE::DUMMY_PREFIXSysUpdate(U8* mem, S32 count, ptank_pool& apool
         // Clamps rot_vel, not rot, as retail does.
         par->rot = xDangleClamp(par->rot_vel);
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 13): on the host, the particle hurts the
+        // guest too. Nothing when co-op is off.
+        if (emitter->doDamage && rat_rev > Update::seg_allowCollide[0] &&
+            rat_rev < Update::seg_allowCollide[1] && par->color.a > 0x20)
+        {
+            iCoopParticleHit((const F32*)&par->pos, 0.25f);
+        }
+#endif
         if (emitter->doDamage && !(globals.player.DamageTimer > 0.0f) && globals.player.s->Health &&
             rat_rev > Update::seg_allowCollide[0] && rat_rev < Update::seg_allowCollide[1] &&
             par->color.a > 0x20)

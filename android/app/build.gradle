@@ -2,9 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
-// The Android app: SDL's Java half, three small activities of our own
-// (LauncherActivity, ImportActivity, GameActivity), and the game itself as
-// libmain.so, built by the repository's CMakeLists.txt. docs/ANDROID.md.
+// The co-op app: SDL's Java half, four small activities of our own
+// (LauncherActivity, CoopNoticeActivity, ImportActivity, GameActivity), and
+// the game itself with co-op as libmain.so, built by the repository's
+// CMakeLists.txt. It installs beside the normal app (its own application ID,
+// the same signing key) and plays on that app's saves and game files.
+// docs/ANDROID.md, "The co-op app".
 //
 // Properties (gradle -P<name>=<value>):
 //
@@ -46,6 +49,28 @@ if (!tssmIcon.isEmpty()) {
     logger.lifecycle("tssm: launcher icon from ${tssmIconRes}")
 }
 
+// The co-op badge over whichever icon that is (res/drawable/coop_badge.xml,
+// res/mipmap*/ic_launcher_coop.xml): the two layers named here, since the
+// default icon and tssm.icon's name their foreground differently.
+def coopIconRes = new File(layout.buildDirectory.get().asFile, 'generated/tssm-coop-icon/res')
+def coopForeground = tssmIconRes != null ? '@mipmap/ic_launcher_foreground' : '@drawable/ic_launcher_foreground'
+def coopBackground = tssmIconRes != null ? '@color/tssm_icon_background' : '@color/ic_launcher_background'
+new File(coopIconRes, 'drawable').mkdirs()
+new File(coopIconRes, 'values').mkdirs()
+new File(coopIconRes, 'drawable/coop_icon_foreground.xml').text = """<?xml version="1.0" encoding="utf-8"?>
+<!-- Made by app/build.gradle. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="${coopForeground}" />
+    <item android:drawable="@drawable/coop_badge" />
+</layer-list>
+"""
+new File(coopIconRes, 'values/coop_icon.xml').text = """<?xml version="1.0" encoding="utf-8"?>
+<!-- Made by app/build.gradle. -->
+<resources>
+    <color name="coop_icon_background">${coopBackground}</color>
+</resources>
+"""
+
 def cmakeArgs = [
     // The game is C++ and librw is C++; the shared runtime would be a second
     // .so in the APK for nothing.
@@ -57,6 +82,33 @@ if (!tssmFfmpeg.isEmpty()) {
     cmakeArgs += '-DTSSM_FFMPEG_ROOT=' + file(tssmFfmpeg).absolutePath.replace('\\', '/')
 }
 
+// The co-op version code tools/coop_id.cmake gives the native build, for the
+// version name, as the Switch's .nro carries it. The SDK's CMake runs it.
+def coopCode = 'unknown'
+try {
+    def sdkDir = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+    def localProps = rootProject.file('local.properties')
+    if (sdkDir == null && localProps.isFile()) {
+        def props = new Properties()
+        localProps.withInputStream { props.load(it) }
+        sdkDir = props.getProperty('sdk.dir')
+    }
+    def windows = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')
+    def cmakeExe = new File(sdkDir, 'cmake/3.22.1/bin/cmake' + (windows ? '.exe' : ''))
+    def repo = file('../..').absolutePath.replace('\\', '/')
+    def text = providers.exec {
+        commandLine cmakeExe.absolutePath, "-DSRC=${repo}", '-P', "${repo}/tools/coop_id.cmake"
+        ignoreExitValue = true
+    }.standardOutput.asText.get()
+    def m = text =~ /co-op version ([0-9a-z]+)/
+    if (m.find()) {
+        coopCode = m.group(1)
+    }
+} catch (Exception e) {
+    logger.warn("tssm: the co-op version code could not be worked out: ${e}")
+}
+logger.lifecycle("tssm: co-op version ${coopCode}")
+
 android {
     namespace = 'io.github.tssmport.game'
     compileSdk = 35
@@ -65,7 +117,9 @@ android {
     ndkVersion = '28.2.13676358'
 
     defaultConfig {
-        applicationId = 'io.github.tssmport.game'
+        // Not the normal app's io.github.tssmport.game: installed beside it.
+        // The Java classes keep that package (namespace above).
+        applicationId = 'io.github.tssmport.game.coop'
 
         // 24: GLES 3 where the device has it, and the storage behaviour the
         // import screen is written against.
@@ -73,7 +127,7 @@ android {
         targetSdk = 35
 
         versionCode = 16
-        versionName = '0.9'
+        versionName = '0.9-' + coopCode
 
         externalNativeBuild {
             cmake {
@@ -125,6 +179,7 @@ android {
     sourceSets {
         main {
             java.srcDirs += sdlJava
+            res.srcDirs += coopIconRes
         }
         if (tssmIconRes != null) {
             debug {

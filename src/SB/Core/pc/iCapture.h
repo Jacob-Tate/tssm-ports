@@ -43,4 +43,11 @@ void iCaptureInit();
 // Frames presented so far.
 S32 iCaptureFrameCount();
 
+// Writes the next frame presented as `name` (a plain file name) in
+// TSSM_CAPTURE_DIR. Only while the capture hook runs (any variable above is
+// set); FALSE otherwise. For tests that pick their moments as they go, like
+// tools/coop_test.py's captures at the same moment on both copies
+// (TSSM_COOP_SYNC_CAPTURE, iCoopWorld.cpp).
+bool iCaptureRequest(const char* name);
+
 #endif

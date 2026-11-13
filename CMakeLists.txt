@@ -239,6 +239,46 @@ if(WIN32)
 else()
   set(HOST_SOURCES ${PC_DIR}/iHostPosix.cpp)
 endif()
+# Starting a second copy of the game (local co-op) is Windows only.
+if(NOT WIN32)
+  list(APPEND HOST_SOURCES ${PC_DIR}/iHostChildNull.cpp)
+endif()
+
+# --- online co-op (docs/MULTIPLAYER.md) -------------------------------------------------
+# The network core: the operating system's own UDP sockets behind iNetSock.h,
+# the hashing the handshake needs, the wire format and the session. No game
+# code, so tssm_nettest links it on its own. The only libraries it adds are the
+# system's: ws2_32 (Winsock), bcrypt (the random source) and iphlpapi (the
+# interface list, for finding games on the home network) on Windows.
+set(NET_SOURCES
+  ${PC_DIR}/iNetCrypto.cpp
+  ${PC_DIR}/iNetDisc.cpp
+  ${PC_DIR}/iNetProto.cpp
+  ${PC_DIR}/iNetSession.cpp
+  ${PC_DIR}/iNetSockCommon.cpp
+  ${PC_DIR}/iCoopLocalCore.cpp)
+if(WIN32)
+  list(APPEND NET_SOURCES ${PC_DIR}/iNetSockWin32.cpp)
+  set(NET_LIBS ws2_32 bcrypt iphlpapi)
+else()
+  list(APPEND NET_SOURCES ${PC_DIR}/iNetSockPosix.cpp)
+  set(NET_LIBS)
+endif()
+# SHA-256 is optimised even in a debug build: the game-files hash reads the
+# whole asset folder once, and the handshake's PBKDF2 runs 100,000 rounds.
+set_source_files_properties(${PC_DIR}/iNetCrypto.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+# The co-op version both players must share (iCoop.cpp, docs/MULTIPLAYER.md
+# 14.1): tools/coop_id.cmake fingerprints the shared game and co-op code from
+# git at every build, the same on every platform's branch, and rewrites
+# coop_id.h only when that code changed.
+find_package(Git QUIET)
+set(TSSM_COOP_ID_DIR ${CMAKE_CURRENT_BINARY_DIR}/coop_id)
+add_custom_target(tssm_coop_id ALL
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -DOUT=${TSSM_COOP_ID_DIR}/coop_id.h
+          -DGIT=${GIT_EXECUTABLE} -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/coop_id.cmake
+  BYPRODUCTS ${TSSM_COOP_ID_DIR}/coop_id.h
+  COMMENT "The co-op version"
+  VERBATIM)
 
 # --- window ----------------------------------------------------------------------
 if(TSSM_BACKEND_D3D9 OR TSSM_BACKEND_D3D11 OR TSSM_BACKEND_GL3 OR TSSM_BACKEND_VULKAN)
@@ -545,6 +585,7 @@ if(TSSM_GUI)
   set(GUI_SOURCES
     ${PC_DIR}/gui/iGui.cpp
     ${PC_DIR}/gui/iGuiControls.cpp
+    ${PC_DIR}/gui/iGuiCoop.cpp
     ${PC_DIR}/gui/iGuiLauncher.cpp
     ${PC_DIR}/gui/iGuiMods.cpp
     ${PC_DIR}/gui/iGuiRender.cpp
@@ -697,6 +738,15 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iModPackage.cpp
   ${PC_DIR}/iModTexture.cpp
 
+  # Online co-op (docs/MULTIPLAYER.md): the service and its I/O thread, the
+  # asset hash, and the network core under them. The game-side half (the
+  # puppet) is iCoopPuppet.cpp in tssm_game.
+  ${PC_DIR}/iCoop.cpp
+  ${PC_DIR}/iCoopAssets.cpp
+  # Local co-op (docs/MULTIPLAYER.md 12): a second copy of the game on this PC.
+  ${PC_DIR}/iCoopLocal.cpp
+  ${NET_SOURCES}
+
   ${TSSM_STUB_SOURCES}
 
   ${INPUT_SOURCES}
@@ -708,7 +758,9 @@ add_library(tssm_platform STATIC
   ${GUI_SOURCES}
 )
 target_include_directories(tssm_platform PUBLIC ${TSSM_INCLUDES})
-target_link_libraries(tssm_platform PUBLIC tssm_rw ${INPUT_LIBS} ${AUDIO_LIBS})
+target_include_directories(tssm_platform PRIVATE ${TSSM_COOP_ID_DIR})
+add_dependencies(tssm_platform tssm_coop_id)
+target_link_libraries(tssm_platform PUBLIC tssm_rw ${INPUT_LIBS} ${AUDIO_LIBS} ${NET_LIBS})
 target_link_libraries(tssm_platform PRIVATE ${FMV_LIBRARIES})
 if(TSSM_GUI)
   target_link_libraries(tssm_platform PRIVATE tssm_imgui)
@@ -783,7 +835,21 @@ message(STATUS "tssm: ${_n_game} game units from configure.py (+ ${_n_gc} gc uni
 add_library(tssm_game STATIC ${TSSM_GAME_SOURCES}
   # Port-only, but it calls game code, so it is compiled as a game unit: the
   # debug events of unattended runs (iTestEvents.h).
-  ${PC_DIR}/iTestEvents.cpp)
+  ${PC_DIR}/iTestEvents.cpp
+  # Port-only, game-side half of co-op: reads the local player, drives and
+  # draws the partner's puppet (iCoop.h), and shares the level's enemies,
+  # platforms and destructibles (iCoopWorld.cpp, docs/MULTIPLAYER.md 5), and
+  # the fights, the damage, the guest's respawn and the pickups (iCoopCombat.cpp,
+  # docs/MULTIPLAYER.md 6), and playing through together: level changes,
+  # cutscenes, saving (iCoopFlow.cpp), characters, costumes and the partner's
+  # models (iCoopLook.cpp, docs/MULTIPLAYER.md 7), and the counters a level's
+  # texts show with the texts their logic writes (iCoopHud.cpp, 13).
+  ${PC_DIR}/iCoopPuppet.cpp
+  ${PC_DIR}/iCoopWorld.cpp
+  ${PC_DIR}/iCoopCombat.cpp
+  ${PC_DIR}/iCoopFlow.cpp
+  ${PC_DIR}/iCoopLook.cpp
+  ${PC_DIR}/iCoopHud.cpp)
 target_link_libraries(tssm_game PUBLIC tssm_platform tssm_rw)
 target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
@@ -835,7 +901,9 @@ if(ANDROID)
     ${PC_DIR}/android/iAndroid.cpp
     ${PC_DIR}/android/iAndroidDocument.cpp
     ${PC_DIR}/android/iAndroidMain.cpp
-    ${PC_DIR}/android/iAndroidPerf.cpp)
+    ${PC_DIR}/android/iAndroidNet.cpp
+    ${PC_DIR}/android/iAndroidPerf.cpp
+    ${PC_DIR}/android/iAndroidSaves.cpp)
   set_source_files_properties(${SB_DIR}/Game/zMain.cpp TARGET_DIRECTORY tssm_game PROPERTIES
     COMPILE_OPTIONS "-include;${PC_DIR}/android/iAndroidGameMain.h;-fno-strict-return")
   target_link_libraries(main PRIVATE log android)
@@ -891,6 +959,23 @@ if(WIN32)
   endif()
 endif()
 
+# The players' co-op guides (docs/MULTIPLAYER.md 8.1) and the local co-op
+# starter (12) beside the executable, so the folder handed to the other player
+# (bin\ from tools\pcbuild.bat) has them. A target of its own, so an edited
+# guide is copied again without a relink.
+if(NOT ANDROID)
+  add_custom_target(tssm_guides ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/HOSTING.txt ${CMAKE_CURRENT_SOURCE_DIR}/docs/JOINING.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/LAN.txt "${CMAKE_CURRENT_SOURCE_DIR}/docs/Local co-op.bat"
+            $<TARGET_FILE_DIR:${TSSM_GAME_TARGET}>
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/HOSTING.txt ${CMAKE_CURRENT_SOURCE_DIR}/docs/JOINING.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/docs/LAN.txt "${CMAKE_CURRENT_SOURCE_DIR}/docs/Local co-op.bat"
+    COMMENT "Staging the co-op guides (HOSTING.txt, JOINING.txt, LAN.txt) and Local co-op.bat"
+    VERBATIM)
+  add_dependencies(tssm_guides ${TSSM_GAME_TARGET})
+endif()
+
 # --- the app icon ----------------------------------------------------------------
 # The repository carries no icon art. TSSM_ICON_DIR names a folder that
 # tools/make_icons.ps1 made from a picture, outside the repository
@@ -939,6 +1024,19 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND TSSM_INPUT_BACKEND STREQUAL "sdl")
                COMPILE_DEFINITIONS "NON_MATCHING")
   if(WIN32)
     target_link_libraries(tssm_input_test PRIVATE user32 gdi32 ole32 dbghelp)
+  endif()
+endif()
+
+# --- tssm_configtest --------------------------------------------------------------
+# config.ini read only, as local co-op's Player 2 reads it (iConfig.h): never
+# written, appended to or created; player2.ini takes only Player 2's keys.
+#   build-*/tssm_configtest [scratch folder]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_configtest ${PC_DIR}/tests/configtest.cpp ${PC_DIR}/gui/iGuiNull.cpp)
+  target_link_libraries(tssm_configtest PRIVATE tssm_platform tssm_rw)
+  target_compile_options(tssm_configtest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(tssm_configtest PRIVATE user32 gdi32 ole32 dbghelp)
   endif()
 endif()
 
@@ -1007,6 +1105,30 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   set(TSSM_TEST_ASSETS "" CACHE PATH "An asset folder for the tests that need the game's data")
   if(TSSM_TEST_ASSETS)
     add_test(NAME tssm_widentest COMMAND tssm_widentest ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_nettest ----------------------------------------------------------------
+# tssm_nettest: the co-op network code on its own -- crypto known-answer tests,
+# the wire format, a host and a guest over UDP on 127.0.0.1 with loss, hostile
+# cases and a fixed-seed fuzz loop (src/SB/Core/pc/tests/nettest.cpp). No game
+# code, no window, nothing reachable from the network.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_nettest ${PC_DIR}/tests/nettest.cpp ${PC_DIR}/tests/netfuzzcore.cpp ${NET_SOURCES})
+  target_include_directories(tssm_nettest PRIVATE ${PC_DIR} ${PC_DIR}/tests ${TSSM_COOP_ID_DIR})
+  add_dependencies(tssm_nettest tssm_coop_id)
+  target_link_libraries(tssm_nettest PRIVATE ${NET_LIBS})
+  add_test(NAME tssm_nettest COMMAND tssm_nettest)
+
+  # tssm_netfuzz: the same targets under libFuzzer with ASan, by hand once per
+  # milestone (docs/MULTIPLAYER.md, 4.7). Needs a clang that ships libFuzzer.
+  option(TSSM_NETFUZZ "Build tssm_netfuzz (libFuzzer + ASan) for the co-op network code" OFF)
+  if(TSSM_NETFUZZ)
+    add_executable(tssm_netfuzz ${PC_DIR}/tests/netfuzz.cpp ${PC_DIR}/tests/netfuzzcore.cpp ${NET_SOURCES})
+    target_include_directories(tssm_netfuzz PRIVATE ${PC_DIR} ${PC_DIR}/tests)
+    target_compile_options(tssm_netfuzz PRIVATE -fsanitize=fuzzer,address -g -O1)
+    target_link_options(tssm_netfuzz PRIVATE -fsanitize=fuzzer,address)
+    target_link_libraries(tssm_netfuzz PRIVATE ${NET_LIBS})
   endif()
 endif()
 

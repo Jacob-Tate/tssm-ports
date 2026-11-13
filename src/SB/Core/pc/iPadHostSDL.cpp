@@ -17,6 +17,7 @@
 // (iPadKeyboardSDL.cpp), which that window's event pump keeps current.
 
 #include "iPadHost.h"
+#include "iCoop.h"
 
 #include "iConfig.h"
 #include "iHost.h"
@@ -28,6 +29,9 @@
 #include "iPadTouch.h"
 #include "iTime.h"
 #include "xPad.h"
+#ifdef __ANDROID__
+#include "iNetSock.h"
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -63,16 +67,23 @@ static bool SDLCALL WatchBackButton(void*, SDL_Event* e)
 
 // Android and iOS block the game thread while the app is in the background.
 // The game clock stops for that time, so the frame after it is an ordinary
-// frame and not the whole absence at once.
+// frame and not the whole absence at once. On Android co-op's away flag is
+// set too, and only set: its I/O thread acts on it (iNetSock.h).
 static bool SDLCALL WatchBackground(void*, SDL_Event* e)
 {
     if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
     {
         iTimeSuspend();
+#ifdef __ANDROID__
+        iNet::net_note_away(true);
+#endif
     }
     else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
     {
         iTimeResume();
+#ifdef __ANDROID__
+        iNet::net_note_away(false);
+#endif
     }
     return true;
 }
@@ -627,6 +638,10 @@ void iPadHostSetHotkey(iPadHostHotkeyFn fn)
 
 void iPadHostPoll()
 {
+    // Every frame, menus and movies included: co-op's I/O thread tells the
+    // partner when this stops for a while (docs/MULTIPLAYER.md 5.11).
+    iCoopGameBeat();
+
     if (sReady)
     {
         // Pumping the queue refreshes the gamepad state and reports a

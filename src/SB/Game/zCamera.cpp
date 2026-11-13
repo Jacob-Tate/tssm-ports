@@ -7,6 +7,9 @@
 #include "zCutsceneMgr.h"
 #include "zGlobals.h"
 #include "zMain.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 F32 zcam_pad_pyaw_scale = 0.18124573f; // unknown math
 F32 zcam_pad_pitch_scale = 1.0f / 52;
@@ -277,7 +280,13 @@ static S32 zCameraFlyUpdate(xCamera* cam, F32 dt)
     xQuat quats[2];
     xQuat qresult;
 
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 7.3): a guest does not skip the host's
+    // fly-through (the host does, for both). TRUE at once when co-op is off.
+    if ((globals.pad0->pressed & 0x50000) && zcam_flytime > gSkipTimeFlythrough && iCoopMaySkipShow())
+#else
     if ((globals.pad0->pressed & 0x50000) && zcam_flytime > gSkipTimeFlythrough)
+#endif
     {
         zcam_flytime = 0.033333335f * zcam_flysize;
     }
@@ -469,10 +478,26 @@ static void zCameraFlyRestoreBackup(xCamera* backup)
     globals.oldSkoolCamera.roll_csv = backup->roll_csv;
 }
 
+#ifdef PLATFORM_PC
+// Online co-op (7.3): the host ended its fly-through; the guest's ends as the
+// game's own skip ends one (the rest of its update stops it the game's way).
+void zCameraFlyFinishPC()
+{
+    if (zcam_fly)
+    {
+        zcam_flytime = 0.033333335f * zcam_flysize;
+    }
+}
+#endif
+
 void zCameraFlyStop()
 {
     if (zcam_fly)
     {
+#ifdef PLATFORM_PC
+        // Online co-op (7.3): the host's fly-through ends; the guest is told.
+        iCoopShowFlyStop();
+#endif
         zcam_fly = 0;
         zcam_flypaused = 0;
         follow_cam->cfg_common.priority = 0;

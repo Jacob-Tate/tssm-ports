@@ -20,7 +20,7 @@ import java.util.Set;
  * test runs (tools/android_bench.py; docs/ANDROID.md, "Test launches").
  *
  * <pre>
- * adb shell am start -n io.github.tssmport.game/.LauncherActivity \
+ * adb shell am start -n io.github.tssmport.game.coop/io.github.tssmport.game.LauncherActivity \
  *     --es TSSM_PERF 5 --es TSSM_MOD mods/boot --es TSSM_EXIT_AFTER 7200
  * </pre>
  *
@@ -47,7 +47,7 @@ final class TestLaunch {
     /** Keys that name files or folders: each must resolve inside perf-test. */
     private static final Set<String> PATH_KEYS = new HashSet<>(Arrays.asList(
             "TSSM_MOD", "TSSM_MODS_DIR", "TSSM_SAVE_DIR", "TSSM_CONFIG", "TSSM_LOG",
-            "TSSM_CAPTURE_DIR", "TSSM_PERF_CSV", "TSSM_PERF_PROFILE_OUT"));
+            "TSSM_CAPTURE_DIR", "TSSM_PERF_CSV", "TSSM_PERF_PROFILE_OUT", "TSSM_GUI_CAPTURE"));
 
     /** Every key a test launch takes. */
     static final Set<String> KEYS = new HashSet<>(Arrays.asList(
@@ -63,7 +63,22 @@ final class TestLaunch {
             // The same for the GPU work of 0.9 (docs/RENDERING.md, "What a
             // frame costs the GPU").
             "TSSM_GPU_OPT", "TSSM_GPU_POST", "TSSM_GPU_FIXEDSIZE", "TSSM_GPU_LOG",
-            "TSSM_GPU_VERIFY", "TSSM_GPU_MSRTT", "TSSM_GPU_MSDISCARD"));
+            "TSSM_GPU_VERIFY", "TSSM_GPU_MSRTT", "TSSM_GPU_MSDISCARD",
+            // Co-op runs between this phone and a PC (docs/MULTIPLAYER.md;
+            // design N4): the session, the home-network finder's loopback
+            // hooks, and the test actions both sides drive. Not
+            // TSSM_LOCAL_COOP: local co-op is Windows only.
+            "TSSM_COOP", "TSSM_COOP_PORT", "TSSM_COOP_NAME", "TSSM_COOP_PASSWORD",
+            "TSSM_COOP_ADDR", "TSSM_COOP_BIND", "TSSM_COOP_LOG", "TSSM_COOP_FOLLOW",
+            "TSSM_COOP_RECONNECT", "TSSM_COOP_SYNC_CAPTURE", "TSSM_COOP_LAN_PORT",
+            "TSSM_COOP_LAN_TARGET",
+            "TSSM_TEST_COOP_CODE", "TSSM_TEST_COOP_GO", "TSSM_TEST_COOP_KICK",
+            "TSSM_TEST_COOP_LOOK", "TSSM_TEST_COOP_TAB", "TSSM_TEST_COOP_BUILD_SALT",
+            "TSSM_TEST_COOP_ASSET_SALT",
+            "TSSM_TEST_SCENE", "TSSM_TEST_WARP", "TSSM_TEST_EVENT", "TSSM_TEST_STALL",
+            "TSSM_TEST_QUIT", "TSSM_TEST_SAVE", "TSSM_TEST_PLACE_ON", "TSSM_TEST_HEALTH",
+            "TSSM_GUI_OPEN", "TSSM_GUI_OPEN_AT", "TSSM_GUI_TAB", "TSSM_GUI_CAPTURE",
+            "TSSM_GUI_CAPTURE_FRAMES", "TSSM_GUI_CLOSE"));
 
     /** Pointed into perf-test on every test launch, unless the launch names them. */
     private static final String[][] DEFAULTS = {

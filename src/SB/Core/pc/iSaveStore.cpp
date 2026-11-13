@@ -4,6 +4,9 @@
 #include "iSaveZip.h"
 #include "iHost.h"
 #include "iFile.h"
+#ifdef __ANDROID__
+#include "android/iAndroidSaves.h"
+#endif
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -339,6 +342,7 @@ static void iSS_backup(const char* path)
 bool iSaveStoreWriteFile(const char* path, const U8* data, size_t n, bool backup, char* err,
                          size_t errsize)
 {
+    iSaveStoreChange change;
     char dir[512];
     iSS_parentDir(path, dir, sizeof(dir));
     if (!iSS_mkdirs(dir))
@@ -787,6 +791,7 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
 bool iSaveStoreImportData(const U8* data, size_t n, const char* name, const iSaveImportOptions* o,
                           std::vector<iSaveImportItem>& items, char* err, size_t errsize)
 {
+    iSaveStoreChange change;
     items.clear();
 
     iSaveImportOptions defaults;
@@ -1257,6 +1262,7 @@ void iSaveStoreBackups(S32 target, S32 game, std::vector<iSaveBackupInfo>& out)
 
 bool iSaveStoreRestore(S32 target, S32 game, S32 which, char* err, size_t errsize)
 {
+    iSaveStoreChange change; // after the file time is set
     char path[512];
     iSS_backupPath(target, game, which, path, sizeof(path));
 
@@ -1287,6 +1293,7 @@ bool iSaveStoreRestore(S32 target, S32 game, S32 which, char* err, size_t errsiz
 
 bool iSaveStoreDelete(S32 target, S32 game, char* err, size_t errsize)
 {
+    iSaveStoreChange change;
     char path[512];
     iSaveStoreSlotPath(target, game, path, sizeof(path));
 
@@ -1454,6 +1461,7 @@ static bool iSS_promoteTmp(S32 target, S32 game, const std::vector<U8>& cur, cha
 
 bool iSaveStoreRecover(S32 target, S32 game, char* report, size_t reportsize)
 {
+    iSaveStoreChange change;
     iSS_err(report, reportsize, "%s", "");
     if (target < 0 || target >= ISS_MAX_TARGETS || game < 0 || game >= ISS_GAMES)
     {
@@ -1584,6 +1592,20 @@ bool iSaveStoreRecover(S32 target, S32 game, char* report, size_t reportsize)
 }
 
 // --- one game at a time ------------------------------------------------------------------
+
+iSaveStoreChange::iSaveStoreChange()
+{
+#ifdef __ANDROID__
+    iAndroidSavesChanging();
+#endif
+}
+
+iSaveStoreChange::~iSaveStoreChange()
+{
+#ifdef __ANDROID__
+    iAndroidSavesChanged();
+#endif
+}
 
 S32 iSaveStoreClaimFolder(U32* holder)
 {
