@@ -1,0 +1,174 @@
+JOINING A CO-OP GAME
+The SpongeBob SquarePants Movie, PC port: online co-op for two players
+
+This guide is for the player who joins the host's game. The host has their
+own guide, HOSTING.txt. You do not need to change anything on your router.
+
+
+SAME HOME NETWORK? START HERE
+-----------------------------
+If the host's PC, phone or Switch (with the co-op version of the game on
+it) is on the same Wi-Fi or home network as you, there is no address to
+type: the Co-op tab's list "Games on this
+network" shows the host's game by itself. Pick it, press "Join" and type the
+code shown on the host's screen (a controller or a touch screen gets a code
+pad). LAN.txt explains it. The rest of this guide is for joining over the
+internet.
+
+
+WHAT YOU NEED
+-------------
+1. The same version of the port as the host's.
+2. Your own copy of the game's files, the same release as the host's.
+3. From the host: their address with the port (for example
+   203.0.113.7:2171) and the join code (for example K7QX-M2PD-9TRW).
+
+
+1. INSTALL THE SAME VERSION
+---------------------------
+Get the same release of the port as the host has (the same zip) and unpack
+it to a folder of your own, for example C:\Games\TSSM. The 32-bit and the
+64-bit build of the same release play together; anything else does not.
+An older co-op zip and a newer one never play together, so when a new zip
+comes, both of you switch to it.
+
+To check: in the game, open the overlay with F1 (on a controller: hold Back
+and press Start) and go to the Co-op tab. At the very bottom it says
+"Co-op version:" and eight letters and digits. Yours and the host's must be
+the same.
+
+
+2. SET UP YOUR OWN GAME FILES
+-----------------------------
+The port comes with no game files. Each player uses the files from their own
+copy of the game: the folder extracted from your own Xbox disc that directly
+holds boot.HIP, font.HIP and the FMV folder. It must be the same release and
+region as the host's (The SpongeBob SquarePants Movie, USA). Never copy the
+host's files, and the host never sends you any.
+
+Tell the game where the folder is, in either way:
+
+- In the game: overlay (F1), Settings tab, "Game files": choose the folder.
+  It says "Ready." when the folder is right. Restart the game.
+- Or in config.ini (next to tssm.exe, or the one the About tab names under
+  "Settings file"), in the [assets] section:
+
+      [assets]
+      path = D:\Games\TSSM files
+
+Mods: turn on the same mods as the host, or none (easiest: both of you turn
+mods off in the Mods tab, "Use mods"). Different files or mods are refused
+with "your game files differ from the host's".
+
+The first time you join, the game checks your game files once (the Co-op tab
+says "Checking your game files..."). This takes a few seconds and is
+remembered afterwards.
+
+
+3. JOIN
+-------
+Start the game and load your save (or start a new game), so you are playing
+in a level; any level will do. Open the overlay (F1, or Back+Start) and go to
+the Co-op tab.
+
+  What you see: "Online co-op", "Status: Off", your name, "Join a game" with
+  the list of games on this network (empty when the host is elsewhere) and
+  "Join by address" under it.
+
+Open "Join by address" and fill in (your name is above the list, the other
+two under "Join by address"):
+
+  Your name               shown above your head on the host's screen
+                          (letters, digits, spaces, _ . or -)
+  Host's address          what the host sent you, numbers only, with the
+                          port after a colon: 203.0.113.7:2171
+                          (on the same home network, one the host's tab
+                          shows under "On this network", for example
+                          192.168.1.23:2171)
+  Join code or password   what the host sent you; capitals, spaces and
+                          dashes do not matter, and the letters O, I and
+                          L count as the digits 0 and 1
+
+Press "Join".
+
+  What you see: "Status: Connecting...", then "Checking the password...",
+  then "Status: Connected" in green, with the host's name and the ping under
+  "Partner". A short notice says "you joined the host's game".
+
+The game remembers your name and the address for next time (never the code).
+
+Windows may ask about the firewall the first time (a "Windows Security"
+window naming tssm.exe). Tick "Private networks" and press "Allow access".
+The game never changes your firewall by itself.
+
+Close the overlay (F1 again) and play. If you are not in the host's level,
+your game takes you there by itself, and puts you next to the host.
+
+
+WHILE YOU PLAY
+--------------
+- The host leads: when the host goes to another level, your game comes
+  along, and both of you start it together. The host's cutscenes play on
+  your game too, and only the host can skip them. Walking into a door to
+  another level yourself does nothing while you are in the host's level.
+- The host's game runs the enemies, platforms and pickups for both of you.
+  Your hits count, and enemies can hit you. If you are defeated, you come
+  back next to the host with full health; you lose nothing.
+- Tokens, shiny objects and moves are shared: both of you see the host's
+  count, and a move either of you gets (from Mindy, or bought in the pause
+  menu) is unlocked for both.
+- Your character: by default you get the other one than the host's. Tap LB
+  (Z on the keyboard) to switch between SpongeBob and Patrick at any time;
+  you may both play the same one. Hold LB to change your costume (from the
+  costumes your own save has unlocked). The Co-op tab's "Customize" section
+  does the same. A new costume is worn from the next level. A combat
+  challenge has only one character, as in the original game.
+- Only the host's game saves, and the host's save keeps everything the two
+  of you do together. Your game does not write your save while you are
+  joined (the save screen just closes with a notice). Your own save stays
+  as it was: it keeps nothing from the session, and loses nothing.
+- Top right of the screen, a coloured dot and a number show the connection:
+  green is good, yellow is fair, red is poor, and the number is the ping in
+  milliseconds. "no signal" means nothing has come from the host's game for
+  a moment.
+- If your game window is held or dragged, or your game stalls, the host's
+  game waits for yours, and both carry on together when yours runs again.
+- If the connection drops, your game says "the connection was lost; joining
+  the host's game again" and joins again by itself for up to a minute,
+  back into the host's level. You do not need to do anything. (The Co-op tab
+  can turn this off.)
+- "Leave" in the Co-op tab ends it.
+
+
+WHEN SOMETHING GOES WRONG
+-------------------------
+The Co-op tab says why in red. What to do:
+
+"No answer from the host"
+    Check the address and port with the host (their public address, not one
+    starting with 192.168 unless you are on the same home network), and that
+    they are hosting right now. Then the host checks their port forward and
+    firewall (HOSTING.txt, "When something goes wrong").
+"Wrong join code or password"
+    Ask the host for the code again: it changes every time they start
+    hosting.
+"The host's game is a different version"
+    Install the same release as the host: the "Co-op version" at the bottom
+    of both Co-op tabs must be the same. This is what you see when one of
+    you still runs an older co-op zip.
+"Your game files differ from the host's"
+    Use the same release and region of the game as the host, and the same
+    mods on (or both with mods off). After a try, the bottom of the Co-op
+    tab shows "Game files:" with a code: the host's and yours must match.
+"The host's game already has a player"
+    Co-op is for two. Ask the host.
+"This address was blocked by the host" or "refusing joins for a minute"
+    Too many wrong codes were tried. Wait a minute and check the code.
+"The host removed you from the game"
+    The host pressed Kick. You cannot join again until they host anew.
+"The connection was lost, and joining again did not work within a minute"
+    The host may have stopped, or their internet is down. Press "Try again"
+    when they are back.
+
+Press "Try again" in the Co-op tab to try once more with the same details, or
+"Back" to change them.

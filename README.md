@@ -1,4 +1,4 @@
-# The SpongeBob SquarePants Movie: PC port
+# The SpongeBob SquarePants Movie: PC port with co-op
 
 A native Windows version of *The SpongeBob SquarePants Movie* game, built from the
 matching decompilation of the GameCube game ([tssm-decomp-fork](https://github.com/aidp2/tssm-decomp-fork), whose history
@@ -13,6 +13,12 @@ game's own decompiled code runs unchanged in behaviour; a new platform layer
   Start on a controller), controller and keyboard bindings, mods, and save import and
   export with Dolphin and the GameCube.
 
+**This branch adds co-op for two players:** online over the internet (one player hosts and
+forwards one UDP port on their router), on the same home network (games are found
+automatically and joined with a short code), and, on Windows, two copies on one PC. Co-op is
+host-authoritative: the host's game runs the world for both players. The players' guides
+are `docs/HOSTING.txt`, `docs/JOINING.txt` and `docs/LAN.txt`.
+
 This repository and its branches
 --------------------------------
 
@@ -23,11 +29,11 @@ GitHub's branch menu, or clone it with `git clone --branch <name>`.
 
 | Branch | What it is for |
 |---|---|
-| `pc` (this one) | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
+| `pc` | Windows (64-bit and 32-bit; Direct3D 9, Direct3D 11, OpenGL). The main port: every other branch is built on it. |
 | `android` | Android phones and tablets: the PC port as an app, with touch controls and an import screen for the game files. |
 | `switch` | Nintendo Switch homebrew (custom firmware): `tssm.nro`. |
 | `3ds` | New 3DS homebrew (custom firmware): `tssm.3dsx` and `tssm.cia`. **Still in progress**: it runs, but has been played on a console only a little. |
-| `coop` | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
+| `coop` (this one) | Windows with two-player co-op: online, on the home network, or two copies on one PC. Built on `pc`. |
 | `coop-android` | The co-op app for Android, a second app beside the normal one. Built on `android`. |
 | `coop-switch` | The co-op Switch program, `tssm-coop.nro`. Built on `switch`. |
 
@@ -55,7 +61,7 @@ You need:
 
 Then, in a normal command prompt:
 
-    git clone --branch pc <this repository's address> tssm
+    git clone --branch coop <this repository's address> tssm
     cd tssm
     git submodule update --init --depth 1
     build-release.bat
@@ -88,6 +94,9 @@ More documentation:
 | `docs/ICON.md` | using your own picture as the program's icon |
 | `src/SB/Core/pc/README.md` | building in detail, settings, switches and test runs |
 | `src/SB/Core/pc/PORTING.md` | where every file of the platform layer came from, and what is still stubbed |
+| `docs/HOSTING.txt`, `docs/JOINING.txt`, `docs/LAN.txt` | co-op: the players' guides |
+| `docs/MULTIPLAYER.md` | co-op: the design and the network protocol |
+| `docs/Local co-op.bat` | co-op: two players on one PC; the build copies it next to `tssm.exe` with the guides, and it only works from there |
 
 The GameCube build still works here
 -----------------------------------

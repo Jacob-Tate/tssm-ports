@@ -92,4 +92,15 @@ void iConfigUnset(const char* key);
 // and the caller carries on with the defaults either way.
 bool iConfigWriteDefaults(const char* path);
 
+// Local co-op's Player 2 (docs/MULTIPLAYER.md 12): TSSM_CONFIG_READONLY names
+// its own small file. Then config.ini is read and never written, appended to
+// or created; Player 2's own settings (its name, character, costumes, name
+// tag, camera and stick feel, rumble) come from that file alone, and
+// iConfigSave writes only those, there. Any other change lasts until the game
+// closes.
+bool iConfigReadOnly();
+
+// Tests only: forget what was loaded, so the next call loads again.
+void iConfigTestReset();
+
 #endif

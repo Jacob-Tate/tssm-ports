@@ -153,6 +153,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 static S32 bytesNeeded;
 static S32 availOnDisk;
 static S32 neededFiles;
@@ -1237,6 +1241,9 @@ void zSceneExit(S32 beginReload)
     // The scene's HIP (the credits' CRDT among them) is released below, on a reload as well;
     // credits still running must not outlive it.
     xCMSceneExit();
+    // Online co-op (docs/MULTIPLAYER.md 5.2): the level's table of shared
+    // things goes with it. Nothing when co-op is off.
+    iCoopWorldSceneExit();
 #endif
 
     if (globals.cmgr)
@@ -1501,6 +1508,16 @@ void zSceneSave(zScene* ent)
 
     zMenuSB_SaveMenuCounters(s);
     zGameExtras_Save(s);
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 13): a guest's level that the host's
+    // world changed keeps the block this game's save had for it. FALSE at
+    // once when co-op is off.
+    if (iCoopKeepSceneSave(ent->sceneID))
+    {
+        return;
+    }
+#endif
 
     s->setClient(ent->sceneID);
     s->Write_b1(1);
@@ -2046,6 +2063,12 @@ void zSceneReset()
     }
 
     zEntPickup_UpdateReset();
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 13): what the reset undid of a level
+    // end still due. Nothing when co-op is off.
+    iCoopWorldSceneReset();
+#endif
 }
 
 void zSceneStoreCheckPoint(U32 initialCameraID)
@@ -2947,6 +2970,16 @@ void zSceneUpdate(F32 elapsedSec)
     {
         bob = ppBaseObjs[i];
 
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 5.5): on the guest, a platform the
+        // host owns is posed from the host's snapshots instead of moving by
+        // itself. FALSE at once when co-op is off.
+        if (iCoopWorldGuestPose(bob, elapsedSec))
+        {
+            continue;
+        }
+#endif
+
         if ((bob->baseFlags & 0x1) && !(bob->baseFlags & 0x40))
         {
             switch (bob->baseType)
@@ -3196,6 +3229,13 @@ void zSceneRenderPreFX()
                 xglobals->___player_ent_dont_use_directly->render(
                     xglobals->___player_ent_dont_use_directly);
             }
+
+#ifdef PLATFORM_PC
+            // Online co-op (docs/MULTIPLAYER.md): the partner, drawn like the
+            // player (buckets off, the player's light kit). Returns at once
+            // when co-op is off.
+            iCoopRenderPartner();
+#endif
 
             xLightKit_Enable(NULL, globals.currWorld);
         }

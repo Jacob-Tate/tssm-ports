@@ -6,6 +6,9 @@
 #include "xDebug.h"
 #include "zNMETypeBuckOTron.h"
 #include "zNMESupplement.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 extern _tagGameVidMode gVidMode;
 
@@ -580,6 +583,15 @@ void zNMEStandard::DuploOwner(zNMECommon* duper)
 S32 zNMEStandard::SetCarryState(en_carystat stat)
 {
     S32 result = 0;
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 5.5): the guest's Patrick does not
+    // pick up an enemy the host owns (the host's game moves it; M3 sends the
+    // guest's grabs to the host). FALSE at once when co-op is off.
+    if (stat == zNMECARRY_ATTEMPTPICKUP && iCoopWorldGuestOwns((xBase*)this))
+    {
+        return 0;
+    }
+#endif
     xGoal* goal = psy_self->GetCurGoal();
 
     if (goal == NULL)

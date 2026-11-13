@@ -211,6 +211,65 @@ const iConfigSetting kConfigSettings[] = {
       "Size of the overlay and launcher: auto (from the display's scaling and the\n"
       "; window's height) or a factor from 0.5 to 4.",
       ICONFIG_FLOAT, "auto", 0.5f, 4.0f },
+    // TSSM: online co-op (docs/MULTIPLAYER.md). The password is never stored
+    // here; the Co-op tab asks for it.
+    { "coop", "mode", "off",
+      "Online co-op at startup: off, host (start hosting; the Co-op tab shows the\n"
+      "; join code) or join (join [coop] address; the Co-op tab asks for the\n"
+      "; password). TSSM_COOP, --host and --join override this.",
+      ICONFIG_ENUM, "off|host|join", kNone, kNone },
+    { "coop", "port", "2171",
+      "UDP port to host on (forward it on your router), and the port joining uses\n"
+      "; when the address has none.",
+      ICONFIG_INT, NULL, 1024.0f, 65535.0f },
+    { "coop", "address", "",
+      "Address to join: numbers only, like 203.0.113.7 or 203.0.113.7:2171.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    { "coop", "name", "",
+      "Your name, shown above your head on the other player's screen: 1 to 16\n"
+      "; letters, digits, spaces, _ . or -. Empty: Player.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    { "coop", "bind", "any",
+      "Host on every network (any) or only for this PC (loopback, for tests).",
+      ICONFIG_ENUM, "any|loopback", kNone, kNone },
+    { "coop", "nametag", "on",
+      "Show the other player's name above their head.", ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "follow", "on",
+      "When joining: go to the host's level by yourself whenever the host is in\n"
+      "; another one.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "reconnect", "on",
+      "When joining: if the connection drops (nothing heard for 10 seconds), join\n"
+      "; the host's game again by yourself for up to a minute.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "quality", "on",
+      "Show the connection's quality (a coloured dot and the ping) at the top right\n"
+      "; while playing together.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "lan_visible", "on",
+      "When hosting from the start (mode = host, --host): devices on the same home\n"
+      "; network see this game in their list (UDP port 2172, never answered for the\n"
+      "; internet). Off: they join by address. The Co-op tab's host buttons set their own.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "show_code", "on",
+      "When hosting visible on the home network: show the join code in a corner of\n"
+      "; the screen until a player joins, so it can be read off the TV.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "coop", "character", "auto",
+      "Your character in co-op: auto (a guest takes the other character than the\n"
+      "; host's when it joins and when a level starts; a host keeps the level's),\n"
+      "; spongebob or patrick (whenever a level with both starts). Tap LB (Z) in\n"
+      "; play, or use the Co-op tab, to switch at any time.",
+      ICONFIG_ENUM, "auto|spongebob|patrick", kNone, kNone },
+    { "coop", "costume_spongebob", "game",
+      "SpongeBob's costume in co-op, worn from the next level when your save has\n"
+      "; it unlocked: game (the game's own), mermaidman, plain, caveman or\n"
+      "; rippedshorts.",
+      ICONFIG_ENUM, "game|mermaidman|plain|caveman|rippedshorts", kNone, kNone },
+    { "coop", "costume_patrick", "game",
+      "Patrick's costume in co-op, worn from the next level when your save has it\n"
+      "; unlocked: game (the game's own), disco, plain, caveman or goofygoober.",
+      ICONFIG_ENUM, "game|disco|plain|caveman|goofygoober", kNone, kNone },
 };
 
 const S32 kConfigSettingCount = (S32)(sizeof(kConfigSettings) / sizeof(kConfigSettings[0]));

@@ -17,6 +17,7 @@
 // (iPadKeyboardSDL.cpp), which that window's event pump keeps current.
 
 #include "iPadHost.h"
+#include "iCoop.h"
 
 #include "iConfig.h"
 #include "iHost.h"
@@ -627,6 +628,10 @@ void iPadHostSetHotkey(iPadHostHotkeyFn fn)
 
 void iPadHostPoll()
 {
+    // Every frame, menus and movies included: co-op's I/O thread tells the
+    // partner when this stops for a while (docs/MULTIPLAYER.md 5.11).
+    iCoopGameBeat();
+
     if (sReady)
     {
         // Pumping the queue refreshes the gamepad state and reports a

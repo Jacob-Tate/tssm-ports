@@ -197,8 +197,22 @@ records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
 | `gui/iGuiControls.cpp` | the Controls tab on the input layer's binding API (`iPadControls.h`): every row's controller and keyboard binding (replace, add, remove, type, unbind, default), shared-input marks, the `[input]` settings drawn from the settings table |
 | `gui/iGuiSaves.cpp` | the Saves tab on the save store (`iSaveStore.h`): slots with level, progress, date, backups and the autosave slot; import through the system's file dialog (each save found sent to a slot of the player's choosing, replace only when asked, a question before the autosave slot); export of a slot as `.gci`, of every save as a zip or into a Dolphin GCI folder; backups and restore; delete |
 | `gui/iGuiMods.cpp` | the Mods tab on the mod system (`iMod.h`): load order with on/off, arrows and drag to reorder, rescan, the global switch, details, conflicts, the log; `[assets] mod` below |
+| `gui/iGuiCoop.cpp` | the Co-op tab and the co-op HUD layer (the partner's name tag, join/leave notices). `docs/MULTIPLAYER.md` |
 | `gui/iGuiSelfTest.cpp` | `TSSM_GUI_SELFTEST`: the overlay over a test picture through the real present, with an optional window resize and a scripted virtual controller |
 | `gui/iGuiNull.cpp` | `iGui.h` with `TSSM_GUI=OFF` |
+| `iNetSock.h`, `iNetSockCommon.cpp`, `iNetSockWin32.cpp`, `iNetSockPosix.cpp` | online co-op's UDP sockets on the system's own API (Winsock2, POSIX): dual-stack bind or loopback, oversized and truncated datagrams dropped unread, `SIO_UDP_CONNRESET` off on Windows, numeric-only address parsing (no resolver). `docs/MULTIPLAYER.md` |
+| `iNetWire.h`, `iNetCrypto.h`, `iNetCrypto.cpp` | the bounded little-endian reader and writer every network field goes through; SHA-256, HMAC, PBKDF2, HKDF, constant-time compare and the OS random source (BCryptGenRandom, getrandom) |
+| `iNetProto.h`, `iNetProto.cpp` | the co-op wire format: the handshake packets, the M1 payload (PLAYER_STATE, PING, PONG, DISCONNECT), M2's SNAPSHOT (host to guest), SNAP_ACK (guest to host) and STALL, and M3's EVENT (the guest's hit and pickup claims, the host's damage and grants), REL_ACK and PICKUPS (host to guest); strict canonical parsing with each direction enforced; INPUT (reserved) refused |
+| `iNetSession.h`, `iNetSession.cpp` | the host and guest sessions: stateless cookies, the PBKDF2/HMAC password proof both ways, HKDF session keys, HMAC-tagged packets with a 64-packet replay window, rate limits, wrong-password blocks, kick, keepalives and timeouts; the reliable layer M3's events go through (run by `iCoop.cpp`'s I/O thread) |
+| `iCoop.h`, `iCoop.cpp`, `iCoopInternal.h` | the co-op service: `[coop]`, `TSSM_COOP_*`, `--host` / `--join` / `--coop-name`, the I/O thread that owns the socket (started only when a player hosts or joins), the mailboxes between it and the game thread, the build ID, the status and notices for the GUI. `iCoopInit` and `iCoopShutdown` are called by `iSystem.cpp` |
+| `iCoopAssets.cpp` | the game-files hash both players must share (SHA-256 over the asset folder's packages and INIs and the mods in use), cached in the save folder (`coop_files.cache`) |
+| `iCoopPuppet.cpp` | the game-side half of co-op, compiled with the game units: reads the local player, places the partner (interpolation 100 ms back, short extrapolation, snaps), drives and draws the partner with the idle character model (animation state set, never updated; the player's `BeforeAnimMatrices` callbacks off while it is evaluated), the guest's switch to the other character, the name tag's position. Called from `zGame.cpp` and `zScene.cpp` (one `PLATFORM_PC` line each) |
+| `iCoopWorld.cpp` | co-op's shared world (M2), compiled with the game units: the level's table of shared things (enemies, movers, breakables), the host's delta snapshots and the guest's acknowledgements, the guest's posing of host-owned things (interpolated 100 ms back by the host's clock; breaks, respawns and death effects), the host's stand-in (an enemy's update with the host's player at the guest's place) and update cull near the guest, the guest following the host's level, no autosave while joined. `docs/MULTIPLAYER.md` section 5 |
+| `iCoopCombat.cpp`, `iCoopWorldInternal.h` | co-op's fights (M3), compiled with the game units: the guest's hits on the host's enemies as claims the host checks and applies, the enemies' hits on the guest (the stand-in's damage, projectiles) applied by the guest's own game, the guest's respawn beside the host instead of a lost chance, the host's pickups (which are taken, the guest's claims counted on the host). `iCoopWorldInternal.h` is its seam to `iCoopWorld.cpp`. `docs/MULTIPLAYER.md` section 6 |
+| `iCoopFlow.cpp` | co-op's playing through together (M4), compiled with the game units: the host's level changes (the guest goes along, both start the level together), the host's cutscenes and fly-throughs on the guest (only the host skips them), the guest's portals and saves refused while in the host's level. `docs/MULTIPLAYER.md` section 7 |
+| `iCoopLook.cpp` | co-op's characters and costumes (M4), compiled with the game units: switching at any time (the Co-op tab, LB), the costumes each player's own save has unlocked, the partner's outfit packs loaded with the level, and the partner's own model, built per level from the model its game says it wears. `docs/MULTIPLAYER.md` section 7 |
+| `iCoopHud.cpp` | co-op's challenge counters and texts (protocol 7), compiled with the game units: the counters a level's texts show and the text boxes their logic writes, in one table on both games; in the host's level the guest's show the host's counts and texts (COUNTERS) and its own level does not count them. `docs/MULTIPLAYER.md` 13.4 |
+| `tests/nettest.cpp`, `tests/netfuzzcore.h`, `tests/netfuzzcore.cpp`, `tests/netfuzz.cpp` | `tssm_nettest` (crypto known answers, the wire rules, loopback sessions with loss, hostile cases, a fixed-seed fuzz loop; run by `tools/regress.py`) and the libFuzzer harness `tssm_netfuzz` (`TSSM_NETFUZZ=ON`) |
 | `iAssetWiden.h`, `iAssetWiden.cpp` | 64-bit hosts: copy-at-load widening of the asset types that keep pointers in 4-byte slots (ATBL, SGRP, LODT, COLL, CRDT, DEST, SHRP, LKIT, the scene-parameters DYNA, SPLN, the JSP info blocks) into the host's struct layouts, and iPtr32's handle table. The header says why and how |
 | `iAssetHooks.cpp` | the packer side: `iAssetTypesInstall`, which `zAssetStartup` calls under `PLATFORM_PC`, wraps those types' `readXForm`/`assetUnloaded` in the game's handler table; the copies live in the low heap and are freed with their asset. `TSSM_WIDEN=log` lists every copy, `TSSM_WIDEN=0` turns it off; one summary line at exit. Nothing is installed on a 32-bit host |
 | `tests/widentest.cpp` | `tssm_widentest <asset folder>`: every widened asset of every package walked the way the game walks it and checked against the disk bytes (1.25 million checks over the Xbox data), and iPtr32 |
@@ -209,6 +223,29 @@ runs the launcher after `iConfigLoad`, `iGuiInit` once RenderWare has started an
 through `iGuiFilterPad`; `iConfigTable.cpp` has the `[audio]` volumes and the
 `[gui]` settings; `CMakeLists.txt` builds `third_party/imgui` as `tssm_imgui`
 and turns on SDL's renderer and dialogs in the vendored SDL.
+
+Online co-op (`docs/MULTIPLAYER.md`) touches: `iSystem.cpp`
+(`iCoopInit` after the save folder is claimed, `iCoopShutdown` in
+`iSystemExit`), `gui/iGui.cpp` (the Co-op tab, the HUD layer's frames with the
+overlay closed, the overlay opening on the Co-op tab when a join has no
+password), `iConfigTable.cpp` (`[coop]`), `CMakeLists.txt` (the sources,
+`ws2_32` and `bcrypt`, `tssm_nettest`, `TSSM_NETFUZZ`, the build ID), and these
+game files, each by `PLATFORM_PC` calls that return at once with co-op off:
+`zGame.cpp` (`iCoopFrame` after the player update in `zGameLoop`),
+`zScene.cpp` (`iCoopRenderPartner` after the player is drawn in
+`zSceneRenderPreFX`; M2: `iCoopWorldGuestPose` in `zSceneUpdate`'s entity
+loop, `iCoopWorldSceneExit` in `zSceneExit`), and for M2 `zNMECommon.cpp`
+(`zMODEnemy::Timestep` / `PostTimestep`, `Damage`, `DeathFXKick`),
+`zNMETypeTiki.cpp` and `zNMETypeStandard.cpp` (`Damage`, `SetCarryState`),
+`xUpdateCull.cpp` (`xUpdateCull_DistanceSquaredCB`), `zEntPlayer.cpp`
+(`zEntPlayer_Damage`, `zEntPlayerEventCB`) and `zSaveLoad.cpp`
+(`zSaveLoadAutoSaveUpdate`); `docs/MULTIPLAYER.md` 5.8 lists them. M3 adds
+`zNMECommon.cpp` and `zNMETypeTiki.cpp` (`Damage`: the guest's claims),
+`zEntPlayer.cpp` (`zEntPlayer_PowerupLevel`, the damage functions and the
+event handler during a stand-in, the end of a defeat), `zNMEHazard.cpp`
+(`zMODHazard::Timestep`) and `zEntPickup.cpp` (`CheckPickupAgainstPlayer`);
+`docs/MULTIPLAYER.md` 6.6 lists them. The GameCube build is unchanged by
+them.
 
 and from the sound work:
 

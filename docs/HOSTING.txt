@@ -1,0 +1,260 @@
+HOSTING A CO-OP GAME
+The SpongeBob SquarePants Movie, PC port: online co-op for two players
+
+This guide is for the player who hosts: the other player joins your game.
+The other player has their own guide, JOINING.txt.
+
+You need to do steps 1 to 3 once. After that, hosting takes a few seconds.
+
+
+SAME HOME NETWORK? START HERE
+-----------------------------
+If the other player's PC, phone or Switch (with the co-op version of the
+game on it) is on the same Wi-Fi or home network as you, you need none of
+the steps below: in the Co-op tab, press
+"Host on this network". Your game shows a join code in large letters, the
+other device finds your game in its list, and its player types the code.
+LAN.txt explains it. The rest of this guide is for playing over the internet.
+
+
+WHAT HOSTING MEANS
+------------------
+Your game runs the world for both of you: the enemies, the moving platforms,
+the pickups, the level changes and the cutscenes. Your save is the one that
+counts. The other player's game connects straight to yours over the
+internet. There is no server in between and no account to make.
+
+For that, your router has to let the other player's game reach your PC. That
+is what "forwarding a port" means (step 2). Only the host does this. The
+player who joins does not need to change anything on their router.
+
+
+1. FIND YOUR PC'S LOCAL ADDRESS
+-------------------------------
+Start the game. Open the overlay with F1 (on a controller: hold Back and
+press Start). Go to the Co-op tab.
+
+  What you see: the tab says "Online co-op", "Status: Off", your name, then
+  "Join a game" with the list of games on this network, and "Host a game"
+  with two buttons, "Host on this network" and "Host over the internet".
+
+Type your name (it is shown above your head on the other player's screen).
+Press "Host over the internet". Leave the UDP port at 2171 unless you have a
+reason to change it. Leave "Use a join code" ticked. Press "Start hosting".
+
+  What you see: "Status: Waiting for a player", your join code in large
+  letters (three groups of four letters and digits, for example
+  K7QX-M2PD-9TRW), "Hosting on UDP port 2171." and a line such as
+  "Over the internet: on your router, forward UDP port 2171 to this device,
+  192.168.1.23."
+
+That 192.168.1.23 (yours will differ) is your PC's local address. Write it
+down for step 2.
+
+The first time you press "Start hosting", Windows may ask about the firewall
+(step 3). You can answer it now.
+
+
+2. FORWARD THE PORT ON YOUR ROUTER
+----------------------------------
+Every router looks different, but the steps are the same.
+
+a) Open your router's settings page in a web browser. Its address is often
+   printed on a sticker on the router, usually 192.168.0.1, 192.168.1.1 or
+   10.0.0.1. Log in with the router's admin password (also often on the
+   sticker, or in the router's app).
+
+     What you see: the router maker's page, with menus such as "Status",
+     "Wireless", "Advanced" or "Network".
+
+b) Find the port forwarding section. It may be called "Port Forwarding",
+   "Port Forward", "Virtual Servers", "NAT Forwarding", "Applications and
+   Gaming" or "Firewall > Port rules". It is often under "Advanced".
+
+     What you see: a list of rules (maybe empty) and a button such as "Add",
+     "Add Rule", "Create" or "+".
+
+c) Add a rule with these values:
+     Name or service:        TSSM co-op (any name you like)
+     Protocol:               UDP  (not TCP; "TCP/UDP" or "Both" also works)
+     External port (start and end, or "public port"):  2171
+     Internal port (start and end, or "private port"): 2171
+     Internal IP / device / server IP:  the local address from step 1,
+                                        for example 192.168.1.23
+   If the router asks for a device instead of an address, pick your PC from
+   the list. Turn the rule on ("Enabled") and save or apply it.
+
+     What you see: the new rule in the list, for example
+     "TSSM co-op   UDP   2171   192.168.1.23   Enabled".
+
+d) Keep your PC's local address the same. Routers sometimes give a PC a new
+   local address after a restart, and then the rule points at the wrong
+   place. Most routers have "DHCP reservation", "Address reservation" or
+   "Always use this IP address" next to the list of devices: turn it on for
+   your PC. (If you skip this, check the address in the Co-op tab each time
+   and fix the rule when it changes.)
+
+The game never changes your router by itself. Only you do, here.
+
+
+3. LET THE GAME THROUGH WINDOWS FIREWALL
+---------------------------------------
+The first time you press "Start hosting", Windows may show a window titled
+"Windows Security" saying that Windows Defender Firewall has blocked some
+features of this app, naming tssm.exe.
+
+  What you see: two tick boxes, "Private networks, such as my home or work
+  network" and "Public networks, such as those in airports and coffee
+  shops", and the buttons "Allow access" and "Cancel".
+
+Tick "Private networks" (your home network). Leave "Public networks"
+unticked unless your PC really is on a public network. Press "Allow access".
+
+If you pressed Cancel by mistake, you can fix it yourself: open the Start
+menu, type "Allow an app through Windows Firewall" and open it, press
+"Change settings", find tssm.exe in the list (or press "Allow another app"
+and pick it), tick "Private" and press OK.
+
+The game never changes your firewall by itself. Only you do, here.
+
+
+4. FIND YOUR PUBLIC ADDRESS
+---------------------------
+The other player needs your public address: the address of your home
+internet connection, not the 192.168.x.x one. Two ways to find it:
+
+- Your router's status page (often the first page after logging in) shows
+  it as "WAN IP", "Internet IP", "Public IP" or "IPv4 address" under
+  "Internet".
+- Or search the web for "what is my IP" in your browser.
+
+It looks like 203.0.113.7 (four numbers with dots).
+
+If the router's "WAN IP" starts with 100.64 to 100.127, 10., 172.16 to
+172.31, or 192.168., and is different from what the web search shows, your
+internet provider shares one public address among many homes (this is
+called "CGNAT"). Port forwarding then cannot work. Ask your provider for a
+public IPv4 address (some do it for free when asked), or let the other
+player host instead.
+
+Your public address can change from time to time (for example when the
+router restarts). Check it again if joining stops working.
+
+
+5. HOST AND SHARE THE JOIN CODE
+-------------------------------
+Load your save (or start a new game) and play in the level you want to play
+together: the other player's game comes to your level by itself. Press
+"Start hosting" in the Co-op tab (the game also remembers your name and port
+for next time). Send the other player, in a message or by phone:
+
+  - your public address and the port, written as 203.0.113.7:2171
+  - the join code shown in the Co-op tab, for example K7QX-M2PD-9TRW
+    ("Copy" puts it on the clipboard). Capitals, spaces and dashes do not
+    matter when they type it.
+
+The join code stays the same until you press "New code" beside it (or
+start the game again); press it for a fresh code, for example when someone
+you did not invite may have seen it. You can instead untick "Use a join code" and type a password of
+your own (at least 8 characters is wise). The game never saves the password
+or the code to a file.
+
+When the other player is in, the status says "Connected", their name and
+ping appear under "Partner", and a short notice says "a player joined your
+game".
+
+
+WHAT TO TELL THE OTHER PLAYER
+-----------------------------
+- Install the same version of the port as yours. Both Co-op tabs show a
+  "Co-op version" code at the bottom: the two codes must be the same.
+  32-bit and 64-bit builds of the same version play together.
+- Use their own copy of the game files (from their own copy of the game,
+  the same release and region as yours), with the same mods turned on as
+  yours, or none. Never send them your game files.
+- Join with your public address and port (203.0.113.7:2171) and the join
+  code. JOINING.txt walks them through it.
+
+
+TESTING AT HOME FIRST
+---------------------
+On the same home network you do not need port forwarding: tick "Visible on
+this network" in your Co-op tab while hosting, and the other PC finds your
+game in its list (LAN.txt), or joins with your local address from step 1,
+for example 192.168.1.23:2171. If that works but joining over the internet
+does not, the problem is the port forward (step 2) or the public address
+(step 4).
+
+
+WHILE YOU PLAY
+--------------
+- You lead: when you go to another level, the other player's game comes
+  along, and both of you start the level together. Your cutscenes play on
+  both games, and only you can skip them.
+- Only your game saves, and your save keeps everything the two of you do
+  together: the tokens, shiny objects and moves the other player gets count
+  in it. The other player's game does not write its save while it is
+  joined, and their own save keeps nothing from the session.
+- Each of you picks a character: tap LB (Z on the keyboard) to switch
+  between SpongeBob and Patrick, hold it to change your costume. Both of you
+  may play the same character. The Co-op tab's "Customize" section does the
+  same.
+- Top right of the screen, a coloured dot and a number show the connection:
+  green is good, yellow is fair, red is poor, and the number is the ping in
+  milliseconds (the time a message takes there and back). "no signal" means
+  nothing has come from the other game for a moment.
+- If the other player's window is held or their game stalls, your screen
+  says "waiting for NAME's game"; it picks up again by itself when theirs
+  runs again.
+- If the connection drops, the other player's game joins again by itself for
+  up to a minute. You do not need to do anything; the join code stays the
+  same as long as you keep hosting.
+- "Kick" (in the Co-op tab, while someone is connected) removes the other
+  player and blocks their address until you stop hosting.
+- "Stop hosting" ends it.
+
+
+WHEN SOMETHING GOES WRONG
+-------------------------
+The other player's game tells them why it could not join. What to check:
+
+"No answer from the host"
+    - Are you hosting right now (Co-op tab: "Waiting for a player")?
+    - Did they type your public address (not 192.168...) and the right port?
+    - Does the router rule forward UDP (not only TCP) port 2171 to your PC's
+      current local address (step 1 shows it)?
+    - Did you allow tssm.exe through Windows Firewall (step 3)?
+    - Is your connection behind CGNAT (step 4)?
+"Wrong join code or password"
+    Send the code again, as your Co-op tab shows it now.
+"The host's game is a different version"
+    You need the same version of the port: compare the "Co-op version" at
+    the bottom of both Co-op tabs. This is what you see when one of you
+    still runs an older co-op zip: both switch to the newest one.
+"Your game files differ from the host's"
+    You need the same release and region of the game, and the same mods on
+    (easiest: both turn mods off in the Mods tab). Compare the "Game files"
+    code at the bottom of both Co-op tabs.
+"The host's game already has a player"
+    Co-op is for two. Kick the other player first, or stop and start hosting.
+"Blocked" or "refusing joins for a minute"
+    Too many wrong codes were tried. Wait a minute (and check the code).
+
+"Host over the internet" hosts with "Visible on this network" unticked:
+devices on your own network do not see the game in their list until you tick
+it. "Host on this network" ticks it.
+
+Your Co-op tab counts wrong password attempts. If you see many you did not
+expect, stop hosting: someone is guessing. Press "New code" before you host
+again.
+
+
+SAFETY
+------
+- The game only sends game state (positions, animations, what happens in
+  the level) and checks everything it receives. It never sends files, and
+  it does not let the other player change your save.
+- The join code is checked without ever being sent over the internet.
+  Traffic is protected against tampering but not encrypted: do not type
+  anything private as your name.
+- Remove the port forwarding rule if you stop playing co-op for good.

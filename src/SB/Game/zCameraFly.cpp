@@ -10,6 +10,9 @@
 #include "zCamera.h"
 #include "zGlobals.h"
 #include "zMusic.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 U32 zcam_flyasset_current;
 
@@ -94,6 +97,11 @@ void zCameraFlyEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*, U32)
         if (fly->baseFlags & 1)
         {
             zCameraFlyStart(fly->casset->flyID);
+#ifdef PLATFORM_PC
+            // Online co-op (docs/MULTIPLAYER.md 7.3): the host's fly-through
+            // plays on the guest too. Nothing when co-op is off.
+            iCoopShowFlyStart(fly);
+#endif
         }
         break;
 

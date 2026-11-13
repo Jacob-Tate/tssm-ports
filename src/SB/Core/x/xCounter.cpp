@@ -6,6 +6,10 @@
 
 #include <stdio.h>
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 void xCounterInit()
 {
 }
@@ -75,6 +79,16 @@ void xCounterLoad(_xCounter* ent, xSerial* s)
 void xCounterEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase* toParamWidget, U32)
 {
     _xCounter* t = (_xCounter*)to;
+
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 13): on the guest, a counter a text
+    // shows takes the host's count in the host's level. FALSE at once when
+    // co-op is off.
+    if (iCoopCounterHeld(to, toEvent))
+    {
+        return;
+    }
+#endif
 
     switch (toEvent)
     {

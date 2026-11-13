@@ -194,6 +194,64 @@ bool iHostSetChildEnv(const char* name, const char* value);
 // of the check.
 bool iHostRunDetached(const char* exe, const char* workingDir);
 
+// ---------------------------------------------------------------------------
+// A child process with a pipe to it (local co-op's Player 2, iCoopLocal.cpp)
+//
+// Windows only: elsewhere iHostChildCreate returns NULL and the rest do
+// nothing (iHostChildNull.cpp). The pipe runs one way, this process to the
+// child, and is the only handle the child inherits; when this process ends,
+// however it ends, the child reads the end of it. The child is also in a job
+// that ends it with this process, so even a hung child cannot stay behind.
+
+struct iHostChild;
+
+// Makes the pipe. NULL when the host cannot start a child.
+iHostChild* iHostChildCreate();
+
+// The pipe's end the child reads, as decimal text for the child's environment.
+const char* iHostChildPipeValue(const iHostChild* c);
+
+// Writes `n` bytes into the pipe, before or after the start. It waits while
+// the pipe (4 KB) is full: fine for a few short lines, not for a steady
+// stream to a child that may hang. FALSE: the child is gone.
+bool iHostChildSend(iHostChild* c, const char* data, size_t n);
+
+// Starts `exe` with `envBlock` (NAME=VALUE entries, sorted, NUL after each and
+// one more at the end) as its whole environment, in this process's working
+// directory, with no console and no standard handles of this process's.
+bool iHostChildStart(iHostChild* c, const char* exe, const char* envBlock);
+
+U32 iHostChildId(const iHostChild* c);
+
+// 1 running, 0 ended (`exitCode` set), -1 cannot say. Does not wait.
+S32 iHostChildState(iHostChild* c, U32* exitCode);
+
+// Waits up to `waitMs` for the child to end. TRUE: it has.
+bool iHostChildWait(iHostChild* c, U32 waitMs);
+
+// Closes this end of the pipe: the child reads its end.
+void iHostChildClosePipe(iHostChild* c);
+
+// Ends the child now (only ever this process's own child).
+void iHostChildKill(iHostChild* c);
+
+// Lets go of `c` (the pipe and the process handle) without ending the child.
+void iHostChildFree(iHostChild* c);
+
+// The full path of this executable, '/'-separated.
+bool iHostExePath(char* out, size_t outsize);
+
+// This process's environment, NAME=VALUE each. FALSE when it cannot be read.
+bool iHostEnvironment(void (*each)(void* ctx, const char* nameValue), void* ctx);
+
+// In the child: takes the pipe its parent passed (`value`, from the
+// environment). FALSE when `value` does not name a pipe this process holds.
+bool iHostParentPipeOpen(const char* value);
+
+// Reads what has arrived: > 0 bytes, 0 nothing yet, -1 the parent closed its
+// end or is gone. Waits up to `waitMs` for the first byte (0: not at all).
+S32 iHostParentRead(char* buf, size_t cap, U32 waitMs);
+
 // Claims `key` (letters, digits and '-') for this process for as long as it
 // runs. 1: claimed. 0: another running process holds it, and `holder` (if not
 // NULL) gets that process's id, or 0 when it cannot be read. -1: the host cannot

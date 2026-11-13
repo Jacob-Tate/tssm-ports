@@ -34,6 +34,9 @@
 #include "xserializer.h"
 #include "xString.h"
 #include "xstransvc.h"
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
 
 struct zEntPickup_cbData
 {
@@ -548,6 +551,15 @@ void zEntPickupEventCB(xBase*, xBase* to, U32 toEvent, const F32* toParam, xBase
     case eEventPickup:
         if (toParam && (p->state & 0x1))
         {
+#ifdef PLATFORM_PC
+            // Online co-op (docs/MULTIPLAYER.md 13): on the guest, a token or
+            // chest its own script gives is asked of the host. FALSE at once
+            // when co-op is off.
+            if (iCoopPickupGiven((xBase*)p))
+            {
+                break;
+            }
+#endif
             zEntPickup_DoPickup(p, toParam[0] ? true : false);
         }
         break;
@@ -658,6 +670,15 @@ static S32 CheckPickupAgainstPlayer(xEnt* cbent, void* cbdata)
 
             if (distsqr <= SQR(chkdist) && (ent->pickupFlags & 0x2))
             {
+#ifdef PLATFORM_PC
+                // Online co-op (6.5): on the guest, a pickup the host owns is
+                // asked of the host; it is taken only when the host says so.
+                // FALSE at once when co-op is off.
+                if (iCoopPickupTouch((xBase*)ent))
+                {
+                    return 1;
+                }
+#endif
                 if (ent->p->pickupType == 0)
                 {
                     switch (ent->p->pickupIndex)
@@ -786,6 +807,16 @@ static S32 CheckPickupAgainstPlayer(xEnt* cbent, void* cbdata)
 
     return 1;
 }
+
+#ifdef PLATFORM_PC
+void zEntPickup_PcTakeTouched(zEntPickup* ent)
+{
+    // The touch's way differs from a script's give only here: the token's
+    // eEventPickup is sent two seconds into the reward.
+    zEntPickup_DoPickup(ent, false);
+    sGoofyGooberEventSent = 0;
+}
+#endif
 
 // The PS2 DWARF lists no locals here; the list/ribhelp/pos pointers give retail's single
 // address computations.

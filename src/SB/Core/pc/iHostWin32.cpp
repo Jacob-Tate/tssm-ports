@@ -328,6 +328,332 @@ bool iHostRunDetached(const char* exe, const char* workingDir)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// A child process with a pipe to it
+
+struct iHostChild
+{
+    HANDLE write; // this end
+    HANDLE read; // the child's end; closed here once the child has it
+    HANDLE process; // NULL until started
+    DWORD pid;
+    char value[24];
+};
+
+namespace
+{
+    // One job for every child, held until this process ends, however it ends:
+    // the system then ends what is left of them, so a hung child cannot
+    // outlive this one. What a child starts itself is not tied to it.
+    HANDLE ChildJob()
+    {
+        static HANDLE sJob;
+        static bool sTried;
+        if (!sTried)
+        {
+            sTried = true;
+            sJob = CreateJobObjectA(NULL, NULL);
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+            memset(&info, 0, sizeof(info));
+            info.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+            if (sJob != NULL && !SetInformationJobObject(sJob, JobObjectExtendedLimitInformation,
+                                                         &info, sizeof(info)))
+            {
+                CloseHandle(sJob);
+                sJob = NULL;
+            }
+        }
+        return sJob;
+    }
+} // namespace
+
+iHostChild* iHostChildCreate()
+{
+    // Neither end inheritable: the child's end is, only around its start.
+    HANDLE r = NULL;
+    HANDLE w = NULL;
+    if (!CreatePipe(&r, &w, NULL, 4096))
+    {
+        return NULL;
+    }
+    iHostChild* c = (iHostChild*)calloc(1, sizeof(iHostChild));
+    if (c == NULL)
+    {
+        CloseHandle(r);
+        CloseHandle(w);
+        return NULL;
+    }
+    c->write = w;
+    c->read = r;
+    snprintf(c->value, sizeof(c->value), "%llu", (unsigned long long)(uintptr_t)r);
+    return c;
+}
+
+const char* iHostChildPipeValue(const iHostChild* c)
+{
+    return c != NULL ? c->value : "";
+}
+
+bool iHostChildSend(iHostChild* c, const char* data, size_t n)
+{
+    if (c == NULL || c->write == NULL || n == 0 || n > 4096)
+    {
+        return false;
+    }
+    DWORD wrote = 0;
+    return WriteFile(c->write, data, (DWORD)n, &wrote, NULL) && wrote == (DWORD)n;
+}
+
+bool iHostChildStart(iHostChild* c, const char* exe, const char* envBlock)
+{
+    if (c == NULL || c->read == NULL || c->process != NULL || exe == NULL)
+    {
+        return false;
+    }
+    char path[MAX_PATH + 1];
+    snprintf(path, sizeof(path), "%s", exe);
+    for (char* p = path; *p != '\0'; p++)
+    {
+        if (*p == '/')
+        {
+            *p = BS_CHAR;
+        }
+    }
+    char cmd[MAX_PATH + 4];
+    snprintf(cmd, sizeof(cmd), "\"%s\"", path);
+
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    LPPROC_THREAD_ATTRIBUTE_LIST list = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size);
+    if (list == NULL || !InitializeProcThreadAttributeList(list, 1, 0, &size))
+    {
+        free(list);
+        return false;
+    }
+    HANDLE inherit[1] = { c->read };
+    bool ok = UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit,
+                                        sizeof(inherit), NULL, NULL) != 0;
+
+    // No standard handles: this process's are its log's pipes, which the
+    // child must not write into. The child keeps its own log.
+    STARTUPINFOEXA si;
+    memset(&si, 0, sizeof(si));
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.lpAttributeList = list;
+    PROCESS_INFORMATION pi;
+    memset(&pi, 0, sizeof(pi));
+    // Suspended until it is in the job, so no part of it runs outside.
+    ok = ok && SetHandleInformation(c->read, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) &&
+         CreateProcessA(path, cmd, NULL, NULL, TRUE,
+                        EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                        (LPVOID)envBlock, NULL, &si.StartupInfo, &pi) != 0;
+    SetHandleInformation(c->read, HANDLE_FLAG_INHERIT, 0);
+    DeleteProcThreadAttributeList(list);
+    free(list);
+    if (!ok)
+    {
+        return false;
+    }
+    HANDLE job = ChildJob();
+    if (job == NULL || !AssignProcessToJobObject(job, pi.hProcess))
+    {
+        // It still closes on the pipe's end; only a hung child would stay.
+        printf("tssm: host: the child process could not be tied to this one (error %lu)\n",
+               job == NULL ? 0ul : (unsigned long)GetLastError());
+        fflush(stdout);
+    }
+    if (ResumeThread(pi.hThread) == (DWORD)-1)
+    {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    c->process = pi.hProcess;
+    c->pid = pi.dwProcessId;
+    // The child's now: with this copy closed, the child reads the end of the
+    // pipe as soon as this process lets go of its end.
+    CloseHandle(c->read);
+    c->read = NULL;
+    return true;
+}
+
+U32 iHostChildId(const iHostChild* c)
+{
+    return c != NULL ? (U32)c->pid : 0;
+}
+
+S32 iHostChildState(iHostChild* c, U32* exitCode)
+{
+    if (c == NULL || c->process == NULL)
+    {
+        return -1;
+    }
+    DWORD w = WaitForSingleObject(c->process, 0);
+    if (w == WAIT_TIMEOUT)
+    {
+        return 1;
+    }
+    DWORD code = 0;
+    if (w != WAIT_OBJECT_0 || !GetExitCodeProcess(c->process, &code))
+    {
+        return -1;
+    }
+    if (exitCode != NULL)
+    {
+        *exitCode = (U32)code;
+    }
+    return 0;
+}
+
+bool iHostChildWait(iHostChild* c, U32 waitMs)
+{
+    return c != NULL && c->process != NULL &&
+           WaitForSingleObject(c->process, waitMs) == WAIT_OBJECT_0;
+}
+
+void iHostChildClosePipe(iHostChild* c)
+{
+    if (c != NULL && c->write != NULL)
+    {
+        CloseHandle(c->write);
+        c->write = NULL;
+    }
+}
+
+void iHostChildKill(iHostChild* c)
+{
+    if (c != NULL && c->process != NULL)
+    {
+        TerminateProcess(c->process, 1);
+    }
+}
+
+void iHostChildFree(iHostChild* c)
+{
+    if (c == NULL)
+    {
+        return;
+    }
+    iHostChildClosePipe(c);
+    if (c->read != NULL)
+    {
+        CloseHandle(c->read);
+    }
+    if (c->process != NULL)
+    {
+        CloseHandle(c->process);
+    }
+    free(c);
+}
+
+bool iHostExePath(char* out, size_t outsize)
+{
+    char buf[MAX_PATH + 1];
+    SetLastError(ERROR_SUCCESS);
+    DWORD n = GetModuleFileNameA(NULL, buf, MAX_PATH + 1);
+    if (n == 0 || n > MAX_PATH || GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    {
+        return false;
+    }
+    buf[n] = 0;
+    for (DWORD i = 0; i < n; i++)
+    {
+        if (buf[i] == BS_CHAR)
+        {
+            buf[i] = '/';
+        }
+    }
+    snprintf(out, outsize, "%s", buf);
+    return strlen(buf) < outsize;
+}
+
+bool iHostEnvironment(void (*each)(void* ctx, const char* nameValue), void* ctx)
+{
+    char* block = GetEnvironmentStringsA();
+    if (block == NULL)
+    {
+        return false;
+    }
+    for (const char* p = block; *p != '\0'; p += strlen(p) + 1)
+    {
+        each(ctx, p);
+    }
+    FreeEnvironmentStringsA(block);
+    return true;
+}
+
+namespace
+{
+    HANDLE sParentPipe;
+}
+
+bool iHostParentPipeOpen(const char* value)
+{
+    if (value == NULL || value[0] == '\0' || strlen(value) > 20)
+    {
+        return false;
+    }
+    unsigned long long v = 0;
+    for (const char* p = value; *p != '\0'; p++)
+    {
+        if (*p < '0' || *p > '9')
+        {
+            return false;
+        }
+        v = v * 10 + (unsigned long long)(*p - '0');
+    }
+    if (v == 0 || v > 0xFFFFFFFFull)
+    {
+        return false;
+    }
+    HANDLE h = (HANDLE)(uintptr_t)v;
+    DWORD flags = 0;
+    if (!GetHandleInformation(h, &flags) || GetFileType(h) != FILE_TYPE_PIPE)
+    {
+        return false;
+    }
+    SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+    sParentPipe = h;
+    return true;
+}
+
+S32 iHostParentRead(char* buf, size_t cap, U32 waitMs)
+{
+    if (sParentPipe == NULL || buf == NULL || cap == 0)
+    {
+        return -1;
+    }
+    const U64 until = iHostMonotonicNs() + (U64)waitMs * 1000000ULL;
+    for (;;)
+    {
+        // Never a plain ReadFile first: it would block the game thread.
+        DWORD avail = 0;
+        if (!PeekNamedPipe(sParentPipe, NULL, 0, NULL, &avail, NULL))
+        {
+            return -1; // ERROR_BROKEN_PIPE: the parent closed its end, or is gone
+        }
+        if (avail > 0)
+        {
+            DWORD n = 0;
+            DWORD want = avail < (DWORD)cap ? avail : (DWORD)cap;
+            if (!ReadFile(sParentPipe, buf, want, &n, NULL))
+            {
+                return -1;
+            }
+            return (S32)n;
+        }
+        if (waitMs == 0 || iHostMonotonicNs() >= until)
+        {
+            return 0;
+        }
+        Sleep(10);
+    }
+}
+
 S32 iHostClaimInstance(const char* key, U32* holder)
 {
     if (holder != NULL)

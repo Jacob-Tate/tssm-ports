@@ -70,6 +70,14 @@ namespace iGui
     void DrawControls();
     void DrawSaves();
     void DrawMods();
+    void DrawCoop();
+    // Every frame, overlay open or not: ends the list's search once the Co-op
+    // tab is no longer drawn.
+    void CoopFrame();
+
+    // The co-op HUD layer (name tag, notices): drawn on every frame while co-op
+    // is on, overlay open or not, into the foreground draw list. No input.
+    void DrawCoopHud();
     void DrawAbout();
 
     // The running renderer as a player would name it: "Direct3D 11".

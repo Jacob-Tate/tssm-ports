@@ -5,6 +5,10 @@
 #include "xMemMgr.h"
 #include "zGlobals.h"
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+#endif
+
 #include <string.h>
 
 static inline void xUpdateCull_Swap(xUpdateCullMgr* m, U32 a, U32 b)
@@ -92,6 +96,15 @@ U32 xUpdateCull_DistanceSquaredCB(void* ent, void* cbdata)
 
     if (((xEnt*)ent)->model != NULL)
     {
+#ifdef PLATFORM_PC
+        // Online co-op (docs/MULTIPLAYER.md 5.4): on the host, near the guest
+        // counts as near the camera, so enemies by the guest stay awake.
+        // FALSE at once when co-op is off.
+        if (iCoopCullNearPartner(&((xEnt*)ent)->model->Mat->pos.x, fandv.f))
+        {
+            return 1;
+        }
+#endif
         return SQR(((xEnt*)ent)->model->Mat->pos.x - campos->x) +
                    SQR(((xEnt*)ent)->model->Mat->pos.y - campos->y) +
                    SQR(((xEnt*)ent)->model->Mat->pos.z - campos->z) <

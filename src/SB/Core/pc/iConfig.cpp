@@ -38,6 +38,39 @@ namespace
     char sPath[kMaxPath];
     S32 sHavePath;
 
+    // Local co-op's Player 2 (TSSM_CONFIG_READONLY names its overlay): the
+    // main file is read and never written or created; Player 2's own keys
+    // come from the overlay alone, and only they are saved, there.
+    bool sReadOnly;
+    bool sParsingOverlay;
+    char sOverlay[kMaxPath];
+
+    const char* const kPlayer2Keys[] = {
+        "coop.name",
+        "coop.character",
+        "coop.costume_spongebob",
+        "coop.costume_patrick",
+        "coop.nametag",
+        "input.camera_invert_x",
+        "input.camera_invert_y",
+        "input.camera_sensitivity",
+        "input.stick_curve",
+        "input.deadzone",
+        "input.rumble",
+    };
+
+    bool isPlayer2Key(const char* key)
+    {
+        for (size_t i = 0; i < sizeof(kPlayer2Keys) / sizeof(kPlayer2Keys[0]); i++)
+        {
+            if (iHostStrCaseCmp(kPlayer2Keys[i], key) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void lowerInPlace(char* s)
     {
         for (; *s != '\0'; s++)
@@ -299,6 +332,18 @@ namespace
             return;
         }
 
+        // Read-only: Player 2's own keys from its overlay only (the main
+        // file's are Player 1's), and nothing else from the overlay.
+        if (sReadOnly && isPlayer2Key(e->key) != sParsingOverlay)
+        {
+            if (sParsingOverlay)
+            {
+                printf("tssm: %s:%d: '%s' is not one of Player 2's own settings, ignored\n", path,
+                       (int)lineNo, e->key);
+            }
+            return;
+        }
+
         sCount++;
     }
 
@@ -331,8 +376,34 @@ namespace
 
         // Only now, with the whole file parsed: whether a key is missing is a
         // question about the file as a whole, not about any one line.
-        appendMissingSettings(path);
+        if (!sReadOnly)
+        {
+            appendMissingSettings(path);
+        }
         return true;
+    }
+
+    // Player 2's overlay, after the main file. Missing is fine: no own
+    // settings yet.
+    void readOverlay()
+    {
+        FILE* f = fopen(sOverlay, "rb");
+        if (f == NULL)
+        {
+            return;
+        }
+        sParsingOverlay = true;
+        char section[kMaxKey];
+        section[0] = '\0';
+        char line[kMaxLine];
+        S32 lineNo = 0;
+        while (fgets(line, sizeof(line), f) != NULL)
+        {
+            lineNo++;
+            parseLine(line, section, sizeof(section), sOverlay, lineNo);
+        }
+        sParsingOverlay = false;
+        fclose(f);
     }
 
     // Whether the file that was just read mentions a key at all. Distinct from
@@ -528,6 +599,33 @@ void iConfigLoad()
     // otherwise recurse.
     sLoaded = 1;
 
+    const char* overlay = getenv("TSSM_CONFIG_READONLY");
+    if (overlay != NULL && overlay[0] != '\0')
+    {
+        sReadOnly = true;
+        snprintf(sOverlay, sizeof(sOverlay), "%s", overlay);
+        const char* main = getenv("TSSM_CONFIG");
+        char beside[kMaxPath];
+        char path[kMaxPath];
+        if (main != NULL && main[0] != '\0')
+        {
+            readFile(main);
+        }
+        else if (!readFile("config.ini") && iHostExeDir(beside, sizeof(beside)))
+        {
+            snprintf(path, sizeof(path), "%s/config.ini", beside);
+            readFile(path);
+        }
+        readOverlay();
+        printf("tssm: config: %s%s; this game's own settings are in %s\n",
+               sHavePath ? sPath : "no config.ini",
+               sHavePath ? " is read and never written by this game" :
+                           " found, the defaults are used",
+               sOverlay);
+        fflush(stdout);
+        return;
+    }
+
     const char* explicitPath = getenv("TSSM_CONFIG");
     if (explicitPath != NULL && explicitPath[0] != '\0')
     {
@@ -679,9 +777,94 @@ void iConfigSet(const char* key, const char* value)
     sCount++;
 }
 
+namespace
+{
+    // Read-only: Player 2's own keys go to its overlay; any other change
+    // lasts until the game closes.
+    bool saveOverlay()
+    {
+        bool own = false;
+        for (S32 i = 0; i < sCount; i++)
+        {
+            own = own || (sChanged[i] && isPlayer2Key(sEntries[i].key));
+        }
+        for (S32 i = 0; i < sRemovedCount; i++)
+        {
+            own = own || isPlayer2Key(sRemoved[i]);
+        }
+        bool ok = true;
+        if (own)
+        {
+            iConfigEditFile* file = iConfigEditOpen(sOverlay);
+            if (file == NULL)
+            {
+                file = iConfigEditNew();
+            }
+            ok = file != NULL;
+            for (S32 i = 0; i < sCount && ok; i++)
+            {
+                char section[kMaxKey];
+                char* name;
+                if (sChanged[i] && isPlayer2Key(sEntries[i].key) &&
+                    splitKey(sEntries[i].key, section, &name))
+                {
+                    ok = iConfigEditSet(file, section, name, sEntries[i].value);
+                }
+            }
+            for (S32 i = 0; i < sRemovedCount && ok; i++)
+            {
+                char section[kMaxKey];
+                char* name;
+                if (isPlayer2Key(sRemoved[i]) && splitKey(sRemoved[i], section, &name))
+                {
+                    iConfigEditUnset(file, section, name);
+                }
+            }
+            ok = ok && iConfigEditSave(file, sOverlay);
+            if (file != NULL)
+            {
+                iConfigEditClose(file);
+            }
+            if (!ok)
+            {
+                printf("tssm: config: Player 2's settings could not be saved to %s\n", sOverlay);
+            }
+        }
+        if (ok)
+        {
+            memset(sChanged, 0, sizeof(sChanged));
+            sRemovedCount = 0;
+        }
+        return ok;
+    }
+} // namespace
+
+bool iConfigReadOnly()
+{
+    iConfigLoad();
+    return sReadOnly;
+}
+
+void iConfigTestReset()
+{
+    sLoaded = 0;
+    sCount = 0;
+    sHavePath = 0;
+    sPath[0] = '\0';
+    sReadOnly = false;
+    sOverlay[0] = '\0';
+    memset(sChanged, 0, sizeof(sChanged));
+    sRemovedCount = 0;
+}
+
 bool iConfigSave()
 {
     iConfigLoad();
+
+    if (sReadOnly)
+    {
+        return saveOverlay();
+    }
 
     bool any = sRemovedCount > 0;
     for (S32 i = 0; i < sCount; i++)
