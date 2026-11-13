@@ -33,3 +33,34 @@ compile_commands.json
 # Miscellaneous
 /*.txt
 *.exe
+
+# Local assistant and editor-tool folders and notes: never part of the project
+.claude/
+.specstory/
+.cursor/
+.gemini/
+CLAUDE.md
+PROGRESS_NOTES.md
+*HANDOFF*
+
+# Game files and disc images: never part of the project (orig/ is covered above)
+*.[iI][sS][oO]
+*.[rR][vV][zZ]
+*.[gG][cC][mM]
+*.[wW][bB][fF][sS]
+*.[cC][iI][sS][oO]
+*.[xX][bB][eE]
+*.[hH][iI][pP]
+*.[hH][oO][pP]
+*.[bB][iI][kK]
+/xbox-assets/
+
+# Built programs and their settings: never part of the project (the build folders are
+# ignored above or in their own .gitignore files)
+*.nro
+*.nacp
+*.apk
+*.pdb
+*.dll
+*.so
+config.ini

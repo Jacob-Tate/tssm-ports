@@ -1,5 +1,6 @@
 # See config.example.yml for documentation.
-object: orig/GGVE78/sys/main.dol
+object_base: orig/GGVE78
+object: sys/main.dol
 hash: f772db7f38b9b55e27169822ed17184fa2dc2574
 symbols: config/GGVE78/symbols.txt
 splits: config/GGVE78/splits.txt
