@@ -56,14 +56,16 @@ namespace stereomath
         return sigma * 0.5f * t.k * w * (1.0f - C / we);
     }
 
-    // TSSM_C3D_STEREO / [video] stereo: off, auto (the slider), or
-    // force[:depth[:C]] (the slider taken as full, depth and the convergence
-    // plane held when given).
+    // TSSM_C3D_STEREO / [video] stereo: off, auto (the slider, with the 3DS's
+    // speed guard), always (the slider, no speed guard), or force[:depth[:C]]
+    // (a test switch: the slider taken as full, depth and the convergence plane
+    // held when given). ALWAYS is last so the older values keep their numbers.
     enum
     {
         MODE_OFF,
         MODE_AUTO,
-        MODE_FORCE
+        MODE_FORCE,
+        MODE_ALWAYS
     };
     struct Setting
     {
@@ -94,6 +96,10 @@ namespace stereomath
         else if (strcmp(text, "auto") == 0)
         {
             st.mode = MODE_AUTO;
+        }
+        else if (strcmp(text, "always") == 0)
+        {
+            st.mode = MODE_ALWAYS;
         }
         else if (strncmp(text, "force", 5) == 0 && (text[5] == '\0' || text[5] == ':'))
         {

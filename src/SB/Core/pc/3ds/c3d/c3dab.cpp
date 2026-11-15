@@ -557,10 +557,11 @@ namespace rw
                 StereoProbeStats so;
                 const bool haveStereo = stereoProbeTake(&so) != 0;
                 char stereo[256];
-                const char* what = g->m.stereo == stereomath::MODE_OFF  ? "off" :
-                                   g->m.stereo == stereomath::MODE_AUTO ? "auto (the slider)" :
-                                   g->m.stereoGuard                     ? "force:50 with the guard" :
-                                                                          "force:50";
+                const char* what = g->m.stereo == stereomath::MODE_OFF    ? "off" :
+                                   g->m.stereo == stereomath::MODE_AUTO   ? "auto (the slider)" :
+                                   g->m.stereo == stereomath::MODE_ALWAYS ? "always (the slider, no guard)" :
+                                   g->m.stereoGuard                       ? "force:50 with the guard" :
+                                                                            "force:50";
                 if (!haveStereo || g->stereoAsked)
                 {
                     snprintf(stereo, sizeof(stereo), "%s%s", what,
@@ -697,7 +698,7 @@ namespace rw
         const char* modesText(const Modes* m, char* buf, uint32 size)
         {
             static const char* kSkin[] = { "gpu", "cpu", "bind", "off" };
-            static const char* kStereo[] = { "off", "auto", "force", "?" };
+            static const char* kStereo[] = { "off", "auto", "force", "always" };
             // The measuring words only when they are not the default, so the
             // lines of a normal run read as before.
             snprintf(buf, size,

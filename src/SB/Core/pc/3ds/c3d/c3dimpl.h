@@ -267,7 +267,7 @@ namespace rw
             bool32 fill; // FALSE: the top screen scissored to one pixel (fill=off)
             bool32 cmdFlush; // C3D_FrameEnd(GX_CMDLIST_FLUSH), the command buffer and ring by hand (L2)
             bool32 statsLine; // FALSE: TSSM_C3D_STATS's line is not written
-            int32 stereo; // stereomath::MODE_OFF, _AUTO or _FORCE (c3dstereo.cpp)
+            int32 stereo; // stereomath::MODE_OFF, _AUTO, _FORCE or _ALWAYS (c3dstereo.cpp)
             bool32 stereoGuard; // stereo=guard: MODE_FORCE with the speed guard on (probe 14)
             // FALSE (refresh=off): a model whose vertices changed is instanced
             // again from the start, as before refreshInstance (c3dpipe.cpp).
@@ -407,6 +407,9 @@ namespace rw
         };
         void stereoOpen(const char* setting, int32 depth); // at the device's open
         bool32 stereoEnabled(void); // not off: the slider is read, the screen is in 3D mode
+        // At each present, before the frame's figures: the settings menu's
+        // mode and depth (stereoSetMode, stereoSetDepth) from here.
+        void stereoApplySettings(void);
         // Once a frame, before C3D_FrameBegin: the slider, its easing and the
         // guard. TRUE: this frame is drawn for two eyes.
         bool32 stereoFrameStart(void);

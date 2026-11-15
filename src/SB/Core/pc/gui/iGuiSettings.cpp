@@ -27,6 +27,10 @@
 #include "iScreenWarp.h"
 #include "iWindow.h"
 
+#ifdef __3DS__
+#include "3ds/c3d/rwc3d.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -844,6 +848,52 @@ void iGui::SettingsDisplay()
     ImGui::EndTable();
 }
 
+#ifdef __3DS__
+// Stereoscopic 3D (docs/3DS.md, "3D (the slider)"). Both rows apply at the
+// next frame (rw::c3d's stereoSetMode and stereoSetDepth, c3dstereo.cpp); the
+// slider still turns 3D on and all the way down is still 2D.
+void iGui::Settings3D()
+{
+    ImGui::SeparatorText("3D");
+    if (!BeginRows("stereo"))
+    {
+        return;
+    }
+
+    const bool live = !InLauncher();
+    static const Choice kModes[] = { { "auto", "Auto" }, { "always", "Always" }, { "off", "Off" } };
+    Row("3D");
+    if (ChoiceCombo("##stereo", "video.stereo", kModes, 3, "auto") && live)
+    {
+        rw::c3d::stereoSetMode(iConfigGetString("video.stereo", "auto"));
+    }
+    HelpMarker("Auto turns 3D off by itself for a while where the game would stutter. Always "
+               "keeps 3D on even where it runs slowly. Off is always 2D. The 3D slider sets how "
+               "deep; all the way down is 2D.");
+
+    Row("3D depth");
+    if (IntSlider("##stereodepth", "video.stereo_depth", 50, 0, 100, "%d") && live)
+    {
+        rw::c3d::stereoSetDepth(iConfigGetInt("video.stereo_depth", 50));
+    }
+    ImGui::EndTable();
+
+    const char* mode = iConfigGetString("video.stereo", "auto");
+    if (SDL_strcasecmp(mode, "always") == 0)
+    {
+        Note("Always: keeps 3D on even where it runs slowly.");
+    }
+    else if (SDL_strcasecmp(mode, "off") == 0)
+    {
+        Note("Off: always 2D.");
+    }
+    else
+    {
+        Note("Auto: turns 3D off by itself for a while where the game would stutter.");
+    }
+}
+#endif
+
 void iGui::SettingsAudio()
 {
     ImGui::SeparatorText("Audio");
@@ -1075,6 +1125,10 @@ void iGui::DrawSettings()
 {
     SettingsDisplay();
     ImGui::Spacing();
+#ifdef __3DS__
+    Settings3D();
+    ImGui::Spacing();
+#endif
     SettingsAudio();
     ImGui::Spacing();
     SettingsGame();

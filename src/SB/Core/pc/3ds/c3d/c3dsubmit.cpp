@@ -2245,6 +2245,11 @@ namespace rw
             const u64 t0 = s.timing ? svcGetSystemTick() : 0;
             const float gpuBefore = C3D_GetDrawingTime();
             C3D_FrameEnd(flags);
+            if (s.stereoReady)
+            {
+                // The settings menu's 3D mode and depth, between two frames.
+                stereoApplySettings();
+            }
             if (s.stereoReady && stereoEnabled())
             {
                 // The guard's figures, then whether the next frame is a 3D one

@@ -78,6 +78,9 @@ namespace iGui
     void DrawSettings();
     void SettingsGameFiles();
     void SettingsDisplay();
+#ifdef __3DS__
+    void Settings3D(); // the 3D mode and depth
+#endif
     void SettingsAudio();
     void SettingsGame();
     void SettingsInterface();

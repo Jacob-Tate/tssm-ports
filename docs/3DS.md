@@ -118,9 +118,10 @@ on the top screen while the menu is open, but takes no input from the buttons.
   game** asks, then returns to the HOME Menu (the .cia) or the Homebrew Launcher (the
   .3dsx), the same way HOME's Close does (progress since the last save is lost).
 - **Settings:** the frame rate (30, or 60 for light scenes), field of view, the glow and
-  the screen warp, the four volumes, the logo movies, the save folder and the menu's text
-  size. What does nothing on the 3DS (the renderer, window and render size, anti-aliasing,
-  vertical sync, rumble, touch controls, keyboard and mouse) is left out.
+  the screen warp, 3D (Auto, Always or Off) and 3D depth (*3D*, below), the four volumes,
+  the logo movies, the save folder and the menu's text size. What does nothing on the 3DS
+  (the renderer, window and render size, anti-aliasing, vertical sync, rumble, touch
+  controls, keyboard and mouse) is left out.
 
 The game sees START and SELECT a moment late: each is held back for up to 120 ms in case
 the other follows. If the menu ever misbehaves, `[gui] overlay = off` in `config.ini`
@@ -143,21 +144,35 @@ the screen and the world goes in behind him; through a fly-through or a cutscene
 where it was. The title screen, the pause menu, the options and the galleries are flat. A
 New 2DS XL has no slider and is always 2D.
 
-Two settings in `config.ini` (the game adds both, at their defaults, to a `config.ini`
+The settings menu's Settings tab has a **3D** group:
+
+- **3D:** **Auto** (the default) turns 3D off by itself for a while where the game would
+  stutter. **Always** keeps 3D on even where it runs slowly. **Off** is always 2D. With
+  Auto and Always the slider still sets how deep the 3D is, and all the way down is still
+  2D.
+- **3D depth** (0 to 100): how deep the 3D is with the slider at the top.
+
+Both take effect at the next frame, easing in or out as the slider does, and are saved to
+`config.ini` with the other settings (the depth when you let go of its slider). In
+`config.ini` they are two lines (the game adds both, at their defaults, to a `config.ini`
 from an older build; nothing else in the file changes):
 
     [video]
     stereo = auto
     stereo_depth = 50
 
-`stereo = off` keeps the top screen in 2D whatever the slider says. `stereo_depth` (0 to
-100) is how deep the 3D is with the slider at the top.
+`stereo` is `auto`, `always` or `off`, in capitals or not (`Always` and `OFF` work too);
+any other word is taken as `auto`, and the log says so. `stereo_depth` is the menu's 3D
+depth.
 
-**The speed guard.** The second eye about doubles the GPU's work. When a busy place cannot
-keep 30 fps in 3D, the game eases 3D out there by itself and plays in 2D, then brings 3D
-back once its frame times say a 3D frame would fit again: after 3 seconds the first time,
-twice as long after each later drop (at most a minute; back to 3 seconds when a level
-loads). The log says each time 3D goes off and comes back.
+**Auto (the speed guard).** The second eye about doubles the GPU's work. In Auto, when a
+busy place keeps losing frames in 3D (not one stutter or two, but about one frame in seven
+running late over two seconds, or the GPU over its time for a frame), the game eases 3D out
+there by itself and plays in 2D, then eases 3D back in once its frame times say a 3D frame
+would fit again: after 3 seconds the first time, twice as long after each later drop (at
+most a minute; back to 3 seconds when a level loads). The log says each time 3D goes off
+and comes back. **Always** never turns 3D off: it stays on, and the game runs slower where
+it has to.
 
 ### Drawing effects (`[3ds] effects`)
 
@@ -468,7 +483,7 @@ as the player set it up, and `config.ini` is never changed by a test. For exampl
 | `TSSM_3DS_LOG_SERVER=on` | serve `last_run.log` on TCP port 28772 while the game runs |
 | `TSSM_SND_METER=1` | a line a second with the level of each sound source |
 | `TSSM_C3D_STATS=1` | a line a second of renderer counts (draws, memory, VRAM) and a `frame times` line (CPU, GPU and waits); `TSSM_C3D_STATS=<n>` writes them every n seconds |
-| `TSSM_C3D_STEREO=off/auto/force[:<depth>]`, `TSSM_C3D_STEREO_GUARD=on/off` | 3D for one run, over `[video] stereo`: `force` takes the slider as at its top, with the speed guard off unless `TSSM_C3D_STEREO_GUARD=on` |
+| `TSSM_C3D_STEREO=off/auto/always/force[:<depth>]`, `TSSM_C3D_STEREO_GUARD=on/off` | 3D for one run, over `[video] stereo`: `force` takes the slider as at its top, with the speed guard off unless `TSSM_C3D_STEREO_GUARD=on` |
 | `TSSM_C3D_PIPE=off`, `TSSM_C3D_FAST=off`, `TSSM_C3D_REFRESH=off`, `TSSM_C3D_SKINTRIM=off`, `TSSM_C3D_EYESKIP=off`, `TSSM_C3D_SAVEVRAM=off`, `TSSM_AUDIO_CORE=1` | the speed work left out, for measuring: frame pipelining, the per-draw caches, changed vertices rewritten in place, the shorter skinning path, the right eye's skipped shadow pass, the 3D starting picture's copy in VRAM (*The renderer*, below); SDL's audio thread left on core 1 |
 | `TSSM_C3D_FOG`, `_RTT`, `_SHADOW`, `_GLOW`, `_WARP`, `_COPY`, `_ORTHOZ`, `_HUDZ`, `_SELFTEST` (`on`/`off`) | one effect on or off for a run, over `[3ds] effects` |
 | `TSSM_C3D_SKIN=gpu/cpu/bind/off`, `TSSM_C3D_LIGHT=off`, `TSSM_C3D_ENV=off` | skinning on the GPU (default) or the CPU; lighting and environment maps off, for measuring |
@@ -658,10 +673,10 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   14-16 (*Developer tools*) have played BB01, BB02, GG02, TR01 and JK01, the opening
   fly-through, the title screen and the pause menu with every effect on: 27 to 30 fps in 2D
   (the fly-through about 25). With 3D forced on at depth 50, BB02's busy street keeps about
-  29 fps, GG02 about 21 and BB01 about 23; with the speed guard, as in play, every place
-  measured stayed at 27 to 30 fps, the guard playing stretches in 2D (most of the time in
-  GG02 and BB01). Playing by hand, the settings menu, the crash handler and the error
-  screen are still to be checked on a console.
+  29 fps, GG02 about 21 and BB01 about 23; with the speed guard (Auto, in its earlier and
+  quicker form), every place measured stayed at 27 to 30 fps, the guard playing stretches
+  in 2D (most of the time in GG02 and BB01). Playing by hand, the settings menu, the crash
+  handler and the error screen are still to be checked on a console.
 - **The quit.** Earlier builds' quits could leave the game's process held by the system
   until the console restarted, and after three or four in one power-on the console could
   stop with a kernel panic at the next start. Since the quit was reworked (*The platform

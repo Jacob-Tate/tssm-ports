@@ -1,26 +1,37 @@
 // rw::c3d: stereoscopic 3D (docs/3DS.md, "Stereoscopic 3D").
 //
 // What is decided here, once a frame: whether the frame is drawn for two eyes
-// (the 3D slider, eased; [video] stereo and stereo_depth; TSSM_C3D_STEREO; the
-// speed guard), the eye terms (stereomath.h), and the convergence plane C,
+// (the 3D slider, eased; [video] stereo and stereo_depth, which the settings
+// menu can change while the game runs; TSSM_C3D_STEREO; the speed guard), the
+// eye terms (stereomath.h), and the convergence plane C,
 // which follows the player's camera z and is held while the camera does not
 // follow the player. c3dsubmit.cpp records the frame's command lists and
 // sends them to the GPU again for the right eye; the vertex shaders' eye
 // procedure shifts the main camera's draws by u_eyeSide, which is written
 // only in front of each eye's lists.
 //
-// The speed guard: a 3D frame costs the GPU about twice. When 3 of the last
-// 30 3D frames missed their pair of vblanks (over 40 ms), or the GPU's mean
-// went over 31 ms, 3D eases out over 8 frames and the frames are 2D; it comes
+// The speed guard: a 3D frame costs the GPU about twice. When 9 of the last
+// 60 3D frames missed their pair of vblanks (over 40 ms), or the GPU's mean
+// over them went over 34.5 ms, 3D eases out over 8 frames and the frames are
+// 2D. It judges lasting slowness: the game's one-off hitches miss as often
+// in 2D (probe 16: 2.5% of 2D frames). It comes
 // back after a wait (3 s, doubled each time, at most 60 s, reset at a level
-// load) once no more than 2 of the last 90 frames predict that a 3D frame
-// would not fit. Frames over 250 ms (a load, a capture's file write, a
-// hitch) are left out of both.
+// load), easing in as the slider does, once no more than 2 of the last 90
+// frames predict that a 3D frame would not fit. Frames over 250 ms (a load,
+// a capture's file write, a hitch) are left out of both. The guard runs in
+// auto only: always keeps the slider's 3D however slow the frames are, off
+// is 2D.
+//
+// A change of mode or depth from the menu waits for the next present
+// (stereoApplySettings), so a frame is drawn with one setting throughout; 3D
+// then eases in or out over the slider's frames, and entering auto starts the
+// guard afresh.
 
 #include "c3dimpl.h"
 
 #include "../../rw/stereomath.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +44,8 @@ namespace rw
     {
         namespace
         {
-            const int32 kWindow = 30; // 3D frames the guard looks back over
+            const int32 kWindow = 60; // 3D frames the guard looks back over
+            const int32 kSlowFrames = 9; // of kWindow over kOverMs: a trip
             const int32 kFadeFrames = 8;
             const int32 kRoomFrames = 90;
             const int32 kRoomMisses = 2; // of kRoomFrames that may predict no room
@@ -41,7 +53,8 @@ namespace rw
             const double kFirstWait = 3.0; // seconds
             const double kMaxWait = 60.0;
             const float kOverMs = 40.0f; // a missed pair of vblanks
-            const float kGpuLimitMs = 31.0f;
+            const float kGpuLimitMs = 34.5f; // the window's GPU mean: a trip
+            const int32 kGpuFrames = 29; // GPU times in the window before its mean counts
             const float kFitMs = 31.0f;
             // 3D frames the guard leaves out after 3D starts or comes back:
             // the first ones carry the switch's own one-off work.
@@ -63,12 +76,21 @@ namespace rw
             {
                 bool open;
                 int32 mode; // what modes.stereo was last frame
-                float depth; // stereo_depth
+                float depth; // stereo_depth, eased toward depthTarget
+                float depthTarget; // stereo_depth as set
                 stereomath::Setting env; // TSSM_C3D_STEREO
                 bool envSet;
                 bool nearCap;
                 bool guardOn;
+                int32 guardEnv; // TSSM_C3D_STEREO_GUARD: 1 on, 0 off, -1 not set
                 int32 guardTest; // TSSM_C3D_STEREO_GUARDTEST's frame (0: none)
+
+                // The settings menu's changes, for the next present (-1: none).
+                int32 request; // a stereomath mode
+                int32 depthRequest; // 0..100
+                bool leaving; // off was asked for: 3D eases out, then the mode is off
+                int32 depthQuiet; // presents since the last depth request
+                bool depthLogPending;
 
                 float s; // the slider, eased
                 float sEff; // times the guard's fade
@@ -138,9 +160,65 @@ namespace rw
 
             const char* modeName(int32 m)
             {
-                return m == stereomath::MODE_OFF   ? "off" :
-                       m == stereomath::MODE_FORCE ? "force" :
-                                                     "auto";
+                return m == stereomath::MODE_OFF    ? "off" :
+                       m == stereomath::MODE_FORCE  ? "force" :
+                       m == stereomath::MODE_ALWAYS ? "always" :
+                                                      "auto";
+            }
+
+            // [video] stereo (the file's or the menu's): auto, always or off, in
+            // any case as the config loader and the menu take it; anything else
+            // (force is a test switch's) is auto, said in the log.
+            int32 settingMode(const char* setting)
+            {
+                stereomath::Setting cfg;
+                cfg.mode = stereomath::MODE_AUTO;
+                if (setting == nil || setting[0] == '\0')
+                {
+                    return cfg.mode;
+                }
+                char word[16];
+                size_t n = 0;
+                while (setting[n] != '\0' && n + 1 < sizeof(word))
+                {
+                    word[n] = (char)tolower((unsigned char)setting[n]);
+                    n++;
+                }
+                word[n] = '\0';
+                if (setting[n] != '\0' || !stereomath::parse(word, &cfg) ||
+                    cfg.mode == stereomath::MODE_FORCE)
+                {
+                    printf("tssm: c3d: stereo: [video] stereo = %s is not auto, always or off; "
+                           "auto\n",
+                           setting);
+                    fflush(stdout);
+                    cfg.mode = stereomath::MODE_AUTO;
+                }
+                return cfg.mode;
+            }
+
+            // The guard watches auto's 3D. Always has none, and a forced 3D is
+            // a measurement; TSSM_C3D_STEREO_GUARD=on|off overrides.
+            bool guardFor(int32 mode)
+            {
+                if (st.guardEnv >= 0)
+                {
+                    return st.guardEnv != 0;
+                }
+                return mode != stereomath::MODE_FORCE && mode != stereomath::MODE_ALWAYS;
+            }
+
+            // The guard as at a start: no trip, no wait, empty windows.
+            void guardReset(void)
+            {
+                st.guard = GUARD_ON;
+                st.fadeLeft = 0;
+                st.trips = 0;
+                st.wait = 0.0;
+                st.nWin = 0;
+                st.atWin = 0;
+                st.roomN = 0;
+                st.roomAt = 0;
             }
 
             float depthNow(void)
@@ -283,18 +361,11 @@ namespace rw
             const StereoFocusHook keep = st.hook;
             memset(&st, 0, sizeof(st));
             st.hook = keep;
-            stereomath::Setting cfg;
-            cfg.mode = stereomath::MODE_AUTO;
-            // [video] stereo takes auto or off (force is a test switch's).
-            if (setting != nil && setting[0] != '\0' &&
-                (!stereomath::parse(setting, &cfg) || cfg.mode == stereomath::MODE_FORCE))
-            {
-                printf("tssm: c3d: stereo: [video] stereo = %s is not auto or off; auto\n",
-                       setting);
-                cfg.mode = stereomath::MODE_AUTO;
-            }
+            st.request = -1;
+            st.depthRequest = -1;
             st.depth = (float)(depth < 0 ? 0 : depth > 100 ? 100 : depth);
-            int32 mode = cfg.mode;
+            st.depthTarget = st.depth;
+            int32 mode = settingMode(setting);
             const char* e = getenv("TSSM_C3D_STEREO");
             if (e != nil && e[0] != '\0')
             {
@@ -305,19 +376,18 @@ namespace rw
                 }
                 else
                 {
-                    printf("tssm: c3d: stereo: TSSM_C3D_STEREO=%s is not off, auto or "
+                    printf("tssm: c3d: stereo: TSSM_C3D_STEREO=%s is not off, auto, always or "
                            "force[:depth[:C]]; ignored\n",
                            e);
                 }
             }
             const char* nc = getenv("TSSM_C3D_STEREO_NEARCAP");
             st.nearCap = !(nc != nil && strcmp(nc, "off") == 0);
-            // The guard watches the slider's 3D; a forced 3D is a measurement
-            // and has it off unless TSSM_C3D_STEREO_GUARD=on.
             const char* g = getenv("TSSM_C3D_STEREO_GUARD");
-            st.guardOn = g != nil && strcmp(g, "on") == 0    ? true :
-                         g != nil && strcmp(g, "off") == 0   ? false :
-                         mode != stereomath::MODE_FORCE;
+            st.guardEnv = g != nil && strcmp(g, "on") == 0  ? 1 :
+                          g != nil && strcmp(g, "off") == 0 ? 0 :
+                                                              -1;
+            st.guardOn = guardFor(mode);
             const char* gt = getenv("TSSM_C3D_STEREO_GUARDTEST");
             st.guardTest = gt != nil ? atoi(gt) : 0;
             modes.stereo = mode;
@@ -353,6 +423,101 @@ namespace rw
             return st.open && modes.stereo != stereomath::MODE_OFF;
         }
 
+        void stereoSetMode(const char* setting)
+        {
+            if (st.open)
+            {
+                st.request = settingMode(setting);
+            }
+        }
+
+        void stereoSetDepth(int depth)
+        {
+            if (st.open)
+            {
+                st.depthRequest = depth < 0 ? 0 : depth > 100 ? 100 : depth;
+            }
+        }
+
+        void stereoApplySettings(void)
+        {
+            if (!st.open)
+            {
+                return;
+            }
+            if (st.depthRequest >= 0)
+            {
+                st.depthTarget = (float)st.depthRequest;
+                st.depthRequest = -1;
+                st.depthQuiet = 0;
+                st.depthLogPending = true;
+                if (modes.stereo == stereomath::MODE_OFF)
+                {
+                    // Nothing is shown in 3D to ease.
+                    st.depth = st.depthTarget;
+                }
+            }
+            else if (st.depthLogPending && ++st.depthQuiet >= 30)
+            {
+                // Once the slider has stopped (a drag sends one a frame).
+                st.depthLogPending = false;
+                printf("tssm: c3d: stereo: depth %.0f from the settings menu (far parallax %.1f "
+                       "px at the slider's top), frame %d\n",
+                       (double)st.depthTarget,
+                       (double)(st.depthTarget / 100.0f * stereomath::kMaxParallaxPx), logFrame());
+                fflush(stdout);
+            }
+            if (st.request < 0)
+            {
+                return;
+            }
+            const int32 m = st.request;
+            st.request = -1;
+            if (m == (st.leaving ? (int32)stereomath::MODE_OFF : modes.stereo))
+            {
+                return;
+            }
+            printf("tssm: c3d: stereo: %s from the settings menu at frame %d%s\n", modeName(m),
+                   logFrame(),
+                   m == stereomath::MODE_OFF && modes.stereo != stereomath::MODE_OFF ?
+                       " (3D eases out first)" :
+                       "");
+            fflush(stdout);
+            if (modes.stereo != stereomath::MODE_OFF)
+            {
+                // Eased on from what the eyes see now, the guard's fade
+                // included.
+                st.s = st.sEff;
+            }
+            st.guard = GUARD_ON;
+            st.fadeLeft = 0;
+            if (m == stereomath::MODE_OFF)
+            {
+                // stereoFrameStart turns the mode off once the slider's ease
+                // reaches 0.
+                st.leaving = true;
+                return;
+            }
+            st.leaving = false;
+            if (modes.stereo == stereomath::MODE_OFF)
+            {
+                // The screen's 3D mode is committed at the next swap.
+                gfxSet3D(true);
+                st.s = 0.0f;
+                st.sEff = 0.0f;
+                st.depth = st.depthTarget;
+            }
+            modes.stereo = m;
+            st.mode = m;
+            st.guardOn = guardFor(m);
+            st.guardSetting = st.guardOn;
+            if (m == stereomath::MODE_AUTO)
+            {
+                guardReset();
+                st.warm = 0;
+            }
+        }
+
         bool32 stereoFrameStart(void)
         {
             st.frame3D = false;
@@ -369,6 +534,7 @@ namespace rw
                        logFrame());
                 fflush(stdout);
                 st.mode = modes.stereo;
+                st.leaving = false;
                 if (modes.stereo == stereomath::MODE_FORCE)
                 {
                     st.s = 1.0f;
@@ -393,19 +559,47 @@ namespace rw
                 st.hook();
             }
 
-            if (modes.stereo == stereomath::MODE_FORCE)
+            if (modes.stereo == stereomath::MODE_FORCE && !st.leaving)
             {
                 st.s = 1.0f;
             }
             else
             {
                 const float raw = osGet3DSliderState();
-                const float target = raw < kSliderDead ? 0.0f : raw > 1.0f ? 1.0f : raw;
+                const float target = st.leaving || raw < kSliderDead ? 0.0f :
+                                     raw > 1.0f                      ? 1.0f :
+                                                                       raw;
                 st.s += (target - st.s) * kEase;
                 if (target == 0.0f && st.s < 0.01f)
                 {
                     st.s = 0.0f;
                 }
+            }
+            if (st.depth != st.depthTarget)
+            {
+                // The menu's depth, eased as the slider is.
+                st.depth += (st.depthTarget - st.depth) * kEase;
+                if (fabsf(st.depthTarget - st.depth) < 0.5f)
+                {
+                    st.depth = st.depthTarget;
+                }
+            }
+            if (st.leaving && st.s == 0.0f)
+            {
+                // The menu's off, now that 3D has eased out.
+                st.leaving = false;
+                modes.stereo = stereomath::MODE_OFF;
+                st.mode = stereomath::MODE_OFF;
+                st.sEff = 0.0f;
+                gfxSet3D(false);
+                if (st.lastLogged3D)
+                {
+                    st.lastLogged3D = false;
+                    logChange(false);
+                }
+                printf("tssm: c3d: stereo: off from frame %d\n", logFrame());
+                fflush(stdout);
+                return 0;
             }
             float mul = 1.0f;
             if (st.guard == GUARD_FADE)
@@ -417,8 +611,9 @@ namespace rw
                 mul = 0.0f;
             }
             st.sEff = st.s * mul;
-            bool want = modes.stereo == stereomath::MODE_FORCE ? st.guard != GUARD_2D :
-                                                                 st.sEff > 0.0f && st.depth > 0.0f;
+            bool want = modes.stereo == stereomath::MODE_FORCE && !st.leaving ?
+                            st.guard != GUARD_2D :
+                            st.sEff > 0.0f && st.depth > 0.0f;
             const stereomath::Terms t =
                 stereomath::terms(st.sEff, depthNow(), st.cInit ? st.C : kCNone, st.nearCap, 0.0f);
             st.k = t.k;
@@ -595,7 +790,7 @@ namespace rw
                     }
                 }
                 const float gmean = gn > 0 ? gsum / (float)gn : 0.0f;
-                if (over >= 3 || (gn >= kWindow - 1 && gmean > kGpuLimitMs))
+                if (over >= (uint32)kSlowFrames || (gn >= kGpuFrames && gmean > kGpuLimitMs))
                 {
                     guardTrip(over, gmean);
                 }
@@ -649,6 +844,9 @@ namespace rw
                         st.guard = GUARD_ON;
                         st.nWin = 0;
                         st.atWin = 0;
+                        // Eased back in from 2D as the slider eases, not at
+                        // the slider's depth at once (warm-up covers the ease).
+                        st.s = 0.0f;
                         printf("tssm: c3d: stereo: guard: back to 3D at frame %d after %.1f s in "
                                "2D (%d of the last %d frames predicted a 3D frame in %.1f ms or "
                                "less; the last %.1f ms: recording %.1f, the rest %.1f, GPU %.1f x "
@@ -693,16 +891,8 @@ namespace rw
                 st.probeDepthSet = false;
                 st.guardOn = st.guardSetting;
             }
-            // Each segment's guard from the start: no trip, no wait, empty
-            // windows.
-            st.guard = GUARD_ON;
-            st.fadeLeft = 0;
-            st.trips = 0;
-            st.wait = 0.0;
-            st.nWin = 0;
-            st.atWin = 0;
-            st.roomN = 0;
-            st.roomAt = 0;
+            // Each segment's guard from the start.
+            guardReset();
             printf("tssm: c3d: stereo: probe segment: %s, depth %.0f, guard %s\n",
                    modeName(mode), (double)depthNow(), st.guardOn ? "on" : "off");
             fflush(stdout);

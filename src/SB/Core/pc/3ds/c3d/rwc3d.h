@@ -33,7 +33,8 @@ namespace rw
             // [3ds] effects: the effects not yet shown to work on a console
             // that are turned on ("fog,rtt,..."; nil or "none": none).
             const char* effects;
-            // [video] stereo (auto or off; nil: auto) and stereo_depth (0..100).
+            // [video] stereo (auto, always or off; nil: auto) and stereo_depth
+            // (0..100).
             const char* stereo;
             int stereoDepth;
         };
@@ -148,6 +149,13 @@ namespace rw
         // (c3dstereo.cpp; docs/3DS.md "Stereoscopic 3D"). The right eye is the
         // frame's command lists sent to the GPU a second time with the other
         // eye's shift.
+
+        // The settings menu (gui/iGuiSettings.cpp): [video] stereo (auto,
+        // always or off; anything else is auto) and stereo_depth (0..100) while
+        // the game runs. Taken at the next present; 3D eases in or out from
+        // there, and auto's speed guard starts afresh.
+        void stereoSetMode(const char* setting);
+        void stereoSetDepth(int depth);
 
         // Once a frame, at the present before it, the device asks the game
         // (3ds/iStereo3DS.cpp) for the convergence plane: the hook calls
