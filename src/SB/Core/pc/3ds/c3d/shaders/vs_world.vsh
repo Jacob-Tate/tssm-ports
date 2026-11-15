@@ -17,14 +17,31 @@
 
 ; xform: r0 = object position (w = 1) -> outpos, and outtc2 the fog ramp's
 ; coordinate from the clip w (GL3's DoFog(gl_Position.w)). Uses r14, r15.
+; With b_eye (a 3D frame's main camera) clip y, the landscape x turned by the
+; tilt, gets this eye's shift first (eye).
 .proc xform
 	dp4 outpos.x, u_mvp[0], r0
-	dp4 outpos.y, u_mvp[1], r0
+	dp4 r14.y, u_mvp[1], r0
 	dp4 outpos.z, u_mvp[2], r0
 	dp4 r14.w, u_mvp[3], r0
+	callu b_eye, eye
+	mov outpos.y, r14.y
 	mov outpos.w, r14.w
 	mov r15, u_fog
 	mad outtc2, r14.wwww, r15.xxxx, r15.yyyy
+.end
+
+; eye: the off-axis eye shift, r14.y += w (1 - C / max(w, w_min)) * u_eyeSide.x:
+; nothing at the convergence plane C, half the far parallax towards the sky,
+; crossed nearer than C, capped at w_min. Uses r15 (xform loads u_fog after).
+.proc eye
+	mov r15, u_eyeCam
+	max r15.y, r14.w, r15.y
+	rcp r15.y, r15.y
+	mul r15.y, r15.x, r15.y
+	add r15.y, ONE, -r15.y
+	mul r15.y, r15.y, r14.w
+	mad r14.y, r15.y, u_eyeSide.x, r14.y
 .end
 
 ; uvout: v3 through u_uvMat -> outtc0.
@@ -36,6 +53,34 @@
 	; Every part of an output must be written: the PICA200 locks up on a
 	; partial write (found on a New 3DS; Azahar does not care).
 	mov outtc0.zw, ZERO
+.end
+
+; uvout1 (skintrim): uvout through dph, v3 as (u, v, w) with the loader's w
+; of 1 (a fixed v3 is (0, 0, 0, 1)): rows . (u, v, 1) + the rows' w, the same
+; terms as uvout's dp4 with (u, v, 1, 1).
+.proc uvout1
+	dph outtc0.x, v3.xyww, u_uvMat[0]
+	dph outtc0.y, v3.xyww, u_uvMat[1]
+	mov outtc0.zw, ZERO
+.end
+
+; light1 (skintrim): light with r6 = u_surf already (every caller has set it)
+; and the ambient straight from its uniform.
+.proc light1
+	mad r1.xyz, r6.xxxx, u_ambient, r1
+	dp3 r4.x, u_lightDir[0], r3
+	dp3 r4.y, u_lightDir[1], r3
+	dp3 r4.z, u_lightDir[2], r3
+	dp3 r4.w, u_lightDir[3], r3
+	max r4, ZERO, r4
+	mul r5, u_lightCol[0], r4.xxxx
+	mad r5, r4.yyyy, u_lightCol[1], r5
+	mad r5, r4.zzzz, u_lightCol[2], r5
+	mad r5, r4.wwww, u_lightCol[3], r5
+	mad r1.xyz, r5, r6.zzzz, r1
+	max r1, ZERO, r1
+	min r1, ONE, r1
+	mul outclr, u_matColor, r1
 .end
 
 ; light: r1 = base colour (prelit, 0..1), r3 = object-space normal -> outclr.

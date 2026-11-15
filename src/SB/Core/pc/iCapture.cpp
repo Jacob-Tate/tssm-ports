@@ -274,31 +274,58 @@ namespace
 
         if (Wanted(sFrame))
         {
-            char path[640];
-            snprintf(path, sizeof(path), "%sframe_%05d.png", sDir, (int)sFrame);
+#ifdef RW_C3D
+            // A 3D frame on the 3DS: each eye, as frame_N_L and frame_N_R.
+            const int eyes = rw::c3d::frameWasStereo() ? 2 : 1;
+#else
+            const int eyes = 1;
+#endif
+            for (int eye = 0; eye < eyes; eye++)
+            {
+                char path[640];
+                if (eyes == 2)
+                {
+                    snprintf(path, sizeof(path), "%sframe_%05d_%c.png", sDir, (int)sFrame,
+                             eye == 0 ? 'L' : 'R');
+                }
+                else
+                {
+                    snprintf(path, sizeof(path), "%sframe_%05d.png", sDir, (int)sFrame);
+                }
+#ifdef RW_C3D
+                rw::c3d::readScreenEye(eyes == 2 && eye == 0);
+#endif
 
-            const F32 at = iTimeDiffSec(sFirstFrameAt, iTimeGet());
-            const U64 writeFrom = iHostMonotonicNs();
-            if (iFrameGrabWrite(path, 0))
-            {
-                sCaptured++;
-                // By the wall clock (TSSM_FIXED_STEP holds iTime), with its
-                // parts, so a console run says which one costs.
-                F32 readMs, encodeMs, fileMs;
-                iFrameGrabLastTimes(&readMs, &encodeMs, &fileMs);
-                printf("tssm: capture: frame %d (%.2f s) -> %s (%.2f s to write: read back %.1f "
-                       "ms, PNG built %.1f ms, file written %.1f ms)\n",
-                       (int)sFrame, at, path, (double)(iHostMonotonicNs() - writeFrom) / 1e9,
-                       (double)readMs, (double)encodeMs, (double)fileMs);
+                const F32 at = iTimeDiffSec(sFirstFrameAt, iTimeGet());
+                const U64 writeFrom = iHostMonotonicNs();
+                if (iFrameGrabWrite(path, 0))
+                {
+                    sCaptured++;
+                    // By the wall clock (TSSM_FIXED_STEP holds iTime), with its
+                    // parts, so a console run says which one costs.
+                    F32 readMs, encodeMs, fileMs;
+                    iFrameGrabLastTimes(&readMs, &encodeMs, &fileMs);
+                    printf("tssm: capture: frame %d (%.2f s) -> %s (%.2f s to write: read back %.1f "
+                           "ms, PNG built %.1f ms, file written %.1f ms)\n",
+                           (int)sFrame, at, path, (double)(iHostMonotonicNs() - writeFrom) / 1e9,
+                           (double)readMs, (double)encodeMs, (double)fileMs);
+                }
+                else
+                {
+                    printf("tssm: capture: frame %d (%.2f s): no frame to read, or %s could not be "
+                           "written\n",
+                           (int)sFrame, at, path);
+                }
+                fflush(stdout);
             }
-            else
-            {
-                printf("tssm: capture: frame %d (%.2f s): no frame to read, or %s could not be "
-                       "written\n",
-                       (int)sFrame, at, path);
-            }
-            fflush(stdout);
+#ifdef RW_C3D
+            rw::c3d::readScreenEye(0);
+#endif
         }
+#ifdef RW_C3D
+        // The next frame keeps its left eye when it is one to capture.
+        rw::c3d::stereoCaptureLeft(Wanted(sFrame + 1));
+#endif
 
         iTestEventsFrame(sFrame);
         iD0RwLightLogFrame(sFrame);

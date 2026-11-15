@@ -10,8 +10,8 @@ running custom firmware (Luma3DS), in two packages made from the same program:
 - `tssm.3dsx`, started from the Homebrew Launcher.
 
 Both use the same folder on the SD card, so the settings and saves are the same in
-either. The top screen shows the game at 400 x 240, drawn with citro3d; the bottom screen
-holds the settings menu.
+either. The top screen shows the game at 400 x 240, drawn with citro3d, in stereoscopic 3D
+when the 3D slider is up; the bottom screen holds the settings menu.
 
 An original 3DS, 3DS XL or 2DS is not supported and will not be: it has a third of the
 CPU and half the memory the game gets on a New 3DS. The game checks at start and says so
@@ -133,6 +133,31 @@ turns it off: the bottom screen stays dark and START and SELECT go straight to t
 backup. **Export** beside a slot, **Every save as a .zip** and **Every save into a GCI
 folder** write into `/3ds/tssm/export/`. A file too big for the memory free at the time is
 refused with a message (a 16 MB Dolphin card fits); anything over 64 MB is no save.
+
+### 3D (the slider)
+
+The 3D slider turns stereoscopic 3D on and sets how deep it is; all the way down is 2D.
+The world is drawn for each eye; the HUD, the menus, text and the movies stay at the
+screen's depth. The point the eyes meet at follows SpongeBob (or Patrick), so he sits at
+the screen and the world goes in behind him; through a fly-through or a cutscene it holds
+where it was. The title screen, the pause menu, the options and the galleries are flat. A
+New 2DS XL has no slider and is always 2D.
+
+Two settings in `config.ini` (the game adds both, at their defaults, to a `config.ini`
+from an older build; nothing else in the file changes):
+
+    [video]
+    stereo = auto
+    stereo_depth = 50
+
+`stereo = off` keeps the top screen in 2D whatever the slider says. `stereo_depth` (0 to
+100) is how deep the 3D is with the slider at the top.
+
+**The speed guard.** The second eye about doubles the GPU's work. When a busy place cannot
+keep 30 fps in 3D, the game eases 3D out there by itself and plays in 2D, then brings 3D
+back once its frame times say a 3D frame would fit again: after 3 seconds the first time,
+twice as long after each later drop (at most a minute; back to 3 seconds when a level
+loads). The log says each time 3D goes off and comes back.
 
 ### Drawing effects (`[3ds] effects`)
 
@@ -273,7 +298,7 @@ ones: see the next two sections.
 | CpuSpeed, EnableL2Cache | `804MHz`, on | what the .3dsx asks for at start |
 | ReleaseKernel | 2.44 | puts the linear heap where the .3dsx has it |
 | StackSize | `0x3000` | only the start-up's: libctru moves the main thread to its 1 MB stack |
-| MaxCpu, CanAccessCore2 | `0x9E`, on | room for SDL's audio thread on the system core (30%) |
+| MaxCpu, CanAccessCore2 | `0x9E`, on | core 2 for SDL's audio thread on a New 3DS; the system core's 30% if core 2 is refused |
 | FileSystemAccess | DirectSdmc, DirectSdmcWrite | everything is in `sdmc:/3ds/tssm`, as for the .3dsx |
 | SaveDataSize | 0 | saves are files on the SD card |
 | ServiceAccessControl | APT:U, fs:USER, hid:USER, ir:rst, gsp::Gpu, dsp::DSP, soc:U, cfg:u, ptm:sysm | what the program uses |
@@ -442,11 +467,13 @@ as the player set it up, and `config.ini` is never changed by a test. For exampl
 | `TSSM_INPUT`, `TSSM_CAPTURE_FRAMES`, `TSSM_CAPTURE_DIR`, `TSSM_FIXED_STEP=30` | the PC's scripted input, frame captures (the `captures/` folder must exist) and a fixed time step, so frame N of a 3DS run and a PC run show the same moment |
 | `TSSM_3DS_LOG_SERVER=on` | serve `last_run.log` on TCP port 28772 while the game runs |
 | `TSSM_SND_METER=1` | a line a second with the level of each sound source |
-| `TSSM_C3D_STATS=1` | a line a second of renderer counts (draws, memory, VRAM) and a `frame times` line (CPU, GPU and waits) |
+| `TSSM_C3D_STATS=1` | a line a second of renderer counts (draws, memory, VRAM) and a `frame times` line (CPU, GPU and waits); `TSSM_C3D_STATS=<n>` writes them every n seconds |
+| `TSSM_C3D_STEREO=off/auto/force[:<depth>]`, `TSSM_C3D_STEREO_GUARD=on/off` | 3D for one run, over `[video] stereo`: `force` takes the slider as at its top, with the speed guard off unless `TSSM_C3D_STEREO_GUARD=on` |
+| `TSSM_C3D_PIPE=off`, `TSSM_C3D_FAST=off`, `TSSM_C3D_REFRESH=off`, `TSSM_C3D_SKINTRIM=off`, `TSSM_C3D_EYESKIP=off`, `TSSM_C3D_SAVEVRAM=off`, `TSSM_AUDIO_CORE=1` | the speed work left out, for measuring: frame pipelining, the per-draw caches, changed vertices rewritten in place, the shorter skinning path, the right eye's skipped shadow pass, the 3D starting picture's copy in VRAM (*The renderer*, below); SDL's audio thread left on core 1 |
 | `TSSM_C3D_FOG`, `_RTT`, `_SHADOW`, `_GLOW`, `_WARP`, `_COPY`, `_ORTHOZ`, `_HUDZ`, `_SELFTEST` (`on`/`off`) | one effect on or off for a run, over `[3ds] effects` |
 | `TSSM_C3D_SKIN=gpu/cpu/bind/off`, `TSSM_C3D_LIGHT=off`, `TSSM_C3D_ENV=off` | skinning on the GPU (default) or the CPU; lighting and environment maps off, for measuring |
 | `TSSM_C3D_AB=<frame>:<settings>,...` | switch those modes at given frames of one run (settings joined by `+`, for example `400:skin=cpu+fog=off`); each switch logs the stretch that ended (frames, fps, frame times) |
-| `TSSM_C3D_BENCH=1` | a draw micro-benchmark at the 30th frame |
+| `TSSM_C3D_BENCH=1` | a draw micro-benchmark at the 30th frame (`=2` adds its variants: what each part of a draw costs) |
 | `TSSM_3DS_GUI=off`, `TSSM_3DS_COMBO_MS=<ms>`, `TSSM_3DS_GUI_EVERY=2` | the settings menu off for a run; the START/SELECT hold-back; build the menu every other frame |
 
 ### The speed test (`tssm-spike.3dsx`)
@@ -467,7 +494,7 @@ whoever connects to TCP port 28772 while its last screen is up. `/3ds/tssm/spike
 ### Console probes (`TSSM_3DS_PROBE`)
 
 A probe is a build of the game that tests one thing on a console by itself and logs it:
-`-DTSSM_3DS_PROBE=<n>` at configure time (1-11; 0, the default, is the game). Only
+`-DTSSM_3DS_PROBE=<n>` at configure time (1-11 or 14-16; 0, the default, is the game). Only
 `3ds/i3DS.cpp` differs, so the probes share one build directory. A probe sets its own
 effect switches (neither `config.ini` nor `test-env.txt` changes them), boots BB02 with no
 intro movies, plays by itself and quits at frame 1500, logs to
@@ -487,10 +514,17 @@ the bottom screen.
 | 9 | `exitloop` | quits and starts itself again up to 20 times, checking each time that the console freed the run before |
 | 10 | `fps` | BB02, then GG02, with every effect on, each measured over 900 frames |
 | 11 | `leakladder` | like 9, one more layer of the program per run (from bare libctru up to the full game), to find the first layer whose quit is not freed |
+| 14 | `speed` | the speed survey: ten runs (BB02's busy and calm spots, GG02, TR01, JK01, BB01, the opening fly-through, the title screen, the pause menu) with every effect on, each frame's time split part by part |
+| 15 | `speed` | probe 14's ten runs again, then three that turn each speed change (*The renderer*, below) off and on |
+| 16 | `speed` | probe 15's runs, then three in 3D (BB02, GG02, BB01) that turn each part of the 3D work off and on |
 
-Probes 9-11 restart themselves through Luma3DS's loader and keep their files in a folder
-of their own under `/3ds/tssm/` (`exitloop/`, `fps-effects/`, `leakladder/`) with a
-summary log beside it (`exitloop.log`, `fps-effects.log`, `leakladder.log`).
+Probes 9-11 and 14-16 restart themselves through Luma3DS's loader and keep their files in
+a folder of their own under `/3ds/tssm/` (`exitloop/`, `fps-effects/`, `leakladder/`,
+`speed14/`, `speed15/`, `speed16/`) with a summary log beside it (`exitloop.log`,
+`fps-effects.log`, `leakladder.log`, `speed14.log` ...). Each run quits through the game's
+normal quit, and the next run's first line says whether the console freed it. Probes 14-16
+take about 25, 35 and 50 minutes; in an emulator, which cannot restart them, a file
+`only-run.txt` in their folder holding a run's number runs that one alone.
 `tools/3ds/leakcontrol` builds `probe-11-control.3dsx`, a small plain-libctru program
 (nothing of the port's) that makes the same start-up check, for comparison:
 
@@ -540,8 +574,10 @@ summary log beside it (`exitloop.log`, `fps-effects.log`, `leakladder.log`).
 - **HOME and sleep.** SDL's 3DS video driver sends no background or foreground events, so
   an APT hook stops the game clock while the HOME Menu is open or the console sleeps, and
   restarts the audio on return.
-- **Sound.** SDL's 3DS audio (ndsp) with the port's own mixer; SDL runs its audio thread
-  on core 1 with a 30% time limit.
+- **Sound.** SDL's 3DS audio (ndsp) with the port's own mixer. SDL asks for its audio
+  thread on core 1 with a 30% time limit; the game makes it on core 2 of a New 3DS
+  instead, which is the game's alone (on core 1 if core 2 is refused; `TSSM_AUDIO_CORE=1`
+  keeps SDL's choice). The log's first audio line names the mixer's core.
 - **Closing.** Every `exit()` goes through one quit path (`-Wl,--wrap=exit`) that stops,
   one logged step at a time, everything that runs beside the main thread (the audio
   thread and ndsp, the log server, citro3d after a wait for the GPU, SDL, the sockets, the
@@ -563,6 +599,7 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
 | `c3draster.cpp` | textures: the Xbox textures decoded, packed and tiled; movie frames |
 | `c3drtt.cpp` | render to texture (the shadows, the glow), and the start-up self-test |
 | `c3dpipe.cpp`, `c3dskin.cpp` | the object pipelines (default, UV transform, MatFX, skin) and skinning |
+| `c3dstereo.cpp` | stereoscopic 3D: the slider, the eye shift (`rw/stereomath.h`), the point the eyes meet at, the speed guard (the right eye itself is sent in `c3dsubmit.cpp`) |
 | `c3doverlay.cpp` | the settings menu on the bottom screen (Dear ImGui) |
 | `c3dab.cpp`, `c3dbench.cpp` | the measuring switches and the micro-benchmark (*Test settings*) |
 | `shaders/` | the vertex shaders (picasso) |
@@ -584,23 +621,53 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   an emulator), and picasso fails silently above 8 programs in one binary (there are 7).
   A frame that is never presented (while a level change is pending) is split into pieces
   sent to the GPU before the 2 MB command buffer fills.
+- **Stereoscopic 3D.** The right eye is not recorded a second time: at the present, once
+  the left eye's picture has gone to its framebuffer, the frame's command lists are sent
+  to the GPU again with the other eye's shift (one uniform the vertex shaders add in clip
+  space), into the same colour and depth buffers. So the CPU pays little for it and no
+  second set of buffers is needed (a 3D frame that does not clear its colour keeps a 375
+  KB copy of its starting picture for the right eye, in VRAM when there is room), while
+  the GPU's work about doubles; the right eye leaves out the shadow texture's pass, which
+  both eyes share. Only the game's main camera in play is shifted; the HUD, text, menus,
+  movies and camera textures are the same in both eyes. A frame that cannot be sent again
+  (a hard split or a read-back inside it, or no room left to send it again) is shown as
+  one picture, and the log counts them. On the Windows build (OpenGL), `TSSM_TEST_EYE=L`
+  or `R` with `TSSM_C3D_STEREO=force:<depth>:<distance>` draws one eye with the same
+  shift, as a reference picture (`tools/librw/gl3_testeye.patch` adds the hook).
+- **Speed.** Frame pipelining: when the GPU is still drawing the frame before, the next
+  one is recorded into a second command buffer and frame ring, and its GPU work is queued
+  as soon as the frame before is done, so a frame takes about the longer of the CPU's and
+  the GPU's time instead of nearly their sum. Per-draw caches skip lighting and
+  render-state work that did not change, and a model whose vertices change (face morphs,
+  particles) has them rewritten in place instead of being made again. The skinned models'
+  vertex shader takes a shorter path (the other three bones are skipped where a vertex has
+  one). The sound mixer's loops work on a stretch of samples at a time, with the same
+  output bit for bit. *Test settings* above has the switches that leave each out. In the
+  code's comments and the logs, L2, L3 and L4 name three of these steps (flushing only
+  what a frame wrote for the GPU, off by default and switched on only for measuring; the
+  per-draw caches; frame pipelining), and speed2 and speed3 are the two rounds of this
+  work that probes 15 and 16 measure (speed3: the right eye's shadow pass left out, the
+  shorter skinning path, the starting picture's copy in VRAM).
 - **Not drawn on the 3DS:** the PC's extras (MSAA, per-pixel lighting, shadow maps, toon
   shading, outlines, the Xbox glow and distortion), point and spot lights, and Im3D's
   lighting. Each is named once in the log.
 
 ## Known gaps
 
-- **Barely played on a console.** The game has run on a New 3DS XL (BB02 at 28-29 fps
-  against the 30 fps cap before the drawing effects were added; each effect has since run
-  there on its own) and much more in the Azahar emulator. All the effects together, the
-  other levels, the settings menu, the crash handler and the error screen are still to be
-  checked on a console.
-- **The quit.** On a console, every quit of the game can leave its process held by the
-  system until the console restarts; after three or four in one power-on the console can
-  stop with a kernel panic at the next start. The game reports held programs at start and
-  asks for a restart when there are two or more. A likely cause has since been removed (a
-  system call the quit's own thread listing made kept the process referenced); whether that
-  ends it is still to be checked on a console, and the console probes 9-11 stay for that.
+- **Played on a console mostly in scripted runs.** On a New 3DS XL the console probes
+  14-16 (*Developer tools*) have played BB01, BB02, GG02, TR01 and JK01, the opening
+  fly-through, the title screen and the pause menu with every effect on: 27 to 30 fps in 2D
+  (the fly-through about 25). With 3D forced on at depth 50, BB02's busy street keeps about
+  29 fps, GG02 about 21 and BB01 about 23; with the speed guard, as in play, every place
+  measured stayed at 27 to 30 fps, the guard playing stretches in 2D (most of the time in
+  GG02 and BB01). Playing by hand, the settings menu, the crash handler and the error
+  screen are still to be checked on a console.
+- **The quit.** Earlier builds' quits could leave the game's process held by the system
+  until the console restarted, and after three or four in one power-on the console could
+  stop with a kernel panic at the next start. Since the quit was reworked (*The platform
+  layer*, Closing), the probes 14-16 have made 39 launches on a console, each run quitting
+  and starting the next, and none started with a program held. The game still reports
+  held programs at start and asks for a restart when there are two or more.
 - **The animated banner** (made from your own game files, above) has not been tried on a
   console in its default form; `banner_flat.bnr` is the fallback.
 - **The icon made from your own game files** has been checked in the built `.3dsx` and

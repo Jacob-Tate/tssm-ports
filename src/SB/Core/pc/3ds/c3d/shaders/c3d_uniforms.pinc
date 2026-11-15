@@ -16,6 +16,18 @@
 .fvec u_scrMat[2]     ; c19-c20 Im2D: rows . (x, y, 1, 1), pixels -> clip x, y (tilt included)
 .fvec u_bones[60]     ; c21-c80 skin palette, 20 bones x 3 rows (x, y, z of the 4x3, transposed)
 .fvec u_fog           ; c81     fog: x scale, y bias (camera z -> the ramp's u), z Im2D's w factor
+; Stereo (xform's eye). picasso stops without a word (exit 127) past about 96
+; uniform entries over all programs, 14 a program each with these as .fvec,
+; so the two vectors are aliases of the free c82 and c83 and only b_eye is
+; declared (picasso also stops at a comment after .bool, hence up here):
+;   u_eyeCam  c82  x the convergence C, y w_min (the near cap's w)
+;   u_eyeSide c83  x = -sigma k / 2, this eye's shift (written raw, never in a list)
+;   b_eye     b0   this draw is shifted per eye (the main camera in a 3D frame)
+;   b_trim    b1   the skinned programs' shorter path (skintrim=on, speed3)
+.alias u_eyeCam  c82
+.alias u_eyeSide c83
+.bool b_eye
+.bool b_trim
 ; INV255 is a hair over 1/255: picasso keeps 16 bits of mantissa, and 1/255
 ; itself becomes 257/65536 * 2^-8, so 255 * k fell short of 1 and an opaque byte
 ; could reach the fragment stage as 254 (an alpha test against 255 failing on a

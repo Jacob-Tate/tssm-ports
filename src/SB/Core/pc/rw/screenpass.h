@@ -75,6 +75,11 @@ enum
 };
 bool iScreenPassOn(S32 pass);
 
+// Whether a target drawn over whole is cleared first (iGpuOptOn's
+// IGPUOPT_INVALIDATE: a tiled GPU then starts it from nothing instead of
+// reading back what it held). The 3DS's backend says (its glowclear word).
+bool iScreenPassInvalidates();
+
 // Copy the picture so far into *screen, which is made (or remade, when the
 // render size has changed) as a camera texture of the picture's size. The
 // frame's camera must not be in an update: the copy reads the finished

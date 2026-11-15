@@ -160,6 +160,17 @@ const iConfigSetting kConfigSettings[] = {
       "The ripple of the picture around shockwaves, explosions and heat, as on the\n"
       "; GameCube. Off: none.",
       ICONFIG_BOOL, NULL, kNone, kNone },
+#ifdef __3DS__
+    { "video", "stereo", "auto",
+      "Stereoscopic 3D on the top screen: auto (the 3D slider turns it on and sets\n"
+      "; how deep) or off (always 2D). The HUD, text and movies stay at the\n"
+      "; screen. If a busy place cannot keep its frame rate in 3D, it goes 2D for\n"
+      "; a while by itself and comes back.",
+      ICONFIG_ENUM, "auto|off", kNone, kNone },
+    { "video", "stereo_depth", "50",
+      "How deep the 3D is at the slider's top, 0 to 100.",
+      ICONFIG_INT, NULL, 0.0f, 100.0f },
+#endif
     { "input", "controller", "auto",
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
       ICONFIG_INT, "auto", 1.0f, 4.0f },

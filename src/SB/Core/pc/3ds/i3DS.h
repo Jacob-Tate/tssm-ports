@@ -115,6 +115,14 @@ const char* i3DSCrashLogPath();
 const char* i3DSLogPath();
 void i3DSLogDrain(unsigned ms);
 
+// The audio thread's mixing since the last call (iHost3DS.cpp, from
+// iSndHostMixStatsTake): callbacks, their total and longest time. FALSE, all
+// zero, when no audio device runs (TSSM_AUDIO=0). For probe 14's segments.
+int i3DSAudioMixTake(uint32_t* calls, uint64_t* totalNs, uint64_t* maxNs);
+// The core the thread asked for on core 1 (SDL's audio) was made on: 2 when
+// threadCreate's wrapper moved it there, else 1.
+int i3DSAudioCore();
+
 // ---------------------------------------------------------------- the spike
 // The libctru half of the speed test (iSpike.h; i3DSSpike.cpp). Text comes
 // back in the caller's buffer, a line per finding, ending in a newline.

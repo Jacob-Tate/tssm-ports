@@ -1,0 +1,23 @@
+diff --git a/src/gl/gl3device.cpp b/src/gl/gl3device.cpp
+--- a/src/gl/gl3device.cpp
++++ b/src/gl/gl3device.cpp
+@@ -3001,6 +3001,10 @@
+ 	}
+ }
+ 
++// TSSM port (gl3_testeye.patch): the port's hook into a camera's projection,
++// for TSSM_TEST_EYE (src/SB/Core/pc/rw/engine_start.cpp); nil unless set.
++void (*testEyeHook)(Camera *cam, float32 *proj) = nil;
++
+ static void
+ beginUpdate(Camera *cam)
+ {
+@@ -3061,6 +3065,8 @@
+ 		proj[14] = -(cam->farPlane+cam->nearPlane)*invz;
+ 		proj[15] = 1.0f;
+ 	}
++	if(testEyeHook)
++		testEyeHook(cam, proj);
+ 	memcpy(&cam->devProj, &proj, sizeof(RawMatrix));
+ 	setProjectionMatrix(proj);
+ 

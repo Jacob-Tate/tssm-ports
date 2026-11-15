@@ -6,6 +6,9 @@
 #include "iSndReverb.h"
 
 #include <SDL3/SDL.h>
+#ifdef __3DS__
+#include <3ds.h>
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -184,6 +187,33 @@ static const U64 kStallNs = 1000000000ULL;
 // (iSndHostMixStatsTake). Written by the callback under sLock.
 static iSndHostMixStats sMixStats;
 
+// TSSM_AUDIO_PROF=1 (a measurement): the mixer's parts, a line every 2 s from
+// the audio thread. Nanoseconds and counts since the last line.
+static int sProfOn = -1;
+static U64 sProfVoiceNs, sProfReverbNs, sProfRestNs, sProfLockWaitNs, sProfLast;
+static U64 sProfVoiceFrames, sProfFeedFrames, sProfBlocks, sProfVoicesSum, sProfSendBlocks;
+static U32 sProfVoicesMax;
+static U64 sProfGameWaitNs, sProfGameLocks, sProfGameWaitMaxNs;
+
+// The game thread's lock, its wait timed under TSSM_AUDIO_PROF.
+static void iLockGame()
+{
+    if (sProfOn <= 0)
+    {
+        SDL_LockMutex(sLock);
+        return;
+    }
+    const U64 t0 = iHostMonotonicNs();
+    SDL_LockMutex(sLock);
+    const U64 w = iHostMonotonicNs() - t0;
+    sProfGameWaitNs += w;
+    sProfGameLocks++;
+    if (w > sProfGameWaitMaxNs)
+    {
+        sProfGameWaitMaxNs = w;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Mixing
 
@@ -329,7 +359,8 @@ static void iStepGroupGains(U32 frames, float* from, float* to)
 
 // TSSM: one fed voice's block. It reads up to the last frame fed and then
 // holds, rather than wrapping or ending, unless the feed has been closed.
-static void iMixFeedLocked(hvoice* v, float* out, U32 frames, double step, float from, float to)
+// (The mixer as it was: TSSM_AUDIO_CHECK's reference, below.)
+static void iMixFeedRef(hvoice* v, float* out, U32 frames, double step, float from, float to)
 {
     float gL = v->curL * from;
     float gR = v->curR * from;
@@ -361,60 +392,42 @@ static void iMixFeedLocked(hvoice* v, float* out, U32 frames, double step, float
 
     v->curL = v->volL;
     v->curR = v->volR;
-
-    iSndMeterFrames(iSNDMETER_MIX_FEEDS, n);
 }
 
-// Mix `frames` output frames into sMixBuffer as interleaved stereo. Caller
-// holds the lock.
-static void iMixLocked(U32 frames)
+// The voices' block into `mix` and `send`, as the mixer did it before the
+// loops below: kept as TSSM_AUDIO_CHECK's reference, which runs it on a copy
+// of the voices and compares.
+static void iMixVoicesRef(hvoice* voices, float* mix, float* send, U32 frames,
+                          const float* groupFrom, const float* groupTo)
 {
-    memset(sMixBuffer, 0, sizeof(float) * 2 * frames);
-
-    float groupFrom[ISNDHOST_GROUP_COUNT];
-    float groupTo[ISNDHOST_GROUP_COUNT];
-    iStepGroupGains(frames, groupFrom, groupTo);
-
-    bool sendUsed = false;
-    if (sSendBuffer != NULL)
-    {
-        memset(sSendBuffer, 0, sizeof(float) * 2 * frames);
-    }
-
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
     {
-        hvoice* v = &sVoices[i];
+        hvoice* v = &voices[i];
 
         if (!v->acquired || !v->playing || v->paused)
         {
             continue;
         }
 
-        // TSSM: the bus this voice is mixed into, and its group's level over
-        // this block. The send bus takes its level as a whole, further down.
-        float* out = sMixBuffer;
+        float* out = mix;
         float from = groupFrom[v->group];
         float to = groupTo[v->group];
-        if (v->send && sSendBuffer != NULL)
+        if (v->send && send != NULL)
         {
-            out = sSendBuffer;
-            sendUsed = true;
+            out = send;
             from = 1.0f;
             to = 1.0f;
         }
 
-        // A voice with no data still has to advance, so that it finishes when
-        // its sound would have. Skipping the mix but not the clock is the
-        // difference between a silent sound and a stuck one.
         double step = ((double)v->rate / (double)sOutRate) * (double)v->pitch;
-        if (step <= 0.0)
+        if (!(step > 0.0) || !(step < 1e6))
         {
             step = 0.0;
         }
 
         if (v->feed)
         {
-            iMixFeedLocked(v, out, frames, step, from, to);
+            iMixFeedRef(v, out, frames, step, from, to);
             continue;
         }
 
@@ -450,21 +463,10 @@ static void iMixLocked(U32 frames)
             gR += dR;
         }
 
-        iSndMeterFrames(iSNDMETER_MIX_SOUNDS, n);
-
-        // Only claim to have reached the target gain if the whole block ran;
-        // a voice that ended early keeps where its ramp got to, which matters
-        // if the same slot is restarted before the next block.
         if (n == frames)
         {
             v->curL = v->volL;
             v->curR = v->volR;
-
-            // The loop tests for the end BEFORE reading, which it has to. A
-            // voice whose last frame is the block's last frame would therefore
-            // stay "playing" until the next block noticed -- a whole endpoint
-            // period of slack in every timing the game derives from a sound.
-            // Settle it here instead.
             if (!iWrap(v))
             {
                 v->playing = false;
@@ -476,6 +478,367 @@ static void iMixLocked(U32 frames)
             v->curR = gR;
         }
     }
+}
+
+// TSSM: the loops below give the same samples as iSampleAt and iWrap, to the
+// bit: the same double position stepped the same way, the same float sums in
+// the same order. What they leave out is the work around them that was done
+// per frame per channel: the end and loop checks folded into one compare
+// against the block's end, the position turned into a frame index once per
+// frame instead of twice, the format's branches taken once per block, and a
+// fed voice's 64-bit read position (a library call each way on the 3DS)
+// counted from a whole frame taken once per block.
+
+// 16-bit frames with `CH` channels (1 or 2), from `n` while the position stays
+// below `endD`. Returns where it stopped.
+template <U32 CH>
+static inline U32 iRun16(const S16* p, U32 last, double& pos, double endD, double step, float* out,
+                         U32 n, U32 frames, float& gL, float& gR, float dL, float dR)
+{
+    const float k = 1.0f / 32768.0f;
+    for (; n < frames && pos < endD; n++)
+    {
+        const U32 i0 = (U32)pos;
+        const U32 i1 = i0 < last ? i0 + 1 : i0;
+        const float frac = (float)(pos - (double)i0);
+        const float a0 = (float)p[i0 * CH] * k;
+        const float b0 = (float)p[i1 * CH] * k;
+        const float s0 = a0 + (b0 - a0) * frac;
+        float s1 = s0;
+        if (CH == 2)
+        {
+            const float a1 = (float)p[i0 * CH + 1] * k;
+            const float b1 = (float)p[i1 * CH + 1] * k;
+            s1 = a1 + (b1 - a1) * frac;
+        }
+        out[n * 2 + 0] += s0 * gL;
+        out[n * 2 + 1] += s1 * gR;
+        pos += step;
+        gL += dL;
+        gR += dR;
+    }
+    return n;
+}
+
+// Any other format, through iSampleAt.
+static inline U32 iRunAny(hvoice* v, double& pos, double endD, double step, float* out, U32 n,
+                          U32 frames, float& gL, float& gR, float dL, float dR)
+{
+    for (; n < frames && pos < endD; n++)
+    {
+        out[n * 2 + 0] += iSampleAt(v, pos, 0) * gL;
+        out[n * 2 + 1] += iSampleAt(v, pos, 1) * gR;
+        pos += step;
+        gL += dL;
+        gR += dR;
+    }
+    return n;
+}
+
+// A sound voice's block: TRUE while it is still playing.
+static bool iMixSound(hvoice* v, float* out, U32 frames, double step, float from, float to)
+{
+    float gL = v->curL * from;
+    float gR = v->curR * from;
+    float dL = (v->volL * to - gL) / (float)frames;
+    float dR = (v->volR * to - gR) / (float)frames;
+
+    // iWrap's end, which nothing changes during the block (the lock is held).
+    U32 end = v->frames;
+    if (v->looping && v->loop_end != 0 && v->loop_end <= v->frames)
+    {
+        end = v->loop_end;
+    }
+    const double endD = (double)end;
+    const U32 kind = v->bits == 16 && v->channels == 1 ? 1 : v->bits == 16 && v->channels == 2 ? 2 : 0;
+    const S16* p16 = (const S16*)v->data;
+    const U32 last = v->frames - 1; // i1 = i0 + 1 below the last frame
+
+    double pos = v->pos;
+    U32 n = 0;
+    bool ended = false;
+    while (n < frames)
+    {
+        if (!(pos < endD))
+        {
+            v->pos = pos;
+            // A position iWrap could not bring below the end (only NaN can do
+            // that) ends the voice rather than spinning here under the lock.
+            if (!iWrap(v) || !(v->pos < endD))
+            {
+                ended = true;
+                break;
+            }
+            pos = v->pos;
+        }
+        if (kind == 1)
+        {
+            n = iRun16<1>(p16, last, pos, endD, step, out, n, frames, gL, gR, dL, dR);
+        }
+        else if (kind == 2)
+        {
+            n = iRun16<2>(p16, last, pos, endD, step, out, n, frames, gL, gR, dL, dR);
+        }
+        else
+        {
+            n = iRunAny(v, pos, endD, step, out, n, frames, gL, gR, dL, dR);
+        }
+    }
+    v->pos = pos;
+
+    iSndMeterFrames(iSNDMETER_MIX_SOUNDS, n);
+
+    // Only claim to have reached the target gain if the whole block ran;
+    // a voice that ended early keeps where its ramp got to, which matters
+    // if the same slot is restarted before the next block.
+    if (!ended)
+    {
+        v->curL = v->volL;
+        v->curR = v->volR;
+
+        // The loop tests for the end BEFORE reading, which it has to. A
+        // voice whose last frame is the block's last frame would therefore
+        // stay "playing" until the next block noticed -- a whole endpoint
+        // period of slack in every timing the game derives from a sound.
+        // Settle it here instead.
+        return iWrap(v);
+    }
+    v->curL = gL;
+    v->curR = gR;
+    return false;
+}
+
+// TSSM: one fed voice's block. It reads up to the last frame fed and then
+// holds, rather than wrapping or ending, unless the feed has been closed.
+static void iMixFeedLocked(hvoice* v, float* out, U32 frames, double step, float from, float to)
+{
+    float gL = v->curL * from;
+    float gR = v->curR * from;
+    float dL = (v->volL * to - gL) / (float)frames;
+    float dR = (v->volR * to - gR) / (float)frames;
+
+    const double writtenD = (double)v->written;
+    double pos = v->pos;
+    U32 n = 0;
+    if (v->ring == NULL)
+    {
+        // iSampleAt's silence, with the clock still running.
+        for (; n < frames && !(pos + 1.0 > writtenD); n++)
+        {
+            out[n * 2 + 0] += 0.0f * gL;
+            out[n * 2 + 1] += 0.0f * gR;
+            pos += step;
+            gL += dL;
+            gR += dR;
+        }
+    }
+    else
+    {
+        // Frame i0 = base + (U32)(pos - baseD): pos - baseD is exact (both
+        // are whole multiples of pos's unit), and so is the fraction.
+        const U64 base = (U64)pos;
+        const double baseD = (double)base;
+        const U64 lastFed = v->written - 1;
+        const U32 mask = v->ring_cap - 1;
+        const U32 ch = v->channels;
+        const U32 c1 = ch > 1 ? 1 : 0;
+        const S16* ring = v->ring;
+        const float k = 1.0f / 32768.0f;
+        for (; n < frames && !(pos + 1.0 > writtenD); n++)
+        {
+            const double l = pos - baseD;
+            const U32 li = (U32)l;
+            const U64 i0 = base + li;
+            const U64 i1 = i0 < lastFed ? i0 + 1 : i0;
+            const float frac = (float)(l - (double)li);
+            const S16* f0 = ring + (size_t)(i0 & mask) * ch;
+            const S16* f1 = ring + (size_t)(i1 & mask) * ch;
+            const float a0 = (float)f0[0] * k;
+            const float b0 = (float)f1[0] * k;
+            const float a1 = (float)f0[c1] * k;
+            const float b1 = (float)f1[c1] * k;
+            out[n * 2 + 0] += (a0 + (b0 - a0) * frac) * gL;
+            out[n * 2 + 1] += (a1 + (b1 - a1) * frac) * gR;
+            pos += step;
+            gL += dL;
+            gR += dR;
+        }
+    }
+    if (n < frames && v->feed_ended)
+    {
+        // Dry and closed: finished. (Dry and open: the position stays where
+        // it is, so a late frame is played late rather than skipped.)
+        pos = writtenD;
+        v->playing = false;
+    }
+    v->pos = pos;
+
+    v->curL = v->volL;
+    v->curR = v->volR;
+
+    iSndMeterFrames(iSNDMETER_MIX_FEEDS, n);
+}
+
+// TSSM_AUDIO_CHECK=1 (a check): every block mixed again by iMixVoicesRef from
+// a copy of the voices taken before it, and the two compared to the bit, the
+// buses and where each voice got to. A line every 2 s from the audio thread.
+static int sCheckOn = -1;
+static hvoice sCheckVoices[ISNDHOST_MAX_VOICES];
+static float* sCheckMix;
+static float* sCheckSend;
+static U32 sCheckFrames;
+static U64 sCheckBlocks, sCheckBad, sCheckVoiceBad, sCheckSamples, sCheckLast;
+
+static bool iCheckBegin(U32 frames)
+{
+    if (sCheckOn < 0)
+    {
+        const char* e = getenv("TSSM_AUDIO_CHECK");
+        sCheckOn = e != NULL && e[0] == '1' ? 1 : 0;
+    }
+    if (sCheckOn <= 0)
+    {
+        return false;
+    }
+    if (frames > sCheckFrames)
+    {
+        free(sCheckMix);
+        free(sCheckSend);
+        sCheckMix = (float*)malloc(sizeof(float) * 2 * frames);
+        sCheckSend = (float*)malloc(sizeof(float) * 2 * frames);
+        sCheckFrames = sCheckMix != NULL && sCheckSend != NULL ? frames : 0;
+        if (sCheckFrames == 0)
+        {
+            return false;
+        }
+    }
+    memcpy(sCheckVoices, sVoices, sizeof(sVoices));
+    return true;
+}
+
+static void iCheckEnd(U32 frames, const float* groupFrom, const float* groupTo)
+{
+    memset(sCheckMix, 0, sizeof(float) * 2 * frames);
+    memset(sCheckSend, 0, sizeof(float) * 2 * frames);
+    iMixVoicesRef(sCheckVoices, sCheckMix, sSendBuffer != NULL ? sCheckSend : NULL, frames,
+                  groupFrom, groupTo);
+    U64 bad = 0;
+    for (U32 i = 0; i < frames * 2; i++)
+    {
+        bad += memcmp(&sCheckMix[i], &sMixBuffer[i], sizeof(float)) != 0;
+        if (sSendBuffer != NULL)
+        {
+            bad += memcmp(&sCheckSend[i], &sSendBuffer[i], sizeof(float)) != 0;
+        }
+    }
+    U64 vbad = 0;
+    for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
+    {
+        const hvoice& a = sCheckVoices[i];
+        const hvoice& b = sVoices[i];
+        vbad += memcmp(&a.pos, &b.pos, sizeof(double)) != 0 || a.playing != b.playing ||
+                memcmp(&a.curL, &b.curL, sizeof(float)) != 0 ||
+                memcmp(&a.curR, &b.curR, sizeof(float)) != 0;
+    }
+    sCheckBlocks++;
+    sCheckSamples += frames * 2;
+    sCheckBad += bad;
+    sCheckVoiceBad += vbad;
+    const U64 now = iHostMonotonicNs();
+    if (sCheckLast == 0)
+    {
+        sCheckLast = now;
+    }
+    else if (now - sCheckLast >= 2000000000ULL)
+    {
+        printf("tssm: audio check: %llu blocks, %llu samples: %llu samples differ from the "
+               "reference mixer, %llu voice ends differ\n",
+               (unsigned long long)sCheckBlocks, (unsigned long long)sCheckSamples,
+               (unsigned long long)sCheckBad, (unsigned long long)sCheckVoiceBad);
+        fflush(stdout);
+        sCheckLast = now;
+    }
+}
+
+// Mix `frames` output frames into sMixBuffer as interleaved stereo. Caller
+// holds the lock.
+static void iMixLocked(U32 frames)
+{
+    memset(sMixBuffer, 0, sizeof(float) * 2 * frames);
+
+    float groupFrom[ISNDHOST_GROUP_COUNT];
+    float groupTo[ISNDHOST_GROUP_COUNT];
+    iStepGroupGains(frames, groupFrom, groupTo);
+
+    bool sendUsed = false;
+    if (sSendBuffer != NULL)
+    {
+        memset(sSendBuffer, 0, sizeof(float) * 2 * frames);
+    }
+
+    const bool check = iCheckBegin(frames);
+    const U64 profT0 = sProfOn > 0 ? iHostMonotonicNs() : 0;
+    U32 profVoices = 0;
+    for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
+    {
+        hvoice* v = &sVoices[i];
+
+        if (!v->acquired || !v->playing || v->paused)
+        {
+            continue;
+        }
+        profVoices++;
+        if (sProfOn > 0)
+        {
+            if (v->feed)
+                sProfFeedFrames += frames;
+            else if (v->data != NULL)
+                sProfVoiceFrames += frames;
+        }
+
+        // TSSM: the bus this voice is mixed into, and its group's level over
+        // this block. The send bus takes its level as a whole, further down.
+        float* out = sMixBuffer;
+        float from = groupFrom[v->group];
+        float to = groupTo[v->group];
+        if (v->send && sSendBuffer != NULL)
+        {
+            out = sSendBuffer;
+            sendUsed = true;
+            from = 1.0f;
+            to = 1.0f;
+        }
+
+        // A voice with no data still has to advance, so that it finishes when
+        // its sound would have. Skipping the mix but not the clock is the
+        // difference between a silent sound and a stuck one.
+        double step = ((double)v->rate / (double)sOutRate) * (double)v->pitch;
+        if (!(step > 0.0) || !(step < 1e6))
+        {
+            step = 0.0;
+        }
+
+        if (v->feed)
+        {
+            iMixFeedLocked(v, out, frames, step, from, to);
+            continue;
+        }
+
+        if (v->data == NULL)
+        {
+            v->pos += step * (double)frames;
+            if (!iWrap(v))
+            {
+                v->playing = false;
+            }
+            continue;
+        }
+
+        if (!iMixSound(v, out, frames, step, from, to))
+        {
+            v->playing = false;
+        }
+    }
 
     // The environmental reverb. Here rather than in the render thread so that
     // it is inside the same lock the parameters are set under, and so that the
@@ -484,6 +847,19 @@ static void iMixLocked(U32 frames)
     // TSSM-ADAPTED: over the send bus only, which holds the voices the game
     // marked for it, and then the bus (dry and wet) joins the mix. It runs
     // even when no voice sent anything this block, so a tail can ring out.
+    const U64 profT1 = sProfOn > 0 ? iHostMonotonicNs() : 0;
+    if (sProfOn > 0)
+    {
+        sProfVoiceNs += profT1 - profT0;
+        sProfBlocks++;
+        sProfVoicesSum += profVoices;
+        sProfVoicesMax = profVoices > sProfVoicesMax ? profVoices : sProfVoicesMax;
+        sProfSendBlocks += sendUsed ? 1 : 0;
+    }
+    if (check)
+    {
+        iCheckEnd(frames, groupFrom, groupTo); // before the reverb changes the send bus
+    }
     if (sSendBuffer != NULL)
     {
         iSndReverbProcess(sSendBuffer, frames);
@@ -498,6 +874,10 @@ static void iMixLocked(U32 frames)
                 g += d;
             }
         }
+    }
+    if (sProfOn > 0)
+    {
+        sProfReverbNs += iHostMonotonicNs() - profT1;
     }
 }
 
@@ -534,7 +914,17 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
     (void)userdata;
     (void)total;
 
-    SDL_AddAtomicInt(&sCallbacks, 1);
+    const int calls = SDL_AddAtomicInt(&sCallbacks, 1);
+#ifdef __3DS__
+    if (calls == 0)
+    {
+        // Which core SDL's audio thread ended up on (i3DS.cpp's threadCreate).
+        printf("tssm: audio: the mixer runs on core %d\n", (int)svcGetProcessorID());
+        fflush(stdout);
+    }
+#else
+    (void)calls;
+#endif
 
     const U64 startNs = iHostMonotonicNs();
     U64 produced = 0;
@@ -548,7 +938,17 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
             frames = sMixBufferFrames;
         }
 
+        if (sProfOn < 0)
+        {
+            const char* e = getenv("TSSM_AUDIO_PROF");
+            sProfOn = e != NULL && e[0] == '1' ? 1 : 0;
+        }
+        const U64 lw0 = sProfOn > 0 ? iHostMonotonicNs() : 0;
         SDL_LockMutex(sLock);
+        if (sProfOn > 0)
+        {
+            sProfLockWaitNs += iHostMonotonicNs() - lw0;
+        }
         iMixLocked(frames);
         SDL_UnlockMutex(sLock);
 
@@ -590,6 +990,44 @@ static void SDLCALL iStreamCallback(void* userdata, SDL_AudioStream* stream, int
     }
 
     const U64 tookNs = iHostMonotonicNs() - startNs;
+    if (sProfOn > 0)
+    {
+        const U64 now = iHostMonotonicNs();
+        sProfRestNs += tookNs;
+        if (sProfLast == 0)
+        {
+            sProfLast = now;
+        }
+        else if (now - sProfLast >= 2000000000ULL)
+        {
+            const double k = 1000.0 / (double)(now - sProfLast); // ns -> ms a second
+            // The game thread adds to these under the lock: copy and clear them there.
+            SDL_LockMutex(sLock);
+            const U64 gameWaitNs = sProfGameWaitNs;
+            const U64 gameLocks = sProfGameLocks;
+            const U64 gameWaitMaxNs = sProfGameWaitMaxNs;
+            sProfGameWaitNs = sProfGameLocks = sProfGameWaitMaxNs = 0;
+            SDL_UnlockMutex(sLock);
+            printf("tssm: audio prof: %.2f s: callbacks' wall %.1f ms a second (lock wait %.1f, "
+                   "voices %.1f, reverb %.1f); %llu blocks, voices a block %.1f (peak %u), "
+                   "send used in %llu; voice frames %llu a second (fed %llu); the game "
+                   "thread's lock: %llu a second, waited %.2f ms a second, longest %.2f ms\n",
+                   (double)(now - sProfLast) / 1e9, sProfRestNs * k,
+                   sProfLockWaitNs * k, sProfVoiceNs * k, sProfReverbNs * k,
+                   (unsigned long long)sProfBlocks,
+                   sProfBlocks ? (double)sProfVoicesSum / (double)sProfBlocks : 0.0,
+                   (unsigned)sProfVoicesMax, (unsigned long long)sProfSendBlocks,
+                   (unsigned long long)(sProfVoiceFrames * 1e9 / (double)(now - sProfLast)),
+                   (unsigned long long)(sProfFeedFrames * 1e9 / (double)(now - sProfLast)),
+                   (unsigned long long)(gameLocks * 1e9 / (double)(now - sProfLast)),
+                   gameWaitNs * k, gameWaitMaxNs / 1e6);
+            fflush(stdout);
+            sProfVoiceNs = sProfReverbNs = sProfRestNs = sProfLockWaitNs = 0;
+            sProfVoiceFrames = sProfFeedFrames = sProfBlocks = sProfVoicesSum = sProfSendBlocks = 0;
+            sProfVoicesMax = 0;
+            sProfLast = now;
+        }
+    }
     SDL_LockMutex(sLock);
     sMixStats.calls++;
     sMixStats.totalNs += tookNs;
@@ -729,7 +1167,7 @@ static void iResetSilentClock()
 {
     U64 now = iHostMonotonicNs();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
     {
         sVoices[i].silent_ns = now;
@@ -797,7 +1235,7 @@ void iSndHostInit()
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
     memset(sVoices, 0, sizeof(sVoices));
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
     {
@@ -853,7 +1291,7 @@ void iSndHostExit()
 
     iTeardownDevice();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
     {
         free(sVoices[i].ring);
@@ -866,7 +1304,7 @@ S32 iSndHostAcquire(U32 priority)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     S32 got = -1;
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
@@ -895,7 +1333,7 @@ void iSndHostRelease(S32 voice)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     S16* ring = NULL;
     if (iVoiceValid(voice))
@@ -919,7 +1357,7 @@ void iSndHostStart(S32 voice, const iSndHostSample* sample)
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice))
     {
@@ -974,7 +1412,7 @@ void iSndHostStop(S32 voice)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     S16* ring = NULL;
     if (iVoiceValid(voice))
@@ -1006,7 +1444,7 @@ void iSndHostPause(S32 voice, bool paused)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice) && sVoices[voice].playing)
     {
@@ -1034,7 +1472,7 @@ void iSndHostSetVol(S32 voice, F32 left, F32 right)
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice))
     {
@@ -1047,14 +1485,16 @@ void iSndHostSetVol(S32 voice, F32 left, F32 right)
 
 void iSndHostSetPitch(S32 voice, F32 pitch)
 {
-    if (pitch <= 0.0f)
+    // NaN and infinity are refused too: either would make every position NaN
+    // and stall a looping voice's mix for good.
+    if (!(pitch > 0.0f) || !(pitch < 1e6f))
     {
         return;
     }
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice))
     {
@@ -1068,7 +1508,7 @@ bool iSndHostIsPlaying(S32 voice)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     bool playing = iVoiceValid(voice) && sVoices[voice].playing;
 
@@ -1117,7 +1557,7 @@ void iSndHostUpdate()
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     for (S32 i = 0; i < ISNDHOST_MAX_VOICES; i++)
     {
@@ -1174,7 +1614,7 @@ void iSndHostSetReverb(const iSndHostReverb* params)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (params != NULL)
     {
@@ -1198,7 +1638,7 @@ void iSndHostSetSend(S32 voice, bool send)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice))
     {
@@ -1212,7 +1652,7 @@ void iSndHostSetGroup(S32 voice, iSndHostGroup group)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice))
     {
@@ -1237,7 +1677,7 @@ void iSndHostPauseGroup(const S32* voices, S32 count, bool paused)
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     for (S32 i = 0; i < count; i++)
     {
@@ -1275,7 +1715,7 @@ void iSndHostStartFeed(S32 voice, U32 channels, U32 sample_rate, U32 capacity, b
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     S16* old = NULL;
     if (iVoiceValid(voice))
@@ -1321,7 +1761,7 @@ U32 iSndHostFeed(S32 voice, const S16* frames, U32 count)
 
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     U32 taken = 0;
     if (iVoiceValid(voice) && sVoices[voice].feed && sVoices[voice].ring != NULL &&
@@ -1366,7 +1806,7 @@ U32 iSndHostFeedQueued(S32 voice)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     U32 queued = 0;
     if (iVoiceValid(voice) && sVoices[voice].feed)
@@ -1385,7 +1825,7 @@ void iSndHostFeedEnd(S32 voice)
 {
     iEnsureLock();
 
-    SDL_LockMutex(sLock);
+    iLockGame();
 
     if (iVoiceValid(voice) && sVoices[voice].feed)
     {
@@ -1432,7 +1872,7 @@ void iSndHostTestMix(U32 rate, float* out, U32 frames)
     U32 saved = sOutRate;
     sOutRate = rate;
 
-    SDL_LockMutex(sLock);
+    iLockGame();
     iMixLocked(frames);
     SDL_UnlockMutex(sLock);
 
@@ -1444,7 +1884,7 @@ void iSndHostTestMix(U32 rate, float* out, U32 frames)
 bool iSndHostMixStatsTake(iSndHostMixStats* out, bool reset)
 {
     iEnsureLock();
-    SDL_LockMutex(sLock);
+    iLockGame();
     *out = sMixStats;
     out->rate = sDeviceUp ? sOutRate : 0;
     if (reset)

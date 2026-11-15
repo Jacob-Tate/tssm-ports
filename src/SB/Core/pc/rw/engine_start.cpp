@@ -574,6 +574,72 @@ static RwBool OpenDeviceVulkan(void)
 #endif
 
 #ifdef RW_GL3
+#include "stereomath.h"
+
+namespace rw
+{
+    namespace gl3
+    {
+        // tools/librw/gl3_testeye.patch: called with each camera's projection.
+        extern void (*testEyeHook)(Camera* cam, float32* proj);
+    } // namespace gl3
+} // namespace rw
+
+namespace
+{
+    // TSSM_TEST_EYE=L|R with TSSM_C3D_STEREO=force:<depth>:<C>: the 3DS's eye
+    // shift on GL3's projection, so that each eye of a 3DS capture has a PC
+    // reference (docs/3DS.md, "Stereoscopic 3D"). The near cap is left out (the
+    // 3DS's TSSM_C3D_STEREO_NEARCAP=off): then the shader's shift and this are
+    // the same linear map. Every perspective camera drawing to the screen gets
+    // it; on the 3DS only the game's main one does.
+    float sEyeSigma;
+    float sEyeK;
+    float sEyeC;
+
+    void TestEyeHook(rw::Camera* cam, float* proj)
+    {
+        if (cam->projection != rw::Camera::PERSPECTIVE || cam->frameBuffer == NULL ||
+            cam->frameBuffer->type != rw::Raster::CAMERA)
+        {
+            return;
+        }
+        // Column-major: proj[8] is clip x's z (= w) term, proj[12] its constant,
+        // so clip x gains sigma k/2 (w - C).
+        proj[8] += sEyeSigma * 0.5f * sEyeK;
+        proj[12] -= sEyeSigma * 0.5f * sEyeK * sEyeC;
+    }
+
+    void InstallTestEye(void)
+    {
+        const char* eye = getenv("TSSM_TEST_EYE");
+        if (eye == NULL || eye[0] == '\0')
+        {
+            return;
+        }
+        stereomath::Setting st;
+        if ((eye[0] != 'L' && eye[0] != 'R') || eye[1] != '\0' ||
+            !stereomath::parse(getenv("TSSM_C3D_STEREO"), &st) ||
+            st.mode != stereomath::MODE_FORCE || !st.hasDepth || !st.hasC)
+        {
+            printf("tssm: test: TSSM_TEST_EYE wants L or R and TSSM_C3D_STEREO=force:<depth>:<C>; "
+                   "not used\n");
+            fflush(stdout);
+            return;
+        }
+        const stereomath::Terms t = stereomath::terms(1.0f, st.depth, st.C, false, 0.0f);
+        sEyeSigma = eye[0] == 'L' ? -1.0f : 1.0f;
+        sEyeK = t.k;
+        sEyeC = st.C;
+        rw::gl3::testEyeHook = TestEyeHook;
+        printf("tssm: test: TSSM_TEST_EYE=%c: the 3DS's %s eye on GL3's projection (depth %.0f, "
+               "far parallax %.1f px of 400, convergence at camera z %.2f)\n",
+               eye[0], eye[0] == 'L' ? "left" : "right", (double)st.depth,
+               (double)(t.k * stereomath::kPxPerNdc), (double)st.C);
+        fflush(stdout);
+    }
+} // namespace
+
 static RwBool OpenDeviceGL3(void)
 {
     // **librw makes the window here; the port only says what to make.**
@@ -677,6 +743,7 @@ static RwBool OpenDeviceGL3(void)
         fflush(stdout);
         return FALSE;
     }
+    InstallTestEye();
 
     return TRUE;
 }
@@ -713,6 +780,8 @@ static RwBool OpenDeviceC3D(void)
                              "none");
     }
     params.effects = iConfigGetString("3ds.effects", "all");
+    params.stereo = iConfigGetString("video.stereo", "auto");
+    params.stereoDepth = iConfigGetInt("video.stereo_depth", 50);
     // Engine::open hands the pointer to the device as it is; rw::c3d's open
     // parameters are a plain struct, not derived from librw's (rwc3d.h has
     // no librw types).

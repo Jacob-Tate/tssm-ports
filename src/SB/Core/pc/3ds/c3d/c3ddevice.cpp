@@ -199,6 +199,9 @@ namespace rw
             // A frame's stats line, once a second, with TSSM_C3D_STATS=1.
             int sStatsEnv = -1;
             u64 sStatsAt;
+            u64 sStatsPeriod = 1000;
+            // The camera texture drawn into is the shadow's (gpusplit).
+            bool sShadowTarget;
 
             const Mat4 kTilt = { { { 0.0f, 1.0f, 0.0f, 0.0f },
                                    { -1.0f, 0.0f, 0.0f, 0.0f },
@@ -234,6 +237,12 @@ namespace rw
                 default:
                     return GPU_ONE;
                 }
+            }
+
+            // A blend factor that reads the target's alpha.
+            bool readsDstAlpha(uint32 f)
+            {
+                return f == BLENDDESTALPHA || f == BLENDINVDESTALPHA || f == BLENDSRCALPHASAT;
             }
 
             GPU_TEXTURE_WRAP_PARAM wrapFor(uint32 a)
@@ -302,6 +311,52 @@ namespace rw
                     logOnce("lines", "a line or point list was not drawn (the PICA has neither)");
                     return false;
                 }
+            }
+
+            // alphafill: xFXHighDynamicRangeStartRender's quad, one alpha over the
+            // whole raster with alpha writes only: a strip of four at its
+            // corners, untextured, nothing blended or tested, no depth.
+            // Its alpha, or -1.
+            int32 alphaResetOf(uint32 prim, const Im2DVertex* v, int32 n)
+            {
+                const bool vertexAlpha =
+                    !rs.pipelineFresh && rs.pipelineOpaque ? rs.appVertexAlpha : rs.vertexAlpha;
+                if (prim != GPU_TRIANGLE_STRIP || n != 4 || rs.raster != nil ||
+                    rs.colorwritemask != COLORWRITEALPHA || rs.ztest || rs.zwrite || vertexAlpha ||
+                    rs.textureAlpha || sTexTarget || screenPassRunning() >= 0)
+                {
+                    return -1;
+                }
+                float x0 = v[0].x, x1 = v[0].x, y0 = v[0].y, y1 = v[0].y;
+                for (int32 i = 0; i < 4; i++)
+                {
+                    if (v[i].a != v[0].a || !(v[i].w > 0.0f))
+                    {
+                        return -1;
+                    }
+                    x0 = v[i].x < x0 ? v[i].x : x0;
+                    x1 = v[i].x > x1 ? v[i].x : x1;
+                    y0 = v[i].y < y0 ? v[i].y : y0;
+                    y1 = v[i].y > y1 ? v[i].y : y1;
+                }
+                if (x0 > 0.0f || y0 > 0.0f || x1 < sIm2DW || y1 < sIm2DH)
+                {
+                    return -1;
+                }
+                // Each corner once, the strip's two triangles across both
+                // diagonals (v0-v3 and v1-v2).
+                for (int32 i = 0; i < 4; i++)
+                {
+                    if ((v[i].x != x0 && v[i].x != x1) || (v[i].y != y0 && v[i].y != y1))
+                    {
+                        return -1;
+                    }
+                }
+                if (v[0].x == v[3].x || v[0].y == v[3].y || v[1].x == v[2].x || v[1].y == v[2].y)
+                {
+                    return -1;
+                }
+                return (int32)v[0].a;
             }
 
             void setIm2DMatrix(void)
@@ -440,8 +495,11 @@ namespace rw
             {
                 if (sStatsEnv < 0)
                 {
+                    // TSSM_C3D_STATS=1 a line a second; =<n> every n seconds.
                     const char* e = getenv("TSSM_C3D_STATS");
                     sStatsEnv = e != nil && e[0] != '\0' && e[0] != '0';
+                    const int n = e != nil ? atoi(e) : 0;
+                    sStatsPeriod = n > 1 ? (u64)n * 1000 : 1000;
                 }
                 if (!sStatsEnv)
                 {
@@ -452,8 +510,19 @@ namespace rw
                 {
                     sStatsAt = now;
                 }
-                if (now - sStatsAt < 1000)
+                if (now - sStatsAt < sStatsPeriod)
                 {
+                    return;
+                }
+                if (!modes.statsLine)
+                {
+                    // statsline=off (probe 14): is the line's own SD write a
+                    // frame's cost? The sums still restart.
+                    sStatsAt = now;
+                    FrameTimes f;
+                    uint32 n;
+                    u64 wallMax;
+                    takeFrameSums(&f, &n, &wallMax);
                     return;
                 }
                 sStatsAt = now;
@@ -474,9 +543,13 @@ namespace rw
                     st.targetBindsPeak, st.rttDrawsPeak, st.rttClearsPeak, st.readbacksPeak,
                     st.copiesPeak, st.targets, st.targetVram >> 10);
                 printFrameTimes();
+                submitStereoStats();
+                submitAlphaStats();
                 fflush(stdout);
             }
         } // namespace
+
+        L3Counts gL3;
 
         // ------------------------------------------------------------ matrices
 
@@ -528,8 +601,28 @@ namespace rw
 
         void setMaterial(const RGBA& color, const SurfaceProperties& surf)
         {
-            setUniform4(REG_MATCOLOR, color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f,
-                        color.alpha / 255.0f);
+            // c / 255.0f for each byte, divided once (L3: four divisions a
+            // draw); the same quotients, so the same uniforms.
+            static float div255[256];
+            static bool made;
+            if (!made)
+            {
+                for (int i = 0; i < 256; i++)
+                {
+                    div255[i] = (float)i / 255.0f;
+                }
+                made = true;
+            }
+            if (!modes.fast)
+            {
+                setUniform4(REG_MATCOLOR, color.red / 255.0f, color.green / 255.0f,
+                            color.blue / 255.0f, color.alpha / 255.0f);
+            }
+            else
+            {
+                setUniform4(REG_MATCOLOR, div255[color.red], div255[color.green],
+                            div255[color.blue], div255[color.alpha]);
+            }
             setUniform4(REG_SURF, surf.ambient, 0.0f, surf.diffuse, 1.0f / 127.0f);
         }
 
@@ -703,30 +796,62 @@ namespace rw
                 }
 
                 Matrix* ltm = atomic->getFrame()->getLTM();
-                V3d axes[3] = { ltm->right, ltm->up, ltm->at };
-                for (int a = 0; a < 3; a++)
-                {
-                    float len = sqrtf(axes[a].x * axes[a].x + axes[a].y * axes[a].y +
-                                      axes[a].z * axes[a].z);
-                    if (len > 1e-8f)
-                    {
-                        axes[a].x /= len;
-                        axes[a].y /= len;
-                        axes[a].z /= len;
-                    }
-                }
-                int n = wl.numDirectionals < 4 ? wl.numDirectionals : 4;
+                const int n = wl.numDirectionals < 4 ? wl.numDirectionals : 4;
+                V3d Ls[4];
                 for (int i = 0; i < n; i++)
                 {
                     Light* l = wl.directionals[i];
-                    V3d L = l->getFrame()->getLTM()->at; // where the light travels
-                    for (int a = 0; a < 3; a++)
-                    {
-                        dir[i][a] = -(axes[a].x * L.x + axes[a].y * L.y + axes[a].z * L.z);
-                    }
+                    Ls[i] = l->getFrame()->getLTM()->at; // where the light travels
                     col[i][0] = l->color.red;
                     col[i][1] = l->color.green;
                     col[i][2] = l->color.blue;
+                }
+                // L3's light cache: the last atomic's inputs and directions.
+                // Atomics in a row often share their axes (the world's are
+                // all identity) and the lights rarely move within a frame.
+                static V3d lastAxes[3], lastLs[4];
+                static int lastN = -1;
+                static float lastDir[4][4];
+                const bool same =
+                    modes.fast && lastN == n &&
+                    memcmp(lastAxes, &ltm->right, sizeof(V3d)) == 0 &&
+                    memcmp(&lastAxes[1], &ltm->up, sizeof(V3d)) == 0 &&
+                    memcmp(&lastAxes[2], &ltm->at, sizeof(V3d)) == 0 &&
+                    memcmp(lastLs, Ls, sizeof(V3d) * (size_t)n) == 0;
+                gL3.lightCalls++;
+                if (same)
+                {
+                    gL3.lightHits++;
+                    memcpy(dir, lastDir, sizeof(dir));
+                }
+                else
+                {
+                    V3d axes[3] = { ltm->right, ltm->up, ltm->at };
+                    lastAxes[0] = axes[0];
+                    lastAxes[1] = axes[1];
+                    lastAxes[2] = axes[2];
+                    for (int a = 0; a < 3; a++)
+                    {
+                        float len = sqrtf(axes[a].x * axes[a].x + axes[a].y * axes[a].y +
+                                          axes[a].z * axes[a].z);
+                        if (len > 1e-8f)
+                        {
+                            axes[a].x /= len;
+                            axes[a].y /= len;
+                            axes[a].z /= len;
+                        }
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        const V3d& L = Ls[i];
+                        for (int a = 0; a < 3; a++)
+                        {
+                            dir[i][a] = -(axes[a].x * L.x + axes[a].y * L.y + axes[a].z * L.z);
+                        }
+                        lastLs[i] = L;
+                    }
+                    lastN = n;
+                    memcpy(lastDir, dir, sizeof(dir));
                 }
             }
 
@@ -748,9 +873,60 @@ namespace rw
             return sDiscard || !submitIsOpen();
         }
 
+        void deviceDescribe(char* buf, int32 size)
+        {
+            const Raster* r = rs.raster;
+            snprintf(buf, (size_t)size,
+                     "raster %dx%d type %d, src %u dst %u, vertex alpha %d (app %d), texture alpha "
+                     "%d, z test %d write %d, colour mask %#x, alpha func %u ref %u",
+                     r != nil ? (int)r->width : 0, r != nil ? (int)r->height : 0,
+                     r != nil ? (int)r->type : -1, (unsigned)rs.srcblend, (unsigned)rs.destblend,
+                     (int)rs.vertexAlpha, (int)rs.appVertexAlpha, (int)rs.textureAlpha,
+                     (int)rs.ztest, (int)rs.zwrite, (unsigned)rs.colorwritemask,
+                     (unsigned)rs.alphafunc, (unsigned)rs.alpharef);
+        }
+
+        int32 devicePass(void)
+        {
+            const int32 sp = screenPassRunning();
+            if (sp == 0)
+            {
+                return PASS_GLOW;
+            }
+            if (sp == 1)
+            {
+                return PASS_WARP;
+            }
+            if (sTexTarget)
+            {
+                return sShadowTarget ? PASS_SHADOW : PASS_RTT;
+            }
+            return sParallel || rs.im2DActive ? PASS_HUD : PASS_3D;
+        }
+
         void deviceStateDirty(void)
         {
             ap.valid = false;
+        }
+
+        void deviceResync(void)
+        {
+            // Unit 0 bound again by the next textured draw (citro3d must not
+            // keep a pointer the filter has forgotten); unit 1 back on the
+            // dummy if anything was on it; every stage and test set again.
+            C3D_TexBind(0, nil);
+            ap.tex[0] = nil;
+            ap.texGen[0] = 0;
+            C3D_Tex* d = dummyTexture();
+            if (ap.tex[1] != nil && d != nil)
+            {
+                C3D_TexBind(1, d);
+                ap.tex[1] = d;
+            }
+            ap.texGen[1] = 0;
+            ap.valid = false;
+            ap.tev = -2;
+            ap.fog = -1;
         }
 
         void deviceResetStats(void)
@@ -897,6 +1073,7 @@ namespace rw
                     ap.texGen[unit] != natras->generation)
                 {
                     C3D_TexBind(unit, &natras->tex);
+                    noteCount(COUNT_TEX_BINDS, 1);
                     ap.tex[unit] = &natras->tex;
                     ap.texGen[unit] = natras->generation;
                 }
@@ -953,10 +1130,18 @@ namespace rw
             }
         } // namespace
 
+        namespace
+        {
+            bool32 flushRest(C3dRaster* natras, bool depthEnable, uint32 depthFunc, uint32 cull,
+                             uint32 back, bool orthoDepth, bool blend, uint32 src, uint32 dst,
+                             bool test, uint32 func, uint32 ref);
+        } // namespace
+
         // The render states into citro3d's. FALSE: do not draw (the texture
         // is a camera texture nothing has rendered yet).
         bool32 flushState(void)
         {
+            ProfScope prof(PROF_FLUSH);
             // The pipeline's word holds for the draw it was given for, not
             // for an immediate-mode draw after it.
             if (!rs.pipelineFresh && rs.pipelineOpaque)
@@ -974,6 +1159,47 @@ namespace rw
                 {
                     return 0;
                 }
+            }
+
+            if (sTexTarget && (rs.ztest || rs.zwrite))
+            {
+                eyeFreeDepth(); // eyeskip
+            }
+
+            // alphafill: the top screen's alpha before the glow's reset.
+            const bool mayBlend = rs.vertexAlpha || rs.textureAlpha;
+            const bool readsDst = mayBlend && (readsDstAlpha(rs.srcblend) || readsDstAlpha(rs.destblend));
+            const bool holdAlpha =
+                topAlphaDraw((rs.colorwritemask & COLORWRITEALPHA) != 0, readsDst) != 0;
+
+            // L3's fast path: what the part down to the depth map reads.
+            struct Key
+            {
+                uint32 textureAlpha, textureKeyed, vertexAlpha, zwrite, im2DActive,
+                    pipelineOpaque, alpharef, alphafunc, srcblend, destblend, colorwritemask,
+                    ztest, cullmode, texTarget, texFlip, orthoDepth, holdAlpha;
+            };
+            const Key key = { (uint32)rs.textureAlpha, (uint32)rs.textureKeyed,
+                              (uint32)rs.vertexAlpha,  (uint32)rs.zwrite,
+                              (uint32)rs.im2DActive,   (uint32)rs.pipelineOpaque,
+                              rs.alpharef,             rs.alphafunc,
+                              rs.srcblend,             rs.destblend,
+                              rs.colorwritemask,       (uint32)rs.ztest,
+                              rs.cullmode,             (uint32)sTexTarget,
+                              (uint32)sTexFlip,        (uint32)sOrthoDepth,
+                              (uint32)holdAlpha };
+            static Key lastKey;
+            static bool lastKeyValid;
+            static uint32 lastCull, lastBack;
+            static bool lastDepthEnable, lastBlend, lastTest;
+            static uint32 lastDepthFunc, lastSrc, lastDst, lastFunc, lastRef;
+            gL3.stateCalls++;
+            if (modes.fast && ap.valid && lastKeyValid && memcmp(&key, &lastKey, sizeof(key)) == 0)
+            {
+                gL3.stateHits++;
+                return flushRest(natras, lastDepthEnable, lastDepthFunc, lastCull, lastBack,
+                                 sOrthoDepth && !rs.im2DActive, lastBlend, lastSrc, lastDst,
+                                 lastTest, lastFunc, lastRef);
             }
 
             const bool cutout = rs.textureAlpha && rs.textureKeyed && !rs.vertexAlpha &&
@@ -999,7 +1225,7 @@ namespace rw
                 mask |= GPU_WRITE_GREEN;
             if (rs.colorwritemask & COLORWRITEBLUE)
                 mask |= GPU_WRITE_BLUE;
-            if (rs.colorwritemask & COLORWRITEALPHA)
+            if ((rs.colorwritemask & COLORWRITEALPHA) && !holdAlpha)
                 mask |= GPU_WRITE_ALPHA;
             if (rs.zwrite)
                 mask |= GPU_WRITE_DEPTH;
@@ -1020,6 +1246,7 @@ namespace rw
             {
                 C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, (GPU_BLENDFACTOR)src,
                                (GPU_BLENDFACTOR)dst, (GPU_BLENDFACTOR)src, (GPU_BLENDFACTOR)dst);
+                noteCount(COUNT_BLEND, 1);
                 ap.blend = blend;
                 ap.src = src;
                 ap.dst = dst;
@@ -1027,6 +1254,7 @@ namespace rw
             if (!ap.valid || ap.test != test || ap.func != func || ap.ref != ref)
             {
                 C3D_AlphaTest(test, (GPU_TESTFUNC)func, (int)ref);
+                noteCount(COUNT_ALPHA, 1);
                 ap.test = test;
                 ap.func = func;
                 ap.ref = ref;
@@ -1035,6 +1263,7 @@ namespace rw
                 ap.writeMask != mask)
             {
                 C3D_DepthTest(depthEnable, (GPU_TESTFUNC)depthFunc, (GPU_WRITEMASK)mask);
+                noteCount(COUNT_DEPTH, 1);
                 ap.depthEnable = depthEnable;
                 ap.depthFunc = depthFunc;
                 ap.writeMask = mask;
@@ -1042,6 +1271,7 @@ namespace rw
             if (!ap.valid || ap.cull != cull)
             {
                 C3D_CullFace((GPU_CULLMODE)cull);
+                noteCount(COUNT_CULL, 1);
                 ap.cull = cull;
             }
             // 2D keeps its own z (vs_im2d: -1 near) under any camera.
@@ -1056,8 +1286,33 @@ namespace rw
                 {
                     C3D_DepthMap(true, -1.0f, 0.0f);
                 }
+                noteCount(COUNT_DEPTHMAP, 1);
                 ap.orthoDepth = orthoDepth;
             }
+            lastKey = key;
+            lastKeyValid = true;
+            lastCull = cull;
+            lastBack = back;
+            lastDepthEnable = depthEnable;
+            lastDepthFunc = depthFunc;
+            lastBlend = blend;
+            lastSrc = src;
+            lastDst = dst;
+            lastTest = test;
+            lastFunc = func;
+            lastRef = ref;
+            return flushRest(natras, depthEnable, depthFunc, cull, back, orthoDepth, blend, src,
+                             dst, test, func, ref);
+        }
+
+        namespace
+        {
+            // flushState from the textures on: the units, the combiners, the
+            // fog stage, and the draw counted.
+            bool32 flushRest(C3dRaster* natras, bool depthEnable, uint32 depthFunc, uint32 cull,
+                             uint32 back, bool orthoDepth, bool blend, uint32 src, uint32 dst,
+                             bool test, uint32 func, uint32 ref)
+            {
 
             // The environment map holds for this draw only.
             C3dRaster* envRas = nil;
@@ -1098,12 +1353,14 @@ namespace rw
                 if (d != nil && ap.tex[1] != nil && ap.tex[1] != d)
                 {
                     C3D_TexBind(1, d);
+                    noteCount(COUNT_TEX_BINDS, 1);
                     ap.tex[1] = d;
                 }
             }
             if (ap.tev != tev)
             {
                 setTev(tev);
+                noteCount(COUNT_TEV, 1);
                 ap.tev = tev;
                 ap.envColor = ~rs.envColor; // the constant is set below
                 ap.envByAlpha = !rs.envByAlpha;
@@ -1124,6 +1381,7 @@ namespace rw
             if (!ap.valid || ap.fog != (fog ? 1 : 0) || (fog && ap.fogColor != rs.fogColor))
             {
                 setFogStage(fog, rs.fogColor);
+                noteCount(COUNT_FOGSTAGE, 1);
             }
             if (fog)
             {
@@ -1151,6 +1409,7 @@ namespace rw
             }
             return 1;
         }
+        } // namespace
 
         // TSSM_C3D_HUDLOG: an atomic about to be drawn (c3dpipe.cpp).
         void hudLogAtomic(Atomic* atomic, const char* path)
@@ -1280,6 +1539,7 @@ namespace rw
             sScreenCamera = false;
             sTexTarget = false;
             sTexFlip = false;
+            sShadowTarget = false;
             sOrthoDepth = false;
             sParallel = cam->projection == Camera::PARALLEL;
             sCamNear = cam->nearPlane;
@@ -1301,10 +1561,23 @@ namespace rw
                 }
                 sTexTarget = true;
                 sTexFlip = modes.rttFlip != 0;
+                sShadowTarget = fb->platform == PLATFORM_C3D && GETC3DRASTEREXT(fb)->isShadow;
             }
             else
             {
                 sScreenCamera = true;
+            }
+
+            // Stereo: in a 3D frame the main camera's draws are shifted per
+            // eye (b_eye, u_eyeCam; c3dstereo.cpp); every other camera's not.
+            {
+                float eyeCam[4];
+                const bool eye = stereoCamera(cam, sScreenCamera ? 1 : 0, eyeCam) != 0;
+                setEyeShift(eye ? 1 : 0);
+                if (eye)
+                {
+                    setUniform4(REG_EYECAM, eyeCam[0], eyeCam[1], eyeCam[2], eyeCam[3]);
+                }
             }
 
             // The view matrix is the GL3 device's: the camera's frame
@@ -1507,17 +1780,25 @@ namespace rw
             noteStats(sDraws);
             frameEnd();
             statsTick();
+            vbVramMigrate();
 
-            // TSSM_C3D_BENCH=1: the draw micro-benchmark, once (c3dbench.cpp).
+            // TSSM_C3D_BENCH=1: the draw micro-benchmark, once (c3dbench.cpp);
+            // =2 its variants as well.
             static int benchAt = -1;
+            static bool bench2;
             if (benchAt < 0)
             {
                 const char* e = getenv("TSSM_C3D_BENCH");
                 benchAt = e != nil && e[0] != '\0' && e[0] != '0' ? 30 : 0;
+                bench2 = e != nil && e[0] == '2';
             }
             if (benchAt > 0 && --benchAt == 0)
             {
                 runBench();
+                if (bench2)
+                {
+                    runBench2();
+                }
             }
         }
 
@@ -1716,22 +1997,37 @@ namespace rw
             {
                 return;
             }
-            Im2DVertex* v = (Im2DVertex*)ringAlloc(numVertices * sizeof(Im2DVertex));
-            if (v == nil)
+            const int32 resetA = alphaResetOf(prim, (const Im2DVertex*)vertices, numVertices);
+            if (resetA >= 0 && alphaResetSkip((uint32)resetA))
             {
                 return;
             }
-            memcpy(v, vertices, numVertices * sizeof(Im2DVertex));
-            const float wFactor = normaliseIm2DW(v, numVertices);
+            Im2DVertex* v;
+            float wFactor;
+            {
+                ProfScope prof(PROF_IM);
+                v = (Im2DVertex*)ringAlloc(numVertices * sizeof(Im2DVertex));
+                if (v == nil)
+                {
+                    return;
+                }
+                memcpy(v, vertices, numVertices * sizeof(Im2DVertex));
+                wFactor = normaliseIm2DW(v, numVertices);
+            }
             setIm2DActive(1);
             if (flushState())
             {
+                ProfScope prof(PROF_C3D);
                 useProgram(PROG_IM2D);
                 useFormat(FORMAT_IM2D, v, sizeof(Im2DVertex));
                 setIm2DMatrix();
                 setRasterUVMatrix();
                 setIm2DFog(wFactor);
                 drawArrays(prim, 0, numVertices);
+                if (resetA >= 0)
+                {
+                    alphaResetDrawn((uint32)resetA);
+                }
             }
             setIm2DActive(0);
         }
@@ -1749,19 +2045,26 @@ namespace rw
             // One block: a ring split between two would leave the vertices
             // behind.
             const uint32 vbytes = (numVertices * sizeof(Im2DVertex) + 15) & ~15u;
-            uint8* block = (uint8*)ringAlloc(vbytes + numIndices * sizeof(uint16));
-            if (block == nil)
+            Im2DVertex* v;
+            uint16* idx;
+            float wFactor;
             {
-                return;
+                ProfScope prof(PROF_IM);
+                uint8* block = (uint8*)ringAlloc(vbytes + numIndices * sizeof(uint16));
+                if (block == nil)
+                {
+                    return;
+                }
+                v = (Im2DVertex*)block;
+                idx = (uint16*)(block + vbytes);
+                memcpy(v, vertices, numVertices * sizeof(Im2DVertex));
+                wFactor = normaliseIm2DW(v, numVertices);
+                memcpy(idx, indices, numIndices * sizeof(uint16));
             }
-            Im2DVertex* v = (Im2DVertex*)block;
-            uint16* idx = (uint16*)(block + vbytes);
-            memcpy(v, vertices, numVertices * sizeof(Im2DVertex));
-            const float wFactor = normaliseIm2DW(v, numVertices);
-            memcpy(idx, indices, numIndices * sizeof(uint16));
             setIm2DActive(1);
             if (flushState())
             {
+                ProfScope prof(PROF_C3D);
                 useProgram(PROG_IM2D);
                 useFormat(FORMAT_IM2D, v, sizeof(Im2DVertex));
                 setIm2DMatrix();
@@ -1806,6 +2109,7 @@ namespace rw
             {
                 return;
             }
+            ProfScope prof(PROF_IM);
             Im3DVertex* v = (Im3DVertex*)ringAlloc(numVertices * sizeof(Im3DVertex));
             if (v == nil)
             {
@@ -1890,6 +2194,7 @@ namespace rw
             noteIm3DUnderWindow();
             if (flushState())
             {
+                ProfScope prof(PROF_C3D);
                 useProgram(PROG_IM3D);
                 useFormat(FORMAT_IM3D, sIm3DVerts, sizeof(Im3DVertex));
                 setRasterUVMatrix();
@@ -1907,16 +2212,21 @@ namespace rw
             {
                 return;
             }
-            uint16* idx = (uint16*)ringAlloc(numIndices * sizeof(uint16));
-            sIm3DVerts = (Im3DVertex*)ringPinned(); // a ring split moves them
-            if (idx == nil || sIm3DVerts == nil)
+            uint16* idx;
             {
-                return;
+                ProfScope prof(PROF_IM);
+                idx = (uint16*)ringAlloc(numIndices * sizeof(uint16));
+                sIm3DVerts = (Im3DVertex*)ringPinned(); // a ring split moves them
+                if (idx == nil || sIm3DVerts == nil)
+                {
+                    return;
+                }
+                memcpy(idx, indices, numIndices * sizeof(uint16));
             }
-            memcpy(idx, indices, numIndices * sizeof(uint16));
             noteIm3DUnderWindow();
             if (flushState())
             {
+                ProfScope prof(PROF_C3D);
                 useProgram(PROG_IM3D);
                 useFormat(FORMAT_IM3D, sIm3DVerts, sizeof(Im3DVertex));
                 setRasterUVMatrix();

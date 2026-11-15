@@ -58,7 +58,13 @@ namespace rw
             REG_SCRMAT = 19,
             REG_BONES = 21,
             REG_FOG = 81,
-            NUM_REGS = 82
+            REG_EYECAM = 82, // stereo: (C, w_min, 0, 0), in the lists
+            NUM_REGS = 83, // shadowed; c83 (u_eyeSide) is written raw, per eye
+            REG_EYESIDE = 83,
+            // b_eye (b0), as citro3d's C3D_BoolUnifSet numbers bools: from
+            // 0x68, the DVLE's register number for b0.
+            REG_BEYE = 0x68,
+            REG_BTRIM = 0x69 // b_trim (b1): skintrim
         };
 
         // ------------------------------------------------------ vertex formats
@@ -189,6 +195,11 @@ namespace rw
             // mesh's pieces are triangle lists).
             SkinPiece* pieces;
             uint32 numPieces;
+            // A split skin's source vertex for each of its vertices (nil:
+            // the geometry's own order), so that new positions can be
+            // written without splitting it again (refreshInstance).
+            uint16* srcMap;
+            uint32 srcVertices; // the geometry's numVertices when instanced
         };
 
         void* destroyNativeData(void* object, int32, int32);
@@ -198,7 +209,25 @@ namespace rw
         ObjPipeline* makeSkinPipeline(bool32 matfx);
 
         // c3dskin.cpp. instanceSkin: nil for a geometry without its weights.
-        InstanceDataHeader* instanceSkin(Geometry* geo);
+        // `again`: made again after a change (TSSM_C3D_STATS counts and
+        // prints only a geometry's first time).
+        InstanceDataHeader* instanceSkin(Geometry* geo, bool again);
+        // TSSM_C3D_INSTPROF=1 (a measurement): where instancing's time goes,
+        // a line every 2 s. Ticks, summed since the last line.
+        struct InstProf
+        {
+            bool on;
+            u64 prep, stats, alloc, write, flush, print, mesh, freeing, refresh, total;
+            uint32 skins, meshes, skinVerts, meshVerts, first, refreshed, refreshVerts;
+        };
+        extern InstProf gInstProf;
+        // L3's caches, how often they were asked and how often they had it
+        // (c3ddevice.cpp; TSSM_C3D_INSTPROF's lines print them).
+        struct L3Counts
+        {
+            uint32 lightCalls, lightHits, stateCalls, stateHits;
+        };
+        extern L3Counts gL3;
         void skinBegin(Atomic* atomic, bool32 bindPose); // this atomic's bones
         int32 skinPalette(const SkinPiece* piece); // the registers sent
         // After skinBegin: what vs_skin computes, on the CPU, from the same
@@ -232,8 +261,68 @@ namespace rw
             bool32 copyEdge; // a screen copy's block drawn past the picture (extendCopyEdges)
             bool32 copy; // screen copies (copyScreen: the glow, the warp, the loading snapshot)
             bool32 hudZ; // parallel cameras' models over a window of their depth (atomicDepth)
+            // Probe 14's measuring words (TSSM_C3D_AB; all off in a normal run):
+            bool32 profile; // tick reads around the parts of a draw's recording (PROF_*)
+            bool32 gpuSplit; // the GPU's time per pass: a split and a wait at each pass change
+            bool32 fill; // FALSE: the top screen scissored to one pixel (fill=off)
+            bool32 cmdFlush; // C3D_FrameEnd(GX_CMDLIST_FLUSH), the command buffer and ring by hand (L2)
+            bool32 statsLine; // FALSE: TSSM_C3D_STATS's line is not written
+            int32 stereo; // stereomath::MODE_OFF, _AUTO or _FORCE (c3dstereo.cpp)
+            bool32 stereoGuard; // stereo=guard: MODE_FORCE with the speed guard on (probe 14)
+            // FALSE (refresh=off): a model whose vertices changed is instanced
+            // again from the start, as before refreshInstance (c3dpipe.cpp).
+            bool32 refresh;
+            // FALSE (fast=off): L3's caches off (the light cache, the material's
+            // table, flushState's fast path), for A/B segments.
+            bool32 fast;
+            // FALSE (pipe=off): every frame waits for the one before, as before
+            // L4, though its buffers stay (TSSM_C3D_PIPE=off leaves them out).
+            bool32 pipe;
+            // FALSE (eyeskip=off): the right eye replays the shadow camera's
+            // pass too, as before speed3 (c3dsubmit.cpp, eyeFreeBegin).
+            bool32 eyeSkip;
+            // TRUE (alphafill=on): the glow's alpha reset is left out when
+            // the frame's fill already gave that alpha (c3dsubmit.cpp,
+            // alphaResetSkip). Off by default: untested where it applies (a
+            // scene that fills colour), and a wrong prediction costs a frame.
+            bool32 alphaFill;
+            // FALSE (skintrim=off): the skinned programs' path as before
+            // speed3 (b_trim off; shaders/vs_skin.vsh, skin1).
+            bool32 skinTrim;
+            // TRUE (glowclear=on): the glow's halving and bright targets are
+            // cleared before they are drawn over whole, as before speed3 (a
+            // tiled GPU's saving; on the PICA a full-target draw for nothing).
+            bool32 glowClear;
+            // Probe 16's measuring word eyetest (EYETEST_*; normal in a
+            // normal run): where the 3D frame's extra GPU time goes.
+            int32 eyeTest;
+            // FALSE (savevram=off): a 3D frame's starting picture (topSave)
+            // is kept in linear memory, as before speed3; on: in VRAM when
+            // there is room (c3dsubmit.cpp, saveTopColour).
+            bool32 saveVram;
         };
         extern Modes modes;
+        enum
+        {
+            EYETEST_NORMAL,
+            // eyetest=2d: 2D frames draw the main camera through the eye code
+            // with no shift (b_eye on, u_eyeSide 0): the same picture, the
+            // eye code's vertex cost.
+            EYETEST_2D,
+            // eyetest=noshift: 3D frames with b_eye off: both eyes the same
+            // picture, the replay without the eye code.
+            EYETEST_NOSHIFT,
+            // eyetest=noright: 3D frames whose right eye is only its prologue
+            // (the clear, and the starting picture copied back where the
+            // frame clears only depth) and its transfer, its lists not sent:
+            // the right picture is the clear colour or that starting picture.
+            EYETEST_NORIGHT,
+            // eyetest=nosave: 3D frames that do not clear the top screen's
+            // colour leave out the copy of their starting picture and its
+            // copy back for the right eye (two GX copies of 375 KB): the
+            // right eye starts on the left eye's picture.
+            EYETEST_NOSAVE
+        };
         // The start-up self-test's GPU steps (rttSelfTest).
         extern bool32 selfTestOn;
         // Once, at the open: what the console has not shown to work is off
@@ -296,6 +385,48 @@ namespace rw
         // the other, fogs a third, reads them back and says what it found.
         void rttSelfTest(void);
 
+        // ------------------------------------------------------------ stereo
+        // c3dstereo.cpp: the slider, the eye terms, the convergence plane,
+        // the speed guard and their log lines. c3dsubmit.cpp records the
+        // frame's lists and sends them again for the right eye.
+        enum
+        {
+            EYE_LEFT,
+            EYE_RIGHT
+        };
+        // Why a 3D frame showed one picture to both eyes.
+        enum
+        {
+            DROP_NONE,
+            DROP_SPLIT, // a hard split: the lists before it are gone
+            DROP_QUEUE, // the GX queue (or the frame list) has no room for the replay
+            DROP_READBACK, // a camera texture read back inside the frame
+            DROP_FLAT, // nothing drawn per eye (a menu, a movie, a loading screen)
+            DROP_ROOM, // the command buffer or the ring has no room for the prologue
+            NUM_DROPS
+        };
+        void stereoOpen(const char* setting, int32 depth); // at the device's open
+        bool32 stereoEnabled(void); // not off: the slider is read, the screen is in 3D mode
+        // Once a frame, before C3D_FrameBegin: the slider, its easing and the
+        // guard. TRUE: this frame is drawn for two eyes.
+        bool32 stereoFrameStart(void);
+        float stereoEyeSide(int32 eye); // u_eyeSide.x: -sigma k / 2
+        // beginUpdate: TRUE when this camera's draws are shifted per eye;
+        // eyeCam gets u_eyeCam (C, w_min, 0, 0). Called for every camera.
+        bool32 stereoCamera(Camera* cam, bool32 screen, float eyeCam[4]);
+        // At the present: what the frame was. wall, busy, record and replay in
+        // ticks (busy is wall less the waits; record 0 when not timed; replay
+        // the right eye's CPU). pipelined: frames may record ahead (L4).
+        void stereoFrameDone(bool32 was3D, int32 drop, u64 wall, u64 busy, u64 record,
+                             u64 replay, float gpuMsBefore, bool32 pipelined);
+        bool32 stereoWantsRecordTiming(void); // the guard predicts from the recording time
+        void stereoLevelLoaded(void);
+        void stereoStats(uint32 replayed, uint32 replayBytes, uint32 queuePeak3D, u64 replayTicks);
+        // The test hook's sleep (TSSM_C3D_STEREO_GUARDTEST), in frameEnsure.
+        void stereoGuardTestSleep(void);
+        bool32 stereoCaptureLeftWanted(void);
+        void submitStereoStats(void); // the stereo line, with the replay's counts
+
         // ------------------------------------------------------------ submit
         // c3dsubmit.cpp: citro3d itself. The frame, the top screen's target,
         // the frame ring, deferred frees, programs and formats, uniforms, the
@@ -305,6 +436,10 @@ namespace rw
         bool32 submitIsOpen(void);
 
         void frameEnsure(void); // open a frame if none is (logged)
+        // L4: a frame recorded ahead waits for the one before and joins the
+        // GPU's queue now (`why` for the log; nil: the present).
+        void frameCatchUp(const char* why);
+
         void frameEnd(void); // C3D_FrameEnd: the frame goes to the GPU
         void frameEndWith(uint8 flags); // the same, with C3D_FrameEnd's flags
         uint32 ringUsed(void);
@@ -321,6 +456,15 @@ namespace rw
         };
 
         void clearScreen(uint32 rgba, bool32 color, bool32 depth);
+
+        // Stereo: b_eye for the draws from here (set only when it changes;
+        // never on in a 2D frame), u_eyeCam through the shadow, and whether
+        // this frame is a 3D one.
+        void setEyeShift(bool32 on);
+        bool32 frameIsStereo(void);
+        // The device's half of a full re-send (c3ddevice.cpp): every filter
+        // forgets what citro3d was given, so the next draw sets it all.
+        void deviceResync(void);
 
         void* ringAlloc(uint32 bytes); // linear memory that lives this frame
         // A block from ringAlloc that later draws still read (Im3D's
@@ -341,6 +485,26 @@ namespace rw
         // Draw on `target` (a camera texture's) from here, its viewport (0, 0,
         // w, h) in target pixels; bindScreen goes back to the top screen.
         void bindTarget(C3D_RenderTarget* target, int32 w, int32 h);
+        // Stereo (eyeskip): `target`'s pass from here, up to the next change
+        // of target, is the same for both eyes (the shadow camera's, which
+        // starts with a clear of the whole target), so the right eye leaves
+        // its list out and reads what the left eye drew. Before its bind.
+        void eyeFreeBegin(C3D_RenderTarget* target);
+        void eyeFreeDepth(void); // a draw with the depth test or write: that pass is sent again
+        // alphafill (c3dsubmit.cpp): the top screen's alpha, the glow's mask.
+        // xFXHighDynamicRangeStartRender sets it all to one value with a quad
+        // (alpha writes only, nothing blended or tested). When the frame's
+        // first fill can give it that value already (the value of the frame
+        // before's reset), and nothing writes alpha in between (alpha writes
+        // into the top screen are held until the reset), the quad changes
+        // nothing and is left out.
+        // topAlphaDraw: a draw about to be set up (flushState); TRUE: its
+        // alpha write is held (left out). alphaResetSkip: the reset quad, with
+        // its alpha; TRUE: leave it out. alphaResetDrawn: it was drawn.
+        bool32 topAlphaDraw(bool32 writesAlpha, bool32 readsDstAlpha);
+        bool32 alphaResetSkip(uint32 a);
+        void alphaResetDrawn(uint32 a);
+        void submitAlphaStats(void); // the stats line's alphafill line
         bool32 targetIsScreen(void); // the top screen is bound (or none yet)
         C3D_RenderTarget* boundTarget(void); // nil: none yet this frame
         // A quad over the bound target's viewport: colour and/or depth (0).
@@ -426,11 +590,27 @@ namespace rw
             COUNT_RTT_CLEARS, // camera texture clears (quads)
             COUNT_READBACKS, // camera textures read back (each a hard split)
             COUNT_COPIES, // screen copies (each a split and a GX copy)
+            // What reached citro3d past the device's own filters (probe 14):
+            COUNT_TEX_BINDS, // C3D_TexBind
+            COUNT_PROG_BINDS, // C3D_BindProgram
+            COUNT_ATTR_SETS, // C3D_SetAttrInfo (a vertex format change)
+            COUNT_BUF_SETS, // BufInfo_Add (a new vertex pointer)
+            COUNT_UNIFORM_REGS, // vertex shader uniform registers written
+            COUNT_BLEND, // C3D_AlphaBlend
+            COUNT_ALPHA, // C3D_AlphaTest
+            COUNT_DEPTH, // C3D_DepthTest
+            COUNT_CULL, // C3D_CullFace
+            COUNT_DEPTHMAP, // C3D_DepthMap
+            COUNT_TEV, // combiner set-ups (setTev, the plain one)
+            COUNT_FOGSTAGE, // the fog stage set
             NUM_COUNTS
         };
         void noteCount(int32 which, uint32 n);
         void noteSkinTicks(u64 ticks); // the bone matrices, on the CPU
         void getSubmitStats(Stats* out);
+        // The textures' and camera textures' counts and bytes only, the
+        // peaks left alone (probe 14's segments).
+        void getMemoryStats(Stats* out);
 
         // Where a frame's time goes (TSSM_C3D_STATS or TSSM_C3D_AB), in
         // system ticks. Wall is present to present; recording is the CPU in
@@ -443,7 +623,37 @@ namespace rw
             TIME_GPU, // C3D_FrameBegin after it: the frame before still drawing
             TIME_END, // C3D_FrameEnd (the linear heap's cache flush)
             TIME_DRAWN, // citro3d's GPU time of the frame before (C3D_GetDrawingTime)
+            TIME_UPDATE, // the present before to this frame's first draw or clear: the update
+            TIME_BONES, // the bone matrices and palettes (part of TIME_RECORD)
             NUM_TIMES
+        };
+        // profile=on (probe 14): where a draw's recording goes, each part
+        // with its own waits left out. PROF_FLUSH is inside PROF_MESH.
+        enum
+        {
+            PROF_MATRIX, // an atomic's matrix (atomicDepth, setWorldMatrix)
+            PROF_LIGHTS, // setLights (enumerateLights, the axes, the light rows)
+            PROF_MESH, // beginMesh: material, texture, MatFX, flushState
+            PROF_FLUSH, // flushState alone
+            PROF_C3D, // useProgram, useFormat, the draw call (and Im2D's uniforms)
+            PROF_PALETTE, // the skin palette's registers
+            PROF_IM, // Im2D/Im3D: the ring copy, w normalised, Im3D's box, rebase and matrix
+            NUM_PROF
+        };
+        // gpusplit=on (probe 14): the GPU's time a frame per pass, from a split
+        // at each change of pass, each piece waited for and timed by citro3d.
+        enum
+        {
+            PASS_3D, // the top screen under a perspective camera
+            PASS_HUD, // the top screen under a parallel camera, or 2D: the HUD, menus
+            PASS_SHADOW, // the shadow camera's texture
+            PASS_RTT, // other camera textures outside the screen passes
+            PASS_GLOW, // inside the HDR glow (its half, blur and glow targets, composite)
+            PASS_WARP, // inside the screen warp
+            PASS_COPY, // screen copies (the GX engine)
+            PASS_BOTTOM, // the bottom screen (the overlay)
+            PASS_PRESENT, // the frame's display transfers
+            NUM_PASSES
         };
         struct FrameTimes
         {
@@ -451,6 +661,17 @@ namespace rw
             u64 t[NUM_TIMES];
             uint32 verts[NUM_PROGRAMS]; // indices (or vertices) drawn per program
             uint32 reads; // the timing's own tick reads
+            // Probe 14's (c3dab.cpp's segments):
+            u64 prof[NUM_PROF];
+            float passMs[NUM_PASSES];
+            uint32 pieces; // gpusplit's timed pieces
+            uint32 profReads; // profile=on's own tick reads (in reads too)
+            uint32 counts[NUM_COUNTS];
+            uint32 draws; // draw calls recorded
+            uint32 cmdBytes; // command buffer used
+            uint32 ringBytes;
+            uint32 queue; // GX queue entries
+            uint32 splits; // hard splits (not gpusplit's)
         };
         bool32 timingOn(void);
         void noteTicks(int32 which, u64 ticks);
@@ -463,10 +684,68 @@ namespace rw
         struct RecordScope
         {
             u64 t0, w0;
+            bool on; // counted in the depth (the timing was on when it began)
             RecordScope(void);
             ~RecordScope(void);
         };
+        // profile=on: the scope's CPU time, its waits left out, into
+        // FrameTimes::prof[which]. Nothing otherwise.
+        struct ProfScope
+        {
+            int32 which;
+            u64 t0, w0;
+            explicit ProfScope(int32 which);
+            ~ProfScope(void);
+        };
+        void noteProf(int32 which, u64 ticks); // ticks read anyway (the palette)
+        // gpusplit: the pass the next draw belongs to (c3ddevice.cpp), and
+        // the screen pass running (-1 none, 0 the glow, 1 the warp: rw's
+        // iScreenPassBegin/End through screenPassScope, c3drtt.cpp).
+        int32 devicePass(void);
+        // TSSM_C3D_GEOMSTAT: the next draw's raster and blend, in words.
+        void deviceDescribe(char* buf, int32 size);
+        int32 screenPassRunning(void);
         void abNoteFrame(const FrameTimes* f); // c3dab.cpp, at each present
+        // A line in TSSM_C3D_AB_LOG (probe 14's speed14.log), when it is set.
+        void abLog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+        void runBench2(void); // c3dbench.cpp: TSSM_C3D_BENCH=2's variants
+
+        // TSSM_C3D_VBVRAM=on (probe 14's run 1b): geometry's vertex buffers
+        // moved into VRAM after the frame they were made in, while VRAM
+        // keeps a margin (c3dpipe.cpp).
+        bool32 vbVramOn(void);
+        void vbVramQueue(InstanceDataHeader* h);
+        void vbVramForget(InstanceDataHeader* h); // freed before it moved
+        void vbVramMigrate(void); // outside a frame (showRaster)
+        void vbVramStats(uint32* movedKB, uint32* stayedKB); // since the open
+        // linearFree or vramFree, by where `p` is.
+        void gpuFree(void* p);
+
+        // Probe 14's 3D segments (TSSM_C3D_AB's stereo=off|force|guard;
+        // c3dstereo.cpp): what a segment drew, since the last take.
+        struct StereoProbeStats
+        {
+            uint32 frames; // frames presented
+            uint32 frames3d; // drawn as 3D frames (recorded for two eyes)
+            uint32 rightDrawn; // ... and shown with both eyes
+            uint32 droppedSplit; // right eyes dropped for a hard split (DROP_SPLIT)
+            uint32 droppedQueue; // ... the GX queue or the frame list (DROP_QUEUE)
+            uint32 droppedReadback; // ... a read-back inside the frame (DROP_READBACK)
+            uint32 droppedFlat; // ... nothing drawn per eye (DROP_FLAT)
+            uint32 droppedRoom; // ... no room for the prologue (DROP_ROOM)
+            uint32 guardFrames; // frames 2D or easing out under the speed guard
+            uint32 guardTrips;
+            uint32 gxEntriesPeak; // GX queue entries in a two-eye frame
+        };
+        // At a segment's start. mode MODE_FORCE: both eyes, the slider taken
+        // as full, the guard on or off, `depth` for stereo_depth, the guard's
+        // state reset; otherwise the setting's guard and depth again. FALSE:
+        // no 3D (the device has none).
+        bool32 stereoProbeSet(int32 mode, bool32 guard, int32 depth);
+        // The counts since the last call; FALSE: no 3D.
+        bool32 stereoProbeTake(StereoProbeStats* out);
+        // A two-eye frame's GX queue entries (c3dsubmit.cpp), for the take.
+        void stereoProbeQueue(uint32 entries);
         void runBench(void); // c3dbench.cpp: TSSM_C3D_BENCH=1
         void logOnce(const char* key, const char* fmt, ...);
 

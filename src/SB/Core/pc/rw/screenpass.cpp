@@ -30,6 +30,7 @@
 
 #include "backend.h"
 #include "iDeviceReset.h"
+#include "iGpuOpt.h"
 #include "screenpass.h"
 
 bool iScreenPassReady()
@@ -67,6 +68,17 @@ bool iScreenPassOn(S32 pass)
 #endif
     (void)pass;
     return true;
+}
+
+bool iScreenPassInvalidates()
+{
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        return rw::c3d::screenPassInvalidates() != 0 && iGpuOptOn(IGPUOPT_INVALIDATE);
+    }
+#endif
+    return iGpuOptOn(IGPUOPT_INVALIDATE) != 0;
 }
 
 void iScreenPassExtent(RwInt32* w, RwInt32* h)
@@ -302,10 +314,22 @@ void iScreenPassBegin(iScreenPassState* s)
     // value wherever this frame's came out fully transparent.
     rw::SetRenderState(rw::ALPHATESTFUNC, rw::ALPHAALWAYS);
     rw::SetRenderState(rw::COLORWRITEMASK, ISCREENPASS_WRITE_ALL);
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        rw::c3d::screenPassScope(1); // the 3DS's per-pass GPU times (probe 14)
+    }
+#endif
 }
 
 void iScreenPassEnd(const iScreenPassState* s)
 {
+#ifdef RW_C3D
+    if (iBackendIsC3D())
+    {
+        rw::c3d::screenPassScope(0);
+    }
+#endif
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, s->raster);
     RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void*)(UPtr)s->filter);
     RwRenderStateSet(rwRENDERSTATETEXTUREADDRESSU, (void*)(UPtr)s->addressU);

@@ -171,9 +171,10 @@ namespace rw
             {
                 return;
             }
-            // Inside the frame: the frame before, which may have sampled it,
-            // was waited for when this one opened.
+            // Inside the frame, once the frame before, which may have
+            // sampled it, has been waited for (L4: it may not have been yet).
             frameEnsure();
+            frameCatchUp("an overlay texture written");
             uint8* data = (uint8*)t->tex.data;
             for (int32 yy = 0; yy < h; yy++)
             {

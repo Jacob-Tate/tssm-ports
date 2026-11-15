@@ -4,6 +4,7 @@
 // The libctru side (i3DS.h): nothing of the game's is included here, and this
 // file is compiled with libctru's short enums (CMakeLists.txt).
 #include "i3DS.h"
+#include "iStereo3DS.h"
 #ifdef RW_C3D
 // C types only, as i3DS.h: safe on this, libctru's, side of the enum line.
 #include "c3d/rwc3d.h"
@@ -1455,10 +1456,43 @@ extern "C" Thread __real_threadCreate(ThreadFunc entrypoint, void* arg, size_t s
 // -Wl,--wrap=threadCreate: every libctru thread (SDL's, ndsp's, GSP's,
 // pthreads) in the log with its memory block, which holds its stack, so that
 // a fault address in a Luma3DS dump can be told apart from the game's.
+//
+// Every thread asked for on core 1 moves, not only SDL's audio thread; the
+// logs show SDL's is the only one today (SDL puts it on the system core of a
+// New 3DS, under a 30% time limit). The mixer needs more than that limit
+// lends at the busy spots, so on a New 3DS it goes to core 2, which is the
+// game's alone; core 1 if core 2 is refused.
+// TSSM_AUDIO_CORE=1 keeps SDL's choice.
+static int sAudioCore = 1;
+
+int i3DSAudioCore()
+{
+    return __atomic_load_n(&sAudioCore, __ATOMIC_ACQUIRE);
+}
+
 extern "C" Thread __wrap_threadCreate(ThreadFunc entrypoint, void* arg, size_t stack_size, int prio,
                                       int core_id, bool detached)
 {
-    Thread t = __real_threadCreate(entrypoint, arg, stack_size, prio, core_id, detached);
+    Thread t = NULL;
+    if (core_id == 1 && sNew3DS)
+    {
+        const char* e = getenv("TSSM_AUDIO_CORE");
+        if (e == NULL || strcmp(e, "1") != 0)
+        {
+            t = __real_threadCreate(entrypoint, arg, stack_size, prio, 2, detached);
+            printf("tssm: 3ds: a thread asked for on core 1 (SDL's audio): %s\n",
+                   t != NULL ? "on core 2 instead" : "core 2 refused, on core 1");
+            if (t != NULL)
+            {
+                core_id = 2;
+                __atomic_store_n(&sAudioCore, 2, __ATOMIC_RELEASE);
+            }
+        }
+    }
+    if (t == NULL)
+    {
+        t = __real_threadCreate(entrypoint, arg, stack_size, prio, core_id, detached);
+    }
     u32 id = 0;
     if (t != NULL && R_SUCCEEDED(svcGetThreadId(&id, threadGetHandle(t))))
     {
@@ -1688,10 +1722,12 @@ namespace
         CHAIN_EXITLOOP, // starts itself again through Luma3DS's loader, N times
         CHAIN_FPS, // BB02, then GG02, each measured
         CHAIN_LADDER, // one more layer of the program each run, until one is held
+        CHAIN_SPEED, // probes 14, 15: one level or spot each run, measured part by part
     };
 
     struct Probe
     {
+        int number; // TSSM_3DS_PROBE's (12 and 13 are not in this build)
         const char* name; // the log's: probe-<name>.log
         const char* tests;
         const char* env; // NAME=VALUE;... over kProbeBase (kChainBase for a chain)
@@ -1709,35 +1745,52 @@ namespace
 
     // Most telling first.
     const Probe kProbes[] = {
-        { "1-rtt", "drawing into textures, and its start-up self-test",
+        { 1, "1-rtt", "drawing into textures, and its start-up self-test",
           "TSSM_C3D_RTT=on;TSSM_C3D_SELFTEST=on" },
-        { "2-overlay", "the settings overlay on the bottom screen",
+        { 2, "2-overlay", "the settings overlay on the bottom screen",
           "TSSM_3DS_GUI=on;TSSM_GUI_OPEN_AT=300;TSSM_3DS_GUI_ALWAYS=1" },
         // No self-test: its fog step draws into a texture target (probe 1's
         // mechanism); BB02's own fog tests the fog alone.
-        { "3-fog", "the fog in BB02", "TSSM_C3D_FOG=on" },
-        { "4-shadow", "the shadows (drawing into a texture with depth)",
+        { 3, "3-fog", "the fog in BB02", "TSSM_C3D_FOG=on" },
+        { 4, "4-shadow", "the shadows (drawing into a texture with depth)",
           "TSSM_C3D_RTT=on;TSSM_C3D_SHADOW=on" },
-        { "5-copy", "screen copies, and their start-up self-test",
+        { 5, "5-copy", "screen copies, and their start-up self-test",
           "TSSM_C3D_COPY=on;TSSM_C3D_SELFTEST=on" },
-        { "6-glow", "the glow (textures and screen copies)",
+        { 6, "6-glow", "the glow (textures and screen copies)",
           "TSSM_C3D_RTT=on;TSSM_C3D_COPY=on;TSSM_C3D_GLOW=on" },
-        { "7-warp", "the heat warp (screen copies)",
+        { 7, "7-warp", "the heat warp (screen copies)",
           "TSSM_C3D_COPY=on;TSSM_C3D_WARP=on;TSSM_TEST_WARP=1000:shockwave:8:1:5" },
-        { "8-orthoz", "the depth of the HUD's and menus' 3D models (orthoz)",
+        { 8, "8-orthoz", "the depth of the HUD's and menus' 3D models (orthoz)",
           "TSSM_C3D_ORTHOZ=on" },
-        { "9-exitloop", "that quitting gives the console its memory back, 20 times in a row", "",
+        { 9, "9-exitloop", "that quitting gives the console its memory back, 20 times in a row", "",
           CHAIN_EXITLOOP },
-        { "10-fps", "the frame rate with every effect on, in BB02 and in GG02", "", CHAIN_FPS },
-        { "11-leakladder", "which part of the program keeps its process after it quits", "",
+        { 10, "10-fps", "the frame rate with every effect on, in BB02 and in GG02", "", CHAIN_FPS },
+        { 11, "11-leakladder", "which part of the program keeps its process after it quits", "",
           CHAIN_LADDER },
+        { 14, "14-speed", "where the time of a frame goes, level by level, on the CPU and the GPU",
+          "", CHAIN_SPEED },
+        // Probe 14's survey again, after speed2's fixes, and three runs that
+        // switch each fix off and on at the same spot.
+        { 15, "15-speed", "where the time of a frame goes now, and what each speed fix gave", "",
+          CHAIN_SPEED },
+        // Probe 15's runs again after speed3's changes, and three runs in 3D
+        // that switch each of them off and on at the same still spot.
+        { 16, "16-speed", "probe 15's survey again, and what each 3D speed change gives", "",
+          CHAIN_SPEED },
     };
     const int kNumProbes = (int)(sizeof(kProbes) / sizeof(kProbes[0]));
 
+    // By number, as the numbers have a gap (12 and 13).
     const Probe* ThisProbe()
     {
-        return TSSM_3DS_PROBE >= 1 && TSSM_3DS_PROBE <= kNumProbes ? &kProbes[TSSM_3DS_PROBE - 1]
-                                                                    : NULL;
+        for (int i = 0; i < kNumProbes; i++)
+        {
+            if (kProbes[i].number == TSSM_3DS_PROBE)
+            {
+                return &kProbes[i];
+            }
+        }
+        return NULL;
     }
 
     // ------------------------------------------------- the self-starting probes
@@ -1781,6 +1834,7 @@ namespace
         char note[200]; // what the run before showed, for the log
         char dir[64]; // sdmc:/3ds/tssm/<probe>
         bool fresh;
+        bool only; // probe 14: only-run.txt's one run (an emulator's check)
     };
     Chain sChain;
 
@@ -1791,6 +1845,9 @@ namespace
     {
         return ThisProbe()->chain == CHAIN_FPS    ? "fps-effects" :
                ThisProbe()->chain == CHAIN_LADDER ? "leakladder" :
+               ThisProbe()->chain == CHAIN_SPEED  ? (TSSM_3DS_PROBE == 16   ? "speed16" :
+                                                     TSSM_3DS_PROBE == 15 ? "speed15" :
+                                                                            "speed14") :
                                                     "exitloop";
     }
 
@@ -2057,6 +2114,349 @@ namespace
         }
     }
 
+    // ----------------------------------------------- probe 14, the speed survey
+
+    // One level or spot a run, every effect on as the player has it, each run
+    // a row of segments TSSM_C3D_AB switches between (c3dab.cpp): the same
+    // spot plain, with the parts of each draw's recording timed (profile),
+    // with the GPU's time per pass (gpusplit), with nothing filled (fill=off),
+    // and, in BB02, with one effect at a time left out. TSSM_FIXED_STEP=30
+    // holds the game's clock to the frames, so every segment of a spot sees
+    // the same picture however fast the console draws it. One summary,
+    // speed14.log, a block of lines a segment (docs/3DS.md, probe 14).
+
+    // Every spot gains three segments: 2D, both eyes forced (stereo=force:
+    // force:50, no guard) and with the speed guard (stereo=guard), through
+    // c3dstereo.cpp's stereoProbeSet. 0 leaves them out.
+#ifndef TSSM_SPEED14_STEREO
+#define TSSM_SPEED14_STEREO 1
+#endif
+
+    enum
+    {
+        SPEED_INPUT_NONE, // no presses: the opening fly-through, the title screen
+        SPEED_INPUT_BB02, // the dialogs; the A/B measuring run's walk to the calm spot
+        SPEED_INPUT_D0, // the speed test's script, version 4
+        SPEED_INPUT_PAUSE // the dialogs, then START
+    };
+
+    struct SpeedSeg
+    {
+        const char* set; // over kSpeedReset
+        const char* label; // no comma: TSSM_C3D_AB's separator; under 40 with a spot
+    };
+
+    struct SpeedRun
+    {
+        const char* cfg; // state.txt's name for it (16 at most)
+        const char* what; // the bottom screen's
+        const char* boot; // TSSM_BOOT ("" the title screen)
+        int input;
+        int first; // the first switch
+        int segLen; // frames
+        const SpeedSeg* a; // the first spot
+        int na;
+        const SpeedSeg* b; // BB02's calm spot, after the walk (nil: none)
+        int nb;
+        const char* extra; // NAME=VALUE;... for this run
+    };
+
+    // Each segment's settings start from these: every effect on (a player's
+    // [3ds] effects = all), no measuring word, speed2's fixes on (an A/B
+    // word holds until a segment sets it again).
+    const char kSpeedReset[] = "glow=on+warp=on+fog=on+shadow=on+rtt=on+copy=on+env=on+"
+                               "profile=off+gpusplit=off+fill=on+flush=heap+statsline=on+"
+                               "stereo=off+refresh=on+fast=on+pipe=on+eyeskip=on+alphafill=off+skintrim=on+glowclear=off+eyetest=normal+savevram=on";
+
+    // BB02's busy spot (about 440 draws, held still from frame 370 while
+    // nothing is pressed): plain at both ends for the drift, the
+    // measuring words, one effect at a time left out, the L2 flush, and the
+    // stats line's own SD write left out.
+    const SpeedSeg kSpeedBusy[] = {
+        { "", "busy: all on (first)" },
+        { "profile=on", "busy: profile" },
+        { "gpusplit=on", "busy: gpusplit" },
+        { "fill=off", "busy: fill=off" },
+        { "glow=off", "busy: glow off" },
+        { "fog=off", "busy: fog off" },
+        { "shadow=off", "busy: shadow off" },
+        { "env=off", "busy: env maps off" },
+        { "flush=cmdlist", "busy: L2 flush=cmdlist" },
+        { "statsline=off", "busy: stats line off" },
+        { "", "busy: all on (last)" },
+    };
+    // The calm spot (about 55 draws), after the walk.
+    const SpeedSeg kSpeedCalm[] = {
+        { "", "calm: all on (first)" }, { "profile=on", "calm: profile" },
+        { "gpusplit=on", "calm: gpusplit" }, { "fill=off", "calm: fill=off" },
+        { "", "calm: all on (last)" },
+    };
+    // Run 2's busy spot with the models' vertices in VRAM.
+    const SpeedSeg kSpeedVb[] = {
+        { "", "busy vbvram: all on" },
+        { "gpusplit=on", "busy vbvram: gpusplit" },
+        { "fill=off", "busy vbvram: fill=off" },
+        { "profile=on", "busy vbvram: profile" },
+    };
+    // A level played by the speed test's script, or a stretch of a cutscene: plain and
+    // profile in turn, one gpusplit.
+    const SpeedSeg kSpeedLevel[] = {
+        { "", "all on" },       { "profile=on", "profile" }, { "", "all on" },
+        { "gpusplit=on", "gpusplit" }, { "", "all on" }, { "profile=on", "profile" },
+        { "", "all on" },       { "profile=on", "profile" }, { "", "all on" },
+    };
+    // BB02's busy spot without sound: audio's cost on the game's core by
+    // the difference with run 1.
+    const SpeedSeg kSpeedQuiet[] = {
+        { "", "busy without audio: all on" },     { "profile=on", "busy without audio: profile" },
+        { "", "busy without audio: all on" },     { "gpusplit=on", "busy without audio: gpusplit" },
+        { "", "busy without audio: all on" },     { "profile=on", "busy without audio: profile" },
+        { "", "busy without audio: all on" },
+    };
+    const SpeedSeg kSpeedShort[] = {
+        { "", "all on" },
+        { "profile=on", "profile" },
+        { "", "all on" },
+    };
+    // Probe 15: each speed2 fix off, then on again, at the same spot. pipe=off
+    // waits for the frame before (no L4), fast=off leaves L3's caches out,
+    // refresh=off instances a model whose vertices changed from the start.
+    const SpeedSeg kSpeedAbBusy[] = {
+        { "", "busy ab: all on" },
+        { "pipe=off", "busy ab: pipe off" },
+        { "", "busy ab: all on" },
+        { "fast=off", "busy ab: fast off" },
+        { "", "busy ab: all on" },
+        { "refresh=off", "busy ab: refresh off" },
+        { "", "busy ab: all on" },
+        { "stereo=force+pipe=off", "busy ab: force:50 pipe off" },
+        { "stereo=force", "busy ab: force:50 pipe on" },
+        { "profile=on", "busy ab: profile" },
+    };
+    const SpeedSeg kSpeedAbFly[] = {
+        { "", "all on" },         { "refresh=off", "refresh off" }, { "", "all on" },
+        { "pipe=off", "pipe off" }, { "", "all on" },             { "refresh=off", "refresh off" },
+        { "", "all on" },
+    };
+    const SpeedSeg kSpeedAbLevel[] = {
+        { "", "all on" },
+        { "pipe=off", "pipe off" },
+        { "", "all on" },
+        { "fast=off", "fast off" },
+        { "", "all on" },
+        { "stereo=force+pipe=off", "force:50 pipe off" },
+        { "stereo=force", "force:50 pipe on" },
+    };
+    // Probe 16: in 3D (force:50), each speed3 change off (alphafill, off by
+    // default, on), "all on" between; eyetest's words; 2D without and with
+    // the eye code (eyetest=2d); then all of speed3 off at once.
+    const SpeedSeg kSpeedAb3[] = {
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+eyeskip=off", "3d ab: eyeskip off" },
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+skintrim=off", "3d ab: skintrim off" },
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+glowclear=on", "3d ab: glowclear on" },
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+savevram=off", "3d ab: savevram off" },
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+alphafill=on", "3d ab: alphafill on" },
+        { "stereo=force+eyetest=noshift", "3d ab: eyetest noshift" },
+        { "stereo=force+eyetest=noright", "3d ab: eyetest noright" },
+        { "stereo=force+eyetest=nosave", "3d ab: eyetest nosave" },
+        { "stereo=force", "3d ab: all on" },
+        { "", "3d ab: 2d" },
+        { "eyetest=2d", "3d ab: 2d eyetest 2d" },
+        { "stereo=force+eyeskip=off+skintrim=off+glowclear=on+savevram=off",
+          "3d ab: speed3 all off" },
+        { "stereo=force", "3d ab: all on" },
+        { "stereo=force+profile=on", "3d ab: profile" },
+    };
+#define SPEED_N(a) (int)(sizeof(a) / sizeof(a[0]))
+#if TSSM_3DS_PROBE == 16
+#define PROBE_SPEED_MINUTES "50"
+#elif TSSM_3DS_PROBE == 15
+#define PROBE_SPEED_MINUTES "35"
+#else
+#define PROBE_SPEED_MINUTES "25"
+#endif
+
+    const SpeedRun kSpeedRuns[] = {
+        { "bb02", "BB02: the busy spot, then the calm one", "BB02", SPEED_INPUT_BB02, 390, 120,
+          kSpeedBusy, SPEED_N(kSpeedBusy), kSpeedCalm, SPEED_N(kSpeedCalm), "" },
+        { "bb02-vbvram", "BB02 with the models in VRAM", "BB02", SPEED_INPUT_BB02, 390, 120,
+          kSpeedVb, SPEED_N(kSpeedVb), NULL, 0, "TSSM_C3D_VBVRAM=on" },
+        { "gg02", "GG02", "GG02", SPEED_INPUT_D0, 400, 150, kSpeedLevel, SPEED_N(kSpeedLevel),
+          NULL, 0, "" },
+        { "tr01", "TR01", "TR01", SPEED_INPUT_D0, 400, 150, kSpeedLevel, SPEED_N(kSpeedLevel),
+          NULL, 0, "" },
+        { "jk01", "JK01", "JK01", SPEED_INPUT_D0, 400, 150, kSpeedLevel, SPEED_N(kSpeedLevel),
+          NULL, 0, "" },
+        { "bb01", "BB01", "BB01", SPEED_INPUT_D0, 400, 150, kSpeedLevel, SPEED_N(kSpeedLevel),
+          NULL, 0, "" },
+        { "bb02-fly", "BB02's opening fly-through", "BB02", SPEED_INPUT_NONE, 100, 150,
+          kSpeedLevel, SPEED_N(kSpeedLevel), NULL, 0, "" },
+        { "bb02-noaudio", "BB02 without sound", "BB02", SPEED_INPUT_BB02, 390, 120, kSpeedQuiet,
+          SPEED_N(kSpeedQuiet), NULL, 0, "TSSM_AUDIO=0" },
+        { "title", "The title screen, and the draw benchmark", "", SPEED_INPUT_NONE, 120, 150,
+          kSpeedShort, SPEED_N(kSpeedShort), NULL, 0, "TSSM_C3D_BENCH=2" },
+        { "bb02-pause", "BB02's pause menu", "BB02", SPEED_INPUT_PAUSE, 450, 150, kSpeedShort,
+          SPEED_N(kSpeedShort), NULL, 0, "" },
+#if TSSM_3DS_PROBE >= 15
+        // The mixer's own timing (TSSM_AUDIO_PROF) goes to the run's log.
+        { "bb02-ab", "BB02: each speed fix off, then on", "BB02", SPEED_INPUT_BB02, 390, 120,
+          kSpeedAbBusy, SPEED_N(kSpeedAbBusy), NULL, 0, "TSSM_AUDIO_PROF=1" },
+        { "bb02-fly-ab", "BB02's fly-through: each fix off, then on", "BB02", SPEED_INPUT_NONE,
+          100, 150, kSpeedAbFly, SPEED_N(kSpeedAbFly), NULL, 0, "" },
+        { "gg02-ab", "GG02: each speed fix off, then on", "GG02", SPEED_INPUT_D0, 400, 150,
+          kSpeedAbLevel, SPEED_N(kSpeedAbLevel), NULL, 0, "TSSM_AUDIO_PROF=1" },
+#endif
+#if TSSM_3DS_PROBE == 16
+        // GG02 and BB01 from frame 1800: the speed test's script has ended (1761), the
+        // player stands where probe 15's 3D pair measured them.
+        { "bb02-ab3", "BB02 in 3D: each new speed change off, then on", "BB02", SPEED_INPUT_BB02,
+          390, 120, kSpeedAb3, SPEED_N(kSpeedAb3), NULL, 0, "" },
+        { "gg02-ab3", "GG02 in 3D: each new speed change off, then on", "GG02", SPEED_INPUT_D0,
+          1800, 150, kSpeedAb3, SPEED_N(kSpeedAb3), NULL, 0, "" },
+        { "bb01-ab3", "BB01 in 3D: each new speed change off, then on", "BB01", SPEED_INPUT_D0,
+          1800, 150, kSpeedAb3, SPEED_N(kSpeedAb3), NULL, 0, "" },
+#endif
+    };
+    const int kNumSpeedRuns = SPEED_N(kSpeedRuns);
+
+    // The dialogs at BB02's start, then (from `walk`) the A/B measuring run's walk
+    // from the busy spot to the calm one: as its script, from its frame 1260.
+    const char kSpeedWalk[][16] = { "0:up/120",  "60:a/9",   "150:right/60", "225:b/6",
+                                    "270:up/120", "300:a/9", "360:a/9",      "420:left/90" };
+    // The walk takes 510 frames; the calm spot is still from about 520 on.
+    const int kSpeedWalkToCalm = 530;
+    const char kSpeedD0[] =
+        "90:a/6,135:a/6,180:b/6,210:b/6,240:b/6,270:b/6,300:b/6,330:b/6,360:b/6,420:up/120,"
+        "480:a/9,570:right/60,645:b/6,690:up/120,720:a/9,780:a/9,840:left/90,945:b/6,990:x/6,"
+        "1020:x/6,1050:down/90,1155:up/180,1200:a/9,1260:a/9,1344:b/6,1380:right/150,1440:a/9,"
+        "1545:b/6,1590:up/150,1650:a/9,1755:b/6";
+
+    void SpeedAdd(char* ab, size_t size, size_t* used, int frame, const char* set,
+                  const char* label)
+    {
+        if (*used >= size)
+        {
+            return;
+        }
+        *used += (size_t)snprintf(ab + *used, size - *used, "%s%d:%s%s%s#%s",
+                                  *used > 0 ? "," : "", frame, kSpeedReset,
+                                  set[0] != '\0' ? "+" : "", set, label);
+    }
+
+    // A spot's segments from `frame`, and with the stereo code the three
+    // that compare 2D and 3D there; the frame after the last.
+    int SpeedBlock(char* ab, size_t size, size_t* used, int frame, int segLen,
+                   const SpeedSeg* segs, int n, const char* spot)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            SpeedAdd(ab, size, used, frame, segs[i].set, segs[i].label);
+            frame += segLen;
+        }
+        if (TSSM_SPEED14_STEREO)
+        {
+            static const char* kSet[3] = { "stereo=off", "stereo=force", "stereo=guard" };
+            static const char* kWhat[3] = { "3D pair: 2D", "3D pair: force:50",
+                                            "3D pair: force:50 with the guard" };
+            for (int i = 0; i < 3; i++)
+            {
+                char label[40];
+                snprintf(label, sizeof(label), "%s%s%s", spot, spot[0] != '\0' ? ": " : "",
+                         kWhat[i]);
+                SpeedAdd(ab, size, used, frame, kSet[i], label);
+                frame += segLen;
+            }
+        }
+        return frame;
+    }
+
+    // The run's TSSM_C3D_AB and TSSM_INPUT, and its last frame.
+    int SpeedSchedule(const SpeedRun* r, char* ab, size_t abSize, char* in, size_t inSize)
+    {
+        size_t used = 0;
+        ab[0] = '\0';
+        in[0] = '\0';
+        int frame = SpeedBlock(ab, abSize, &used, r->first, r->segLen, r->a, r->na,
+                               r->b != NULL ? "busy" : "");
+        int walk = 0;
+        if (r->b != NULL)
+        {
+            // The walk between the spots is a segment of its own, so the
+            // last one at the busy spot ends where the walk starts.
+            walk = frame;
+            SpeedAdd(ab, abSize, &used, walk, "", "the walk to the calm spot (no spot)");
+            frame = SpeedBlock(ab, abSize, &used, walk + kSpeedWalkToCalm, r->segLen, r->b,
+                               r->nb, "calm");
+        }
+        if (r->input == SPEED_INPUT_D0)
+        {
+            snprintf(in, inSize, "%s", kSpeedD0);
+        }
+        else if (r->input == SPEED_INPUT_BB02 || r->input == SPEED_INPUT_PAUSE)
+        {
+            size_t n = (size_t)snprintf(in, inSize, "%s", kIntroKeys);
+            if (r->input == SPEED_INPUT_PAUSE && n < inSize)
+            {
+                n += (size_t)snprintf(in + n, inSize - n, ",420:start/6");
+            }
+            for (int i = 0; walk > 0 && i < SPEED_N(kSpeedWalk) && n < inSize; i++)
+            {
+                const int at = atoi(kSpeedWalk[i]);
+                n += (size_t)snprintf(in + n, inSize - n, ",%d%s", walk + at,
+                                      strchr(kSpeedWalk[i], ':'));
+            }
+        }
+        return frame;
+    }
+
+    // The bottom screen's and the log's name of a run.
+    const SpeedRun* SpeedThisRun()
+    {
+        const int i = sChain.run >= 1 && sChain.run <= kNumSpeedRuns ? sChain.run - 1 : 0;
+        return &kSpeedRuns[i];
+    }
+
+    // A start from the Homebrew Launcher with speed14/only-run.txt (speed15/,
+    // speed16/ for probes 15, 16) holding a run number runs that one alone and stops: for checks in an emulator,
+    // which has no Luma3DS loader to chain with. The console's card has none.
+    void SpeedOnlyRun()
+    {
+        char path[96];
+        snprintf(path, sizeof(path), "%s/only-run.txt", sChain.dir);
+        FILE* f = fopen(path, "r");
+        if (f == NULL)
+        {
+            return;
+        }
+        char line[16] = { 0 };
+        const bool read = fgets(line, sizeof(line), f) != NULL;
+        fclose(f);
+        const int n = read ? atoi(line) : 0;
+        if (n >= 1 && n <= kNumSpeedRuns)
+        {
+            sChain.run = n;
+            sChain.only = true;
+        }
+    }
+
+    void SpeedPlan()
+    {
+        const SpeedRun* r = SpeedThisRun();
+        snprintf(sChain.cfg, sizeof(sChain.cfg), "%s", r->cfg);
+        sChain.last = sChain.only || sChain.run >= kNumSpeedRuns;
+        if (sChain.only)
+        {
+            snprintf(sChain.note, sizeof(sChain.note),
+                     "only this run (%s/only-run.txt, for an emulator's check)",
+                     ChainDirName());
+        }
+    }
+
     // In i3DSEarly, before the log opens: which run this is and its settings.
     void ChainPlan()
     {
@@ -2109,6 +2509,10 @@ namespace
                 snprintf(sChain.cfg, sizeof(sChain.cfg), "fixed");
                 snprintf(sChain.mode, sizeof(sChain.mode), "%s", st.mode);
             }
+        }
+        if (p->chain == CHAIN_SPEED && sChain.fresh)
+        {
+            SpeedOnlyRun();
         }
         Held h;
         MeasureHeld(&h);
@@ -2163,8 +2567,15 @@ namespace
                                                                      : "the run before: its process "
                                                                        "was freed")
                                     : "");
-            snprintf(sChain.cfg, sizeof(sChain.cfg), "%s", sChain.run == 1 ? "bb02" : "gg02");
-            sChain.last = sChain.run >= 2;
+            if (p->chain == CHAIN_SPEED)
+            {
+                SpeedPlan();
+            }
+            else
+            {
+                snprintf(sChain.cfg, sizeof(sChain.cfg), "%s", sChain.run == 1 ? "bb02" : "gg02");
+                sChain.last = sChain.run >= 2;
+            }
         }
         // Seen on the console: the third or the fourth held program in one
         // power-on panicked the kernel at the next start. A run that starts
@@ -2248,6 +2659,35 @@ namespace
                      "TSSM_SAVE_DIR=%s/saves;TSSM_CONFIG=%s/config.ini",
                      ChainEnv(sChain.cfg), kIntroKeys, sChain.run == 1 ? "BB02" : "GG02",
                      k3DSRoot, sChain.dir, sChain.dir);
+        }
+        else if (p->chain == CHAIN_SPEED)
+        {
+            // The schedule and the script are longer than SetPairs takes.
+            const SpeedRun* r = SpeedThisRun();
+            static char ab[8192];
+            static char input[2048];
+            const int last = SpeedSchedule(r, ab, sizeof(ab), input, sizeof(input));
+            setenv("TSSM_C3D_AB", ab, 1);
+            if (input[0] != '\0')
+            {
+                setenv("TSSM_INPUT", input, 1);
+            }
+            else
+            {
+                unsetenv("TSSM_INPUT");
+            }
+            char tag[64];
+            snprintf(tag, sizeof(tag), "run %d %s", sChain.run, r->cfg);
+            setenv("TSSM_C3D_AB_TAG", tag, 1);
+            char boot[32];
+            snprintf(boot, sizeof(boot), "TSSM_BOOT=%s", r->boot);
+            SetPairs(boot);
+            SetPairs("TSSM_FIXED_STEP=30;TSSM_C3D_STATS=5;TSSM_C3D_AB_DETAIL=1");
+            SetPairs(r->extra);
+            snprintf(pairs, sizeof(pairs),
+                     "TSSM_C3D_AB_LOG=%s/%s.log;TSSM_EXIT_AFTER=%d;TSSM_SAVE_DIR=%s/saves;"
+                     "TSSM_CONFIG=%s/config.ini",
+                     k3DSRoot, ChainDirName(), last, sChain.dir, sChain.dir);
         }
         else
         {
@@ -3430,6 +3870,18 @@ namespace
             i3DSQuitLine("the probe stops for this power-on; back to the Homebrew Launcher");
             return;
         }
+        if (sChain.last && p->chain == CHAIN_SPEED)
+        {
+            ChainLog("DONE after run %d%s: probe %d has finished. Restart the console (hold "
+                     "POWER), then open ftpd.",
+                     sChain.run, sChain.only ? " (only-run.txt's one run)" : "", TSSM_3DS_PROBE);
+            i3DSQuitLine(TSSM_3DS_PROBE == 16   ?
+                             "probe 16 has finished; back to the Homebrew Launcher" :
+                         TSSM_3DS_PROBE == 15 ?
+                             "probe 15 has finished; back to the Homebrew Launcher" :
+                             "probe 14 has finished; back to the Homebrew Launcher");
+            return;
+        }
         if (sChain.last)
         {
             ChainLog("DONE after run %d: back to the Homebrew Launcher. Restart the console (hold "
@@ -3588,7 +4040,7 @@ namespace
             }
         }
         char line[160];
-        snprintf(line, sizeof(line), "TSSM probe %d of %d", TSSM_3DS_PROBE, kNumProbes);
+        snprintf(line, sizeof(line), "TSSM probe %d", TSSM_3DS_PROBE);
         int y = BottomText(fb, format, 10, 2, 0xFFFFFF, line);
         snprintf(line, sizeof(line), "Tests %s.", p->tests);
         y = BottomText(fb, format, y + 6, 1, 0xC0D0FF, line);
@@ -3625,6 +4077,31 @@ namespace
         {
             y = LadderBanner(fb, format, y);
         }
+        else if (p->chain == CHAIN_SPEED)
+        {
+            snprintf(line, sizeof(line), "Run %d of %d", sChain.run, kNumSpeedRuns);
+            y = BottomText(fb, format, y + 8, 2, 0xFFFFFF, line);
+            snprintf(line, sizeof(line), "%s.", SpeedThisRun()->what);
+            y = BottomText(fb, format, y + 2, 1, 0xFFFFFF, line);
+            y = BottomText(fb, format, y + 4, 1, 0xFFFFFF,
+                           sChain.only ? "Only this run (only-run.txt), then back to the "
+                                         "Homebrew Launcher." :
+                                         "It plays by itself, then quits and starts the next "
+                                         "run: about " PROBE_SPEED_MINUTES " minutes in all. "
+                                         "Leave it alone.");
+            if (sChain.last && !sChain.only)
+            {
+                y = BottomText(fb, format, y + 4, 1, 0x80FF80,
+                               TSSM_3DS_PROBE == 16 ?
+                                   "The last run. When the Homebrew Launcher is back, probe 16 "
+                                   "has finished: restart the console, then open ftpd." :
+                               TSSM_3DS_PROBE == 15 ?
+                                   "The last run. When the Homebrew Launcher is back, probe 15 "
+                                   "has finished: restart the console, then open ftpd." :
+                                   "The last run. When the Homebrew Launcher is back, probe 14 "
+                                   "has finished: restart the console, then open ftpd.");
+            }
+        }
         else
         {
             y = BottomText(fb, format, y + 10, 1, 0xFFFFFF,
@@ -3637,6 +4114,9 @@ namespace
                        p->chain == CHAIN_LADDER ?
                            "(Frozen: nothing moves for 30 seconds and HOME does nothing.) Then "
                            "switch it on and start probe 11 again: it skips that part." :
+                       p->chain == CHAIN_SPEED ?
+                           "(Frozen: nothing moves for 30 seconds and HOME does nothing.) Note "
+                           "the run's number above first." :
                            "(Frozen: nothing moves for 30 seconds and HOME does nothing.) Then "
                            "start the next probe.");
         if (p->chain != CHAIN_NONE)
@@ -3774,6 +4254,11 @@ void i3DSEarly()
 
 void i3DSStartup()
 {
+#ifdef RW_C3D
+    // The renderer asks the game once a frame where the 3D's eyes converge
+    // (not in the speed test, which draws nothing).
+    rw::c3d::setStereoFocusHook(iStereo3DSFocus);
+#endif
     // What a first hardware session needs to know: the memory a .3dsx really
     // gets on the console it runs on, and how libctru split it.
     const u32 appTotal = osGetMemRegionSize(MEMREGION_APPLICATION);
@@ -3897,7 +4382,7 @@ void i3DSStartup()
     if (ThisProbe() != NULL)
     {
         ApplyProbe();
-        printf("tssm: probe %d of %d (%s): tests %s; switches: %s;%s\n", TSSM_3DS_PROBE, kNumProbes,
+        printf("tssm: probe %d (%s): tests %s; switches: %s;%s\n", TSSM_3DS_PROBE,
                ThisProbe()->name, ThisProbe()->tests,
                ThisProbe()->chain == CHAIN_EXITLOOP || ThisProbe()->chain == CHAIN_LADDER ?
                    "TSSM_INTRO_MOVIES=off;TSSM_3DS_GUI=off" :

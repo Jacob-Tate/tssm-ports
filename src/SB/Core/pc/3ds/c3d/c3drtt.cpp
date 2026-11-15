@@ -28,6 +28,11 @@ namespace rw
     {
         namespace
         {
+            // The screen pass screenPassOn let run last, and the one inside
+            // rw's iScreenPassBegin/End now (-1: none; 0 the glow, 1 the warp).
+            int32 sPassAsked = -1;
+            int32 sPassRunning = -1;
+
             int32 pow2At8(int32 v)
             {
                 int32 p = 8;
@@ -361,6 +366,13 @@ namespace rw
             {
                 return;
             }
+            if (natras->isShadow && color && screenPassRunning() < 0)
+            {
+                // The shadow camera's pass, from a clear of all its colour:
+                // the same for both eyes (its camera has no eye shift; a draw
+                // in it with the depth test or write on sends it again).
+                eyeFreeBegin(natras->target);
+            }
             bindTarget(natras->target, natras->usedW, natras->usedH);
             clearQuad(rgba, color, depth && natras->isShadow);
             natras->rendered = 1;
@@ -427,6 +439,11 @@ namespace rw
             return copyScreenInto(GETC3DRASTEREXT(dst), own != 0) ? 1 : 0;
         }
 
+        int screenPassInvalidates(void)
+        {
+            return modes.glowClear ? 1 : 0;
+        }
+
         int screenPassOn(int pass)
         {
             // The glow draws through camera textures: with rtt=off its
@@ -450,7 +467,23 @@ namespace rw
                 logOnce("glowrtt", "rtt or copy off: the HDR glow is not drawn (it needs camera "
                                    "textures and screen copies)");
             }
+            // The pass that runs next, for gpusplit's buckets (screenPassScope).
+            sPassAsked = on ? pass : -1;
             return on ? 1 : 0;
+        }
+
+        void screenPassScope(int begin)
+        {
+            sPassRunning = begin && sPassAsked >= 0 ? sPassAsked : -1;
+            if (!begin)
+            {
+                sPassAsked = -1;
+            }
+        }
+
+        int32 screenPassRunning(void)
+        {
+            return sPassRunning;
         }
 
         Image* rttToImage(Raster* raster)

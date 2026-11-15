@@ -10,6 +10,9 @@ screen.
   a little; `docs/3DS.md` ("Known gaps") says what is still unchecked.
 - **New 3DS, New 3DS XL and New 2DS XL only**, running custom firmware (Luma3DS). An
   original 3DS or 2DS is too slow and has too little memory; the game says so and stops.
+- **Stereoscopic 3D** with the 3D slider: the world in 3D, the HUD and menus at the
+  screen. Where a busy place cannot keep 30 fps in 3D, the game plays it in 2D for a while
+  by itself.
 - Two packages from the same program: `tssm.3dsx` for the Homebrew Launcher and
   `tssm.cia` for the HOME Menu.
 - This branch still builds the Windows version too. It started from an early copy of the

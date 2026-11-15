@@ -286,8 +286,19 @@ namespace rw
             bool sBonesIdentity;
         } // namespace
 
-        InstanceDataHeader* instanceSkin(Geometry* geo)
+        InstProf gInstProf;
+
+        InstanceDataHeader* instanceSkin(Geometry* geo, bool again)
         {
+            InstProf& ip = gInstProf;
+            u64 tp = ip.on ? svcGetSystemTick() : 0;
+#define IP_MARK(field)                                                                             \
+    if (ip.on)                                                                                     \
+    {                                                                                              \
+        const u64 tn = svcGetSystemTick();                                                         \
+        ip.field += tn - tp;                                                                       \
+        tp = tn;                                                                                   \
+    }
             Skin* skin = Skin::get(geo);
             MeshHeader* mh = geo->meshHeader;
             if (skin == nil || skin->indices == nil || skin->weights == nil || mh == nil ||
@@ -352,12 +363,14 @@ namespace rw
                 int n = pack(tris[m], sets, PALETTE_BONES, &triPiece[m], &pieceSets[m]);
                 pieces20 += n;
                 verts20 += splitVertices(tris[m], triPiece[m], n, nv, &mark);
-                if (statsOn())
+                IP_MARK(prep);
+                if (statsOn() && !again)
                 {
                     int n10 = pack(tris[m], sets, 10, &tp10, &ps10);
                     pieces10 += n10;
                     verts10 += splitVertices(tris[m], tp10, n10, nv, &mark);
                 }
+                IP_MARK(stats);
             }
 
             // The vertices and indices.
@@ -396,6 +409,9 @@ namespace rw
                 rwNewT(SkinPiece, numPieces > 0 ? numPieces : 1, MEMDUR_EVENT | ID_GEOMETRY);
             h->numPieces = numPieces;
             memset(h->pieces, 0, sizeof(SkinPiece) * (numPieces > 0 ? numPieces : 1));
+            h->srcVertices = (uint32)nv;
+            h->srcMap = whole ? nil : rwNewT(uint16, outVerts > 0 ? outVerts : 1,
+                                              MEMDUR_EVENT | ID_GEOMETRY);
             h->indexBuffer = (uint16*)linearAlloc((outIndex > 0 ? outIndex : 1) * sizeof(uint16));
             h->vertexBuffer = (uint8*)linearAlloc((size_t)outVerts * stride);
             if (h->indexBuffer == nil || h->vertexBuffer == nil)
@@ -406,11 +422,13 @@ namespace rw
                     linearFree(h->indexBuffer);
                 if (h->vertexBuffer != nil)
                     linearFree(h->vertexBuffer);
+                rwFree(h->srcMap);
                 rwFree(h->pieces);
                 rwFree(h->inst);
                 rwFree(h);
                 return nil;
             }
+            IP_MARK(alloc);
 
             uint8 prev[PALETTE_BONES]; // the previous piece's bone per slot
             int prevSlots = 0;
@@ -540,6 +558,7 @@ namespace rw
                                 if (local[v] < 0)
                                 {
                                     local[v] = vbase++;
+                                    h->srcMap[local[v]] = (uint16)v;
                                     uint8 slots[4];
                                     for (int j = 0; j < 4; j++)
                                     {
@@ -577,9 +596,18 @@ namespace rw
                 }
             }
 
+            IP_MARK(write);
             GSPGPU_FlushDataCache(h->vertexBuffer, (u32)outVerts * stride);
             GSPGPU_FlushDataCache(h->indexBuffer, (u32)outIndex * sizeof(uint16));
+            IP_MARK(flush);
+            ip.skins++;
+            ip.skinVerts += (uint32)outVerts;
 
+            if (again)
+            {
+                IP_MARK(print);
+                return h;
+            }
             sTotals.geometries++;
             sTotals.split += whole ? 0 : 1;
             sTotals.pieces20 += pieces20;
@@ -604,6 +632,8 @@ namespace rw
                        sTotals.verts10, sTotals.noWeights);
                 fflush(stdout);
             }
+            IP_MARK(print);
+#undef IP_MARK
             return h;
         }
 

@@ -162,7 +162,7 @@ if(TSSM_3DS)
   # A console probe (docs/3DS.md, "Console probes"): the game with one effect
   # not yet shown to work on a console turned on, everything it needs compiled
   # into i3DS.cpp alone, so that the probes share one build directory.
-  set(TSSM_3DS_PROBE "0" CACHE STRING "A console probe build, 1-11 (docs/3DS.md); 0: the game")
+  set(TSSM_3DS_PROBE "0" CACHE STRING "A console probe build, 1-11, 14-16 (docs/3DS.md); 0: the game")
 endif()
 
 # --- render backends -----------------------------------------------------------
@@ -1002,6 +1002,11 @@ target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
 # unit too, for the same reason.
 target_sources(tssm_game PRIVATE ${PC_DIR}/iTestSend.cpp)
+if(TSSM_3DS AND TSSM_BACKEND_C3D)
+  # The 3DS renderer's stereo hook (3ds/iStereo3DS.h): it reads the game's camera
+  # and player, so it is a game unit. The speed test (NULL backend) has none.
+  target_sources(tssm_game PRIVATE ${PC_DIR}/3ds/iStereo3DS.cpp)
+endif()
 # SBPrefix.h is the console's precompiled prefix (-prefix SBPrefix.mch): every
 # game unit sees it first.
 target_compile_options(tssm_game PRIVATE ${TSSM_NO_WARNINGS} ${TSSM_GAME_OPTIONS}

@@ -14,6 +14,7 @@ namespace rw
 {
     struct Raster;
     struct Device;
+    struct Camera;
 
     namespace c3d
     {
@@ -32,6 +33,9 @@ namespace rw
             // [3ds] effects: the effects not yet shown to work on a console
             // that are turned on ("fog,rtt,..."; nil or "none": none).
             const char* effects;
+            // [video] stereo (auto or off; nil: auto) and stereo_depth (0..100).
+            const char* stereo;
+            int stereoDepth;
         };
 
         // TRUE once the device is open (citro3d up, the top screen ours).
@@ -129,10 +133,41 @@ namespace rw
         // A/B switches; the glow also needs rtt): 0 the HDR glow, 1 the
         // screen warp.
         int screenPassOn(int pass);
+        // Whether the glow clears its halving and bright targets before drawing
+        // each over whole (glowclear; off: the PICA draws them for nothing).
+        int screenPassInvalidates(void);
+        // rw's iScreenPassBegin (1) and iScreenPassEnd (0): the pass
+        // screenPassOn let run is drawing in between (probe 14's gpusplit).
+        void screenPassScope(int begin);
 
         // TSSM_C3D_AB's switches (c3dab.cpp): called after each present with
         // the capture hook's frame number.
         void testFrame(int frame);
+
+        // ------------------------------------------- stereoscopic 3D
+        // (c3dstereo.cpp; docs/3DS.md "Stereoscopic 3D"). The right eye is the
+        // frame's command lists sent to the GPU a second time with the other
+        // eye's shift.
+
+        // Once a frame, at the present before it, the device asks the game
+        // (3ds/iStereo3DS.cpp) for the convergence plane: the hook calls
+        // stereoFocus with the game's main camera (only it is drawn per eye),
+        // the player's position (nil: none), whether the camera follows the
+        // player (`fixed`: a fly-through, a cutscene, tracking off; the plane
+        // is then held), and whether the game is outside play (`flat`: the
+        // title, the pause menu and the other menus, whose 3D models stay at
+        // the screen with the text).
+        typedef void (*StereoFocusHook)(void);
+        void setStereoFocusHook(StereoFocusHook hook);
+        void stereoFocus(Camera* mainCamera, const float* playerPos, int fixed, int flat);
+
+        // The per-eye captures (iCapture.cpp): whether the frame just
+        // presented had two eyes; that the next frame keep its left eye for
+        // readScreen; and which eye readScreen reads (1 the left of a 3D
+        // frame, 0 the right one, or the only one of a 2D frame).
+        int frameWasStereo(void);
+        void stereoCaptureLeft(int on);
+        void readScreenEye(int left);
 
         // For the error box and the quit (3ds/i3DS.cpp): the GPU is waited
         // for, what it read freed and citro3d shut down. Nothing draws

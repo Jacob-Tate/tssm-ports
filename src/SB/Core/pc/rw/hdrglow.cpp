@@ -206,7 +206,7 @@ void iHDRGlowRender(RwCamera* cam, F32 overbrighten, S32 downsamples, S32 downSr
         RwRaster* from = picture;
         for (S32 i = 0; i < sHalvings; i++)
         {
-            if (iGpuOptOn(IGPUOPT_INVALIDATE))
+            if (iScreenPassInvalidates())
             {
                 iScreenPassClear(&sHalf[i]);
             }
@@ -220,7 +220,7 @@ void iHDRGlowRender(RwCamera* cam, F32 overbrighten, S32 downsamples, S32 downSr
         //    as one draw at up to 1 and additive draws for the rest.
         S32 total = kBrightStages * (S32)brightConstant(overbrighten);
 
-        if (iGpuOptOn(IGPUOPT_INVALIDATE))
+        if (iScreenPassInvalidates())
         {
             iScreenPassClear(&sBright);
         }

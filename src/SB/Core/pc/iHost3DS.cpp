@@ -25,6 +25,7 @@
 
 #include "iAudioSDL.h"
 #include "iLog.h"
+#include "iSndHost.h"
 #include "iTime.h"
 #include "3ds/i3DS.h"
 
@@ -457,6 +458,16 @@ void i3DSGameBack()
     // opened again, so whatever the system did to them while the game was
     // away cannot matter.
     iAudioSDLRestart(iAUDIOSDL_FOREGROUND);
+}
+
+int i3DSAudioMixTake(uint32_t* calls, uint64_t* totalNs, uint64_t* maxNs)
+{
+    iSndHostMixStats st;
+    const bool up = iSndHostMixStatsTake(&st, true);
+    *calls = up ? st.calls : 0;
+    *totalNs = up ? st.totalNs : 0;
+    *maxNs = up ? st.maxNs : 0;
+    return up ? 1 : 0;
 }
 
 const char* i3DSCrashLogPath()
