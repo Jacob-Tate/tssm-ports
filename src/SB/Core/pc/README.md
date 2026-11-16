@@ -37,14 +37,151 @@ By hand:
 
 | CMake option | Default | |
 |---|---|---|
-| `TSSM_BUILD_32BIT` | OFF | 32-bit build; needs a fresh build directory and the x86 MSVC environment |
+| `TSSM_BUILD_32BIT` | OFF | 32-bit build; needs a fresh build directory and the x86 MSVC environment (MinGW: not needed, the MINGW32 shell's gcc builds 32-bit) |
 | `TSSM_RENDER_BACKENDS` | `D3D9;D3D11;GL3` (Windows), `GL3` elsewhere | also `VULKAN`, or `NULL` alone for headless |
 | `TSSM_INPUT_BACKEND` | `sdl` | or `null` |
 | `TSSM_AUDIO_BACKEND` | `sdl` | or `null` |
-| `TSSM_SDL` | `auto` | `system` / `vendored` (`third_party/SDL`) |
+| `TSSM_SDL` | `auto` (MinGW: `vendored`) | `system` / `vendored` (`third_party/SDL`) |
 | `TSSM_GUI` | ON | the Dear ImGui launcher and in-game overlay (`third_party/imgui`, `docs/GUI.md`) |
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
+
+## Building with MinGW (MSYS2)
+
+MinGW-w64's GCC builds the same game as the MSVC build, 64-bit and 32-bit:
+D3D9, D3D11 and GL3 in one `tssm.exe`, the settings overlay, sound, controllers
+and the movies. The result is one file that needs no DLL besides Windows' own
+(the GCC runtime, SDL and FFmpeg are linked into it), so it runs outside MSYS2.
+
+### 1. Install MSYS2 and the packages
+
+Install MSYS2 from https://www.msys2.org into a folder without spaces (its
+default, `C:\msys64`, is fine). It has several shells; use **MINGW64** for a
+64-bit build and **MINGW32** for a 32-bit one (in the Start menu as "MSYS2
+MINGW64" and "MSYS2 MINGW32", or `mingw64.exe` and `mingw32.exe` in the MSYS2
+folder). The UCRT64 shell MSYS2 opens by default has not been tried, and the
+build script refuses it.
+
+In the shell, bring MSYS2 up to date first (it may ask to close the window
+and run the same command again), then install the packages. The toolchain
+group asks which members to install: press Enter for all of them.
+
+    pacman -Syu
+
+    MINGW64:  pacman -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git make diffutils
+    MINGW32:  pacman -S --needed mingw-w64-i686-toolchain mingw-w64-i686-cmake mingw-w64-i686-ninja git make diffutils
+
+`git` is for the submodules and for the librw patches the build applies; Git
+for Windows works as well (the script finds it in its default folder), and so
+does a checkout made by either. `make` and `diffutils` are only for building
+FFmpeg (below).
+
+### 2. Get the source
+
+Clone the repository's `pc` branch, or `cd` into a checkout you already
+have; its folder may have spaces in it. In the MSYS2 shell, `C:\` is `/c/`.
+Then fetch the submodules:
+
+    git submodule update --init --depth 1
+
+### 3. FFmpeg, for the movies
+
+The game's movies are Bink files, which FFmpeg decodes. `tools/mingw/build_ffmpeg.sh`
+builds just the part the port uses (the Bink decoders, and Vorbis, Opus, FLAC
+and MP3 for mods' replacement sounds) as static LGPL libraries. Download an
+FFmpeg release's source from https://ffmpeg.org/download.html (tested: 9.0.2)
+and unpack it into your MSYS2 home folder (`~`, whose path has no spaces,
+which FFmpeg's build needs). Then, once per shell (about 3 minutes):
+
+    MINGW64:  tools/mingw/build_ffmpeg.sh ~/ffmpeg-9.0.2 ~/ffmpeg-work-64 ~/ffmpeg-64
+    MINGW32:  tools/mingw/build_ffmpeg.sh ~/ffmpeg-9.0.2 ~/ffmpeg-work-32 ~/ffmpeg-32
+
+The three arguments are the unpacked source, a scratch folder, and where the
+result goes. Without FFmpeg the game still builds and runs, but skips the
+movies, and mods' sounds can only be plain PCM WAV files.
+
+MSYS2's own FFmpeg package (`pacman -S mingw-w64-x86_64-ffmpeg`, 64-bit only)
+also works, and CMake finds it without `TSSM_FFMPEG`. It is a DLL build, so
+the build copies the roughly 100 DLLs `tssm.exe` then needs into `bin\`, and it
+is GPL-licensed (CMake warns about it): use it for your own builds only, not
+for ones you hand out.
+
+### 4. Build
+
+    MINGW64:  TSSM_FFMPEG=~/ffmpeg-64 tools/pcbuild-mingw.sh           Release, in build-mingw64-release\
+    MINGW32:  TSSM_FFMPEG=~/ffmpeg-32 tools/pcbuild-mingw.sh           Release, in build-mingw32-release\
+              TSSM_FFMPEG=~/ffmpeg-64 tools/pcbuild-mingw.sh Debug     a Debug build
+              TSSM_FFMPEG=~/ffmpeg-64 tools/pcbuild-mingw.sh Release GL3    only one backend
+
+Leave out `TSSM_FFMPEG=...` to build without movies. Either way `tssm.exe`
+(and the test programs) end up in `bin\`, as with the MSVC scripts, and
+`bin\BUILD-INFO.txt` says which build is there: the last one built wins. A
+Release build takes about a minute on a recent PC. Before the first run, set
+up the game's files as below.
+
+By hand, in the same shell, with any build folder name:
+
+    cmake -S . -B build-mingw64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$(cygpath -m ~/ffmpeg-64)
+    cmake --build build-mingw64
+
+`tssm.exe` is then in `build-mingw64\`. All the CMake options in the table
+above work the same way.
+
+### From Linux (cross-compiling)
+
+`tools/mingw/toolchain-x86_64.cmake` and `toolchain-i686.cmake` build the
+Windows executables with the distribution's MinGW-w64 GCC (Debian and Ubuntu:
+`apt install mingw-w64 cmake ninja-build`; Fedora: `dnf install mingw64-gcc-c++
+mingw32-gcc-c++ cmake ninja-build`):
+
+    cmake -S . -B build-mingw64-cross -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=tools/mingw/toolchain-x86_64.cmake
+    cmake --build build-mingw64-cross
+
+An FFmpeg built for Windows goes in with `-DCMAKE_FIND_ROOT_PATH=<its folder>`;
+`build_ffmpeg.sh` itself runs only in the MSYS2 shells. These toolchain files
+have only been tried in CMake's cross mode with MSYS2's compilers on Windows,
+not yet on a Linux machine.
+
+### How it differs from the MSVC build
+
+- Compiler and C runtime: GCC with MinGW-w64's runtime (msvcrt), linked
+  statically; the MSVC build is clang++ with Microsoft's libraries.
+- FFmpeg: the small static one from `build_ffmpeg.sh` inside `tssm.exe`,
+  instead of vcpkg's DLLs beside it. SDL: always the bundled
+  `third_party/SDL`, inside `tssm.exe` (`TSSM_SDL` defaults to `vendored`).
+- Compiler flags, each explained in CMakeLists.txt: C++ with
+  `-fno-lifetime-dse` (the game clears objects before constructing them in
+  place), SSE2 floating point for 32-bit, a 64-bit `time_t` for 32-bit (as the
+  MSVC x86 build has), and `__FILE__` written relative to the checkout.
+- Same game otherwise: the same renderers, settings, `config.ini`, saves (a
+  save is byte-identical whichever build wrote it) and mods.
+- `tools/regress.py` runs MinGW builds too: configure them by hand (so each
+  executable stays in its build folder) and pass `--build-dir-x64` and
+  `--build-dir-x86`; `--build` rebuilds them.
+
+### Known limits
+
+- Only the MINGW64 and MINGW32 shells are tried; UCRT64 and CLANG64 are not.
+- The Vulkan renderer has not been tried with MinGW.
+- A crash log from a MinGW build has addresses but no function names (the
+  crash handler looks names up through Windows' dbghelp, which does not read
+  GCC's symbols).
+- A Release `tssm.exe` is about 16 MB with FFmpeg inside it, and keeps its
+  symbol table; `strip bin/tssm.exe` drops that and leaves about 13 MB. (The
+  MSVC one is about 8 MB, with about 18 MB of FFmpeg DLLs beside it.)
+- FFmpeg is built without threads; the port decodes movies on the main thread,
+  and the movies are small enough for that.
+- The 64-bit and 32-bit builds share `bin\`, as the MSVC scripts' do.
+
+### Handing out a MinGW build
+
+The About tab of the settings overlay lists every library in `tssm.exe` with
+its license, including the two MinGW-w64 runtime parts a static build carries
+(winpthreads, MIT; the C runtime, ZPL 2.1). FFmpeg is LGPL 2.1: whoever hands
+out a `tssm.exe` with it linked in must also offer the FFmpeg source it was
+built from and `tools/mingw/build_ffmpeg.sh`, which is how it was configured;
+the port's own source covers the rest. Never hand out a build made with
+MSYS2's GPL FFmpeg package.
 
 ## The game's files
 

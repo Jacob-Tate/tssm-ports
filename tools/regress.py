@@ -6,10 +6,11 @@
 What it does, in order:
 
   1. (--build) builds each width's existing build directory with `cmake --build`
-     inside that width's MSVC environment. It never configures: a build
-     directory is made once with build-debug.bat (or the cmake line in
-     src/SB/Core/pc/README.md), and its cache keeps the compiler and the vcpkg
-     prefix it was made with.
+     inside that width's MSVC environment, or, for a directory configured with
+     MinGW's gcc, with the CMake it was configured with and the MinGW folder
+     first on PATH. It never configures: a build directory is made once with
+     build-debug.bat (or the cmake lines in src/SB/Core/pc/README.md), and its
+     cache keeps the compiler and the FFmpeg prefix it was made with.
   2. runs tssm.exe of each width with the same scripted controller (TSSM_INPUT)
      from the legal screen through the title, New Game, the autosave prompt, the
      first save, story1.bik and BB02's opening cutscene into gameplay, capturing
@@ -380,10 +381,45 @@ def find_vcvarsall():
     return vcvars if os.path.exists(vcvars) else None
 
 
+def cache_value(build_dir, name):
+    """A CMakeCache.txt entry's value, or None."""
+    with open(os.path.join(build_dir, "CMakeCache.txt"), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            key, sep, value = line.rstrip("\r\n").partition("=")
+            if sep and key.split(":", 1)[0] == name:
+                return value
+    return None
+
+
+def mingw_folder(build_dir):
+    """The MinGW bin folder a build directory was configured with (its C++
+    compiler's, when gcc is beside it), or None."""
+    cxx = cache_value(build_dir, "CMAKE_CXX_COMPILER")
+    if cxx and os.path.isabs(cxx):
+        folder = os.path.dirname(cxx)
+        if os.path.exists(os.path.join(folder, "gcc" + EXE)):
+            return folder
+    return None
+
+
 def build(width, build_dir, log_path):
-    """cmake --build in the width's MSVC environment; never configures."""
+    """cmake --build in the width's MSVC environment, or a MinGW build
+    directory's own; never configures."""
     if not os.path.exists(os.path.join(build_dir, "CMakeCache.txt")):
         return False, "%s is not configured (make it with build-debug.bat first)" % build_dir
+    mingw = mingw_folder(build_dir)
+    if mingw:
+        # gcc, its assembler and linker load DLLs from their own folder, which
+        # has to be on PATH outside the MSYS2 shell.
+        env = dict(os.environ)
+        env["PATH"] = mingw + os.pathsep + env.get("PATH", "")
+        cmake = cache_value(build_dir, "CMAKE_COMMAND") or "cmake"
+        with open(log_path, "w") as log:
+            r = subprocess.run([cmake, "--build", build_dir], stdout=log,
+                               stderr=subprocess.STDOUT, env=env)
+        if r.returncode != 0:
+            return False, "build failed (%s)" % log_path
+        return True, "built (MinGW)"
     vcvars = find_vcvarsall()
     if vcvars is None:
         return False, "no Visual Studio (vswhere/vcvarsall) found"

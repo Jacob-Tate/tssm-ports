@@ -12,7 +12,13 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#if defined(__MINGW32__)
+// __rdtsc. <intrin.h> is compat/intrin.h on this include path; clang under the
+// MSVC ABI has __rdtsc built in, GCC declares it in <x86intrin.h>.
+#include <x86intrin.h>
+#else
 #include <intrin.h>
+#endif
 #endif
 
 #include "rw.h"

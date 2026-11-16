@@ -58,7 +58,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(TSSM_BUILD_32BIT AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR
     "TSSM_BUILD_32BIT is on, but ${CMAKE_CXX_COMPILER_ID} produced a "
-    "${CMAKE_SIZEOF_VOID_P}-byte pointer. Enter the x86 MSVC environment first.")
+    "${CMAKE_SIZEOF_VOID_P}-byte pointer. Enter the x86 MSVC environment first "
+    "(MinGW: configure from MSYS2's MINGW32 shell, whose gcc builds 32-bit).")
 endif()
 
 # Every warning off for code this project does not own the warnings of: the
@@ -84,12 +85,40 @@ set(SB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/SB)
 # Mandatory, not style: the source is full of *(U32*)&someFloat.
 add_compile_options(-fno-strict-aliasing)
 
-if(TSSM_BUILD_32BIT AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  add_compile_options(-msse2 -mfpmath=sse)
+# Also mandatory under GCC: the game clears an object's memory and then
+# constructs it in place (zLoadingScreen::Init: memset, then zUIImage_Init's
+# placement new), and relies on the fields the constructor leaves alone
+# staying zero. GCC treats storage as dead until a constructor runs and drops
+# the memset; zUI::custom keeps the allocator's fill, and zUI_Init calls
+# through it on the first level load. clang does no such thing.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-lifetime-dse>)
+endif()
+
+# 32-bit x86 floating point in SSE2 registers, as clang's code for the MSVC-ABI
+# x86 build has it, not in the x87's 80-bit ones, which GCC uses by default
+# there: whether -m32 asked for 32-bit (TSSM_BUILD_32BIT) or the compiler only
+# builds 32-bit (MSYS2's MINGW32 gcc).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles("#ifndef __i386__\n#error not 32-bit x86\n#endif\nint main() { return 0; }"
+                            TSSM_GNU_X86_32)
+  if(TSSM_GNU_X86_32)
+    add_compile_options(-msse2 -mfpmath=sse)
+  endif()
 endif()
 
 if(MINGW)
   add_link_options(-static)
+  # __FILE__ relative to the checkout (librw's messages and assertions carry
+  # it), so the executable does not carry the folder it was built in.
+  add_compile_options("-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
+  # 32-bit MinGW's time_t is 32 bits unless asked (msvcrt's default), and ends
+  # in January 2038; the MSVC x86 build's UCRT has a 64-bit one. Save dates
+  # go through it (iHostWin32.cpp, iSaveFormat.cpp).
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_compile_definitions(_TIME_BITS=64)
+  endif()
 endif()
 
 # The positive marker that selects the port's arms in shared headers and the
@@ -173,8 +202,10 @@ list(APPEND AUDIO_SOURCES ${PC_DIR}/iSndReverb.cpp)
 
 # --- movies (FFmpeg, optional) ------------------------------------------------
 # TSSM's Xbox movies are Bink 1 (FMV/*.bik), which FFmpeg decodes. Point
-# CMAKE_PREFIX_PATH at vcpkg's installed/<arch>-windows (the build scripts do).
-# Without FFmpeg the null decoder is built and movies report "ran to the end".
+# CMAKE_PREFIX_PATH at vcpkg's installed/<arch>-windows (the build scripts do),
+# or under MinGW at what tools/mingw/build_ffmpeg.sh installed (static
+# libraries, linked into tssm.exe). Without FFmpeg the null decoder is built
+# and movies report "ran to the end".
 find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
 find_library(FFMPEG_AVCODEC_LIBRARY avcodec)
 find_library(FFMPEG_AVFORMAT_LIBRARY avformat)
@@ -190,7 +221,56 @@ if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIBRARY AND FFMPEG_AVFORMAT_LIBRARY
                     ${FFMPEG_AVUTIL_LIBRARY})
   set(FMV_INCLUDES ${FFMPEG_INCLUDE_DIR})
   set(FMV_DEFINES TSSM_HAVE_FFMPEG)
-  message(STATUS "FMV decoder: ffmpeg (${FFMPEG_INCLUDE_DIR})")
+  # A GNU static archive (libavcodec.a, not the import library libavcodec.dll.a):
+  # FFmpeg is linked in and no DLL ships. Static FFmpeg leaves the Windows
+  # libraries it calls to the program (its .pc files' Libs: bcrypt for
+  # libavutil's random seed, ole32 and user32).
+  set(TSSM_FFMPEG_STATIC OFF)
+  set(FFMPEG_SYSTEM_LIBS)
+  if(FFMPEG_AVCODEC_LIBRARY MATCHES "\\.a$" AND NOT FFMPEG_AVCODEC_LIBRARY MATCHES "\\.dll\\.a$")
+    set(TSSM_FFMPEG_STATIC ON)
+    if(WIN32)
+      set(FFMPEG_SYSTEM_LIBS bcrypt ole32 user32)
+      list(APPEND FMV_LIBRARIES ${FFMPEG_SYSTEM_LIBS})
+    endif()
+    message(STATUS "FMV decoder: ffmpeg, static (${FFMPEG_INCLUDE_DIR})")
+  else()
+    message(STATUS "FMV decoder: ffmpeg (${FFMPEG_INCLUDE_DIR})")
+  endif()
+  # The license this FFmpeg was configured under, for the About tab: under
+  # MinGW read from libavutil (the string avutil_license() returns), since the
+  # FFmpeg found there may be MSYS2's package, which is configured
+  # --enable-gpl --enable-version3 and links x264 and x265. What
+  # tools/mingw/build_ffmpeg.sh builds is LGPL 2.1 or later, as vcpkg's is.
+  set(TSSM_FFMPEG_LICENSE "LGPL 2.1 or later")
+  if(MINGW)
+    if(TSSM_FFMPEG_STATIC)
+      set(_avutil_files "${FFMPEG_AVUTIL_LIBRARY}")
+    else()
+      file(GLOB _avutil_files "${FFMPEG_INCLUDE_DIR}/../bin/avutil-*.dll")
+    endif()
+    set(_avutil_license)
+    foreach(_f IN LISTS _avutil_files)
+      file(STRINGS "${_f}" _avutil_license REGEX "libavutil license: " LIMIT_COUNT 1)
+      if(_avutil_license)
+        break()
+      endif()
+    endforeach()
+    if(_avutil_license)
+      string(REGEX REPLACE "^.*libavutil license: " "" _avutil_license "${_avutil_license}")
+      string(REPLACE "version " "" TSSM_FFMPEG_LICENSE "${_avutil_license}")
+    else()
+      message(WARNING "Could not read which license this FFmpeg was built under (no libavutil "
+                      "license string found); the About tab says ${TSSM_FFMPEG_LICENSE}.")
+    endif()
+    if(NOT TSSM_FFMPEG_LICENSE MATCHES "^LGPL")
+      message(WARNING
+              "This FFmpeg (${FFMPEG_INCLUDE_DIR}) is licensed ${TSSM_FFMPEG_LICENSE}, not LGPL "
+              "(MSYS2's FFmpeg package is GPL). A tssm.exe built with it is for your own use: handing it "
+              "out would put the whole program under that license's terms. "
+              "tools/mingw/build_ffmpeg.sh builds an LGPL FFmpeg that links into tssm.exe.")
+    endif()
+  endif()
 else()
   set(FMV_SOURCES ${PC_DIR}/iFMVDecoderNull.cpp)
   set(FMV_LIBRARIES)
@@ -225,8 +305,11 @@ else()
 endif()
 
 # --- SDL3 --------------------------------------------------------------------------
-# auto: an installed SDL3 if one links, third_party/SDL otherwise.
-if(ANDROID)
+# auto: an installed SDL3 if one links, third_party/SDL otherwise. MinGW
+# defaults to third_party/SDL: MSYS2's SDL3 is a DLL that needs MSYS2's own
+# DLLs beside it, a different version from the pinned one, and has no
+# TSSM_TEST_AUDIO_RESTART hooks (below); the vendored one links into tssm.exe.
+if(ANDROID OR MINGW)
   set(TSSM_SDL_DEFAULT "vendored")
 else()
   set(TSSM_SDL_DEFAULT "auto")
@@ -358,16 +441,32 @@ if(TSSM_LIBRW_PATCHES)
   # Bounded at third_party/, git sees either librw's own checkout or none.
   set(_librw_ceiling "$ENV{GIT_CEILING_DIRECTORIES}")
   set(ENV{GIT_CEILING_DIRECTORIES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+  # Line endings, whichever git this is. The patches are LF (.gitattributes),
+  # and git apply reads the files as LF only when core.autocrlf says so. Git
+  # for Windows sets it to true and checks out CRLF; MSYS2's, Linux's and
+  # macOS's gits leave it unset, and then no patch applies to a CRLF checkout,
+  # and matfx_uvtransform.patch to none (librw stores
+  # src/d3d/shaders/make_shaders.cmd with CRLF). true for a CRLF checkout and
+  # input for an LF one both read the files as LF, and each writes the patched
+  # files back with the checkout's own line endings.
+  # (In hex: a plain file(READ) on Windows turns CRLF into LF.)
+  file(READ ${_librw_dir}/CMakeLists.txt _librw_probe LIMIT 4096 HEX)
+  string(REGEX MATCH "^(..)*0d0a" _librw_crlf "${_librw_probe}")
+  if(NOT _librw_crlf)
+    set(_librw_git ${GIT_EXECUTABLE} -c core.autocrlf=input)
+  else()
+    set(_librw_git ${GIT_EXECUTABLE} -c core.autocrlf=true)
+  endif()
   foreach(_patch IN LISTS _librw_patches)
     get_filename_component(_name ${_patch} NAME)
-    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${_patch}
+    execute_process(COMMAND ${_librw_git} apply --reverse --check ${_patch}
                     WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
     if(NOT _rc EQUAL 0)
-      execute_process(COMMAND ${GIT_EXECUTABLE} apply ${_patch}
+      execute_process(COMMAND ${_librw_git} apply ${_patch}
                       WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc ERROR_VARIABLE _err)
       # Check it took.
       if(_rc EQUAL 0)
-        execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${_patch}
+        execute_process(COMMAND ${_librw_git} apply --reverse --check ${_patch}
                         WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc ERROR_VARIABLE _err)
       endif()
       if(NOT _rc EQUAL 0)
@@ -570,9 +669,56 @@ if(TSSM_GUI)
                   "https://libsdl.org" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt")
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
-  if(FMV_INCLUDES)
-    tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
-                    "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  # A notice whose license file is not on this machine (MSYS2's FFmpeg package
+  # installs none; a Linux cross toolchain keeps the MinGW-w64 ones elsewhere)
+  # gets a short text saying where the license is, not the path looked in.
+  macro(tssm_gui_notice_text var name)
+    set(${var} ${CMAKE_CURRENT_BINARY_DIR}/gui/notice-${name}.txt)
+    string(CONCAT _notice_body ${ARGN})
+    file(WRITE ${${var}}.tmp "${_notice_body}")
+    configure_file(${${var}}.tmp ${${var}} COPYONLY)
+  endmacro()
+  set(_ffmpeg_notice "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  if(MINGW AND FMV_INCLUDES AND NOT EXISTS "${_ffmpeg_notice}")
+    tssm_gui_notice_text(_ffmpeg_notice ffmpeg
+      "This build of FFmpeg is licensed under the ${TSSM_FFMPEG_LICENSE} (no license file was "
+      "installed with it). FFmpeg's license texts and source: https://ffmpeg.org/legal.html\n")
+  endif()
+  if(FMV_INCLUDES AND TSSM_FFMPEG_STATIC)
+    tssm_gui_notice("FFmpeg" "${TSSM_FFMPEG_LICENSE}" "Movie decoding. Linked statically; its source is at ffmpeg.org."
+                    "https://ffmpeg.org" "${_ffmpeg_notice}")
+  elseif(FMV_INCLUDES)
+    tssm_gui_notice("FFmpeg" "${TSSM_FFMPEG_LICENSE}" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
+                    "https://ffmpeg.org" "${_ffmpeg_notice}")
+  endif()
+  if(MINGW)
+    # -static links in two parts of the MinGW-w64 runtime whose licenses ask
+    # for their notices in binary copies: winpthreads (GCC's threads: std::mutex,
+    # std::thread) and the CRT's startup and support code. libgcc and libstdc++
+    # are under GCC's runtime library exception, which asks for none.
+    get_filename_component(_mingw_prefix "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_mingw_prefix "${_mingw_prefix}/.." ABSOLUTE)
+    set(_winpthreads_notice "${_mingw_prefix}/share/licenses/winpthreads/COPYING")
+    set(_mingw_crt_notice "${_mingw_prefix}/share/licenses/crt/COPYING.MinGW-w64-runtime.txt")
+    if(NOT EXISTS "${_winpthreads_notice}" OR NOT EXISTS "${_mingw_crt_notice}")
+      message(WARNING "The MinGW-w64 runtime's license files are not under ${_mingw_prefix}/share/licenses "
+                      "(MSYS2 has them there); the About tab names those licenses without their text.")
+    endif()
+    if(NOT EXISTS "${_winpthreads_notice}")
+      tssm_gui_notice_text(_winpthreads_notice winpthreads
+        "winpthreads is part of the MinGW-w64 project and under the MIT license; its text is in "
+        "mingw-w64-libraries/winpthreads/COPYING of the MinGW-w64 source (https://www.mingw-w64.org).\n")
+    endif()
+    if(NOT EXISTS "${_mingw_crt_notice}")
+      tssm_gui_notice_text(_mingw_crt_notice mingw-crt
+        "The MinGW-w64 runtime's licenses (the Zope Public License 2.1 and others) are in "
+        "COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt of the MinGW-w64 source "
+        "(https://www.mingw-w64.org).\n")
+    endif()
+    tssm_gui_notice("MinGW-w64 winpthreads" "MIT" "Threads for the GCC runtime. Linked statically."
+                    "https://www.mingw-w64.org" "${_winpthreads_notice}")
+    tssm_gui_notice("MinGW-w64 runtime" "ZPL 2.1 and others" "The C runtime's startup and support code. Linked statically."
+                    "https://www.mingw-w64.org" "${_mingw_crt_notice}")
   endif()
   if(TSSM_BACKEND_VULKAN)
     tssm_gui_notice("Vulkan-Headers" "Apache 2.0" "The Vulkan renderer's API headers."
@@ -755,6 +901,11 @@ add_library(tssm_game STATIC ${TSSM_GAME_SOURCES}
   # debug events of unattended runs (iTestEvents.h).
   ${PC_DIR}/iTestEvents.cpp)
 target_link_libraries(tssm_game PUBLIC tssm_platform tssm_rw)
+# The platform layer calls back into this library too: iCapture.cpp calls
+# iTestEventsFrame and iTestSendFrame, which are game units. lld and link.exe
+# find a symbol in any archive on the line; GNU ld (MinGW, Linux) reads each
+# archive once, in order. Declaring the cycle makes CMake repeat the two.
+target_link_libraries(tssm_platform INTERFACE tssm_game)
 target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
 # unit too, for the same reason.
@@ -822,18 +973,42 @@ if(WIN32)
   endif()
 
   # FFmpeg's and SDL's DLLs beside the executable.
-  if(FMV_INCLUDES)
-    file(GLOB FMV_RUNTIME_DLLS "${FFMPEG_INCLUDE_DIR}/../bin/*.dll")
-    if(FMV_RUNTIME_DLLS)
-      add_custom_command(TARGET tssm POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FMV_RUNTIME_DLLS} $<TARGET_FILE_DIR:tssm>
-        COMMENT "Staging the movie decoder's DLLs")
+  if(MINGW)
+    # Under MinGW those come from a folder of every package's DLLs (MSYS2's
+    # /mingw64/bin), so only the ones tssm.exe imports, directly or through
+    # another DLL, are copied (tools/mingw/stage_dlls.cmake). -static above
+    # already links in the GCC runtime; a static FFmpeg and the vendored SDL
+    # need nothing.
+    set(_tssm_dll_dirs)
+    if(FMV_INCLUDES AND NOT TSSM_FFMPEG_STATIC)
+      get_filename_component(_ffmpeg_bin "${FFMPEG_INCLUDE_DIR}/../bin" ABSOLUTE)
+      list(APPEND _tssm_dll_dirs "${_ffmpeg_bin}")
     endif()
-  endif()
-  if(TSSM_SDL_RUNTIME_DLL)
-    add_custom_command(TARGET tssm POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TSSM_SDL_RUNTIME_DLL} $<TARGET_FILE_DIR:tssm>
-      COMMENT "Staging SDL")
+    if(TSSM_SDL_RUNTIME_DLL)
+      list(APPEND _tssm_dll_dirs "$<TARGET_FILE_DIR:${_sdl_aliased}>")
+    endif()
+    if(_tssm_dll_dirs)
+      string(REPLACE ";" "|" _tssm_dll_dirs "${_tssm_dll_dirs}")
+      add_custom_command(TARGET tssm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} "-DEXE=$<TARGET_FILE:tssm>" "-DDIRS=${_tssm_dll_dirs}"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}" -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/mingw/stage_dlls.cmake
+        COMMENT "Staging the DLLs tssm.exe imports"
+        VERBATIM)
+    endif()
+  else()
+    if(FMV_INCLUDES)
+      file(GLOB FMV_RUNTIME_DLLS "${FFMPEG_INCLUDE_DIR}/../bin/*.dll")
+      if(FMV_RUNTIME_DLLS)
+        add_custom_command(TARGET tssm POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FMV_RUNTIME_DLLS} $<TARGET_FILE_DIR:tssm>
+          COMMENT "Staging the movie decoder's DLLs")
+      endif()
+    endif()
+    if(TSSM_SDL_RUNTIME_DLL)
+      add_custom_command(TARGET tssm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TSSM_SDL_RUNTIME_DLL} $<TARGET_FILE_DIR:tssm>
+        COMMENT "Staging SDL")
+    endif()
   endif()
 endif()
 
@@ -971,7 +1146,8 @@ if(TSSM_BUILD_TESTS AND NOT ANDROID)
     target_include_directories(tssm_modtest PRIVATE ${FMV_INCLUDES})
     target_compile_definitions(tssm_modtest PRIVATE ${FMV_DEFINES})
     target_link_libraries(tssm_modtest PRIVATE ${FFMPEG_AVFORMAT_LIBRARY}
-      ${FFMPEG_AVCODEC_LIBRARY} ${FFMPEG_SWRESAMPLE_LIBRARY} ${FFMPEG_AVUTIL_LIBRARY})
+      ${FFMPEG_AVCODEC_LIBRARY} ${FFMPEG_SWRESAMPLE_LIBRARY} ${FFMPEG_AVUTIL_LIBRARY}
+      ${FFMPEG_SYSTEM_LIBS})
   endif()
   if(WIN32)
     target_link_libraries(tssm_modtest PRIVATE user32 dbghelp)

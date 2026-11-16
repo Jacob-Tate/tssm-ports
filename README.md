@@ -65,6 +65,16 @@ install folders. It puts `tssm.exe` and the DLLs it needs in `bin\`.
 `build-release.bat GL3 x86` builds one renderer, 32-bit; `build-debug.bat` makes a debug
 build. `src/SB/Core/pc/README.md` lists the CMake options and the rest.
 
+Building with MinGW-w64
+-----------------------
+
+The PC port also builds with MinGW-w64's GCC in MSYS2: 64-bit in the MINGW64 shell and
+32-bit in the MINGW32 shell, with the same renderers, settings, saves and mods. The result
+is one `tssm.exe` with SDL and FFmpeg inside it, which needs no other DLLs. The steps, from
+installing MSYS2 to the finished build, are in `src/SB/Core/pc/README.md`, section
+"Building with MinGW (MSYS2)": `tools/pcbuild-mingw.sh` builds the game, and
+`tools/mingw/build_ffmpeg.sh` builds the small static FFmpeg it uses for the movies.
+
 Playing
 -------
 
@@ -154,3 +164,13 @@ needed to relink it with another FFmpeg).
 | Vulkan-Headers (Vulkan renderer only) | git submodule | Apache 2.0 / MIT |
 | FFmpeg (optional, for the movies) | not in the repository: you install or build it | LGPL 2.1 or later |
 | treedome (code adapted into `src/SB/Core/pc`) | copied, see `src/SB/Core/pc/PORTING.md` | CC0 1.0 |
+| MinGW-w64 winpthreads (MinGW builds only) | the MinGW-w64 toolchain, linked statically into `tssm.exe` | MIT |
+| MinGW-w64 runtime, the C runtime's startup and support code (MinGW builds only) | the MinGW-w64 toolchain, linked statically | ZPL 2.1 and others |
+| libgcc, libstdc++ (MinGW builds only) | MinGW-w64 GCC, linked statically | GPL 3 with the GCC Runtime Library Exception |
+| FFmpeg in a MinGW build (optional) | built by `tools/mingw/build_ffmpeg.sh` from FFmpeg's source and linked statically into `tssm.exe` | LGPL 2.1 or later |
+
+A MinGW build is the exception on Windows: FFmpeg is linked into `tssm.exe`, so whoever
+shares one also has to offer the FFmpeg source it was built from, with
+`tools/mingw/build_ffmpeg.sh` (which is how it was configured). The About tab lists the
+MinGW-w64 runtime's notices with the others. Never share a build made with MSYS2's own
+FFmpeg package: it is GPL, not LGPL.
