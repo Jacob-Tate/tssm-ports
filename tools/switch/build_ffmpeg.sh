@@ -74,8 +74,18 @@ if [ -z "$HOST_CC" ]; then
     fi
 fi
 
+# The source and work folders as gcc sees them (on Windows, MSYS2 hands it
+# Windows paths). __FILE__, which FFmpeg's assertions carry, then starts at the
+# source folder, so tssm.nro does not carry the folders FFmpeg was built in.
+gccpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+MSRC=$(cd "$SRC" && pwd)
+MWORK=$(pwd)
+WSRC=$(gccpath "$MSRC")
+WWORK=$(gccpath "$MWORK")
+
 NX_ARCH="-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec"
 NX_CFLAGS="$NX_ARCH -ffunction-sections -fdata-sections -D__SWITCH__ -fPIE -O2 -I$DEVKITPRO/libnx/include"
+NX_CFLAGS="$NX_CFLAGS -ffile-prefix-map=$WSRC/= -ffile-prefix-map=$WWORK/="
 NX_LDFLAGS="-specs=$DEVKITPRO/libnx/switch.specs -L$DEVKITPRO/libnx/lib -fPIE $NX_ARCH"
 
 "$SRC/configure" \
@@ -99,6 +109,19 @@ NX_LDFLAGS="-specs=$DEVKITPRO/libnx/switch.specs -L$DEVKITPRO/libnx/lib -fPIE $N
     --enable-parser=vorbis,opus,flac,mpegaudio \
     --enable-protocol=file \
     --enable-neon
+
+# The configure line is compiled in as well (avcodec_configuration()): keep it,
+# with the three folders named by their role instead of their paths.
+sedesc() { printf '%s' "$1" | sed 's/[][\.*^$|]/\\&/g'; }
+sed -i -e "/^#define FFMPEG_CONFIGURATION /{
+s|$(sedesc "$PREFIX")|<prefix>|g
+s|$(sedesc "$(gccpath "$PREFIX")")|<prefix>|g
+s|$(sedesc "$WSRC")|<source>|g
+s|$(sedesc "$MSRC")|<source>|g
+s|$(sedesc "$WWORK")|<build>|g
+s|$(sedesc "$MWORK")|<build>|g
+}" config.h
+grep '^#define FFMPEG_CONFIGURATION ' config.h
 
 JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 make -j"$JOBS"

@@ -45,6 +45,17 @@ for p in "$HERE"/sdl/*.patch; do
     fi
 done
 
+# The source and build folders as gcc sees them (on Windows, MSYS2 hands it
+# Windows paths), mapped away: __FILE__, which SDL's assertions and error
+# messages carry, then starts at the source folder, so tssm.nro does not carry
+# the folders SDL was built in. CMake adds CFLAGS to the toolchain's own flags
+# when it first configures a build folder.
+gccpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+mkdir -p "$BUILD"
+WSRC=$(gccpath "$(cd "$SRC" && pwd)")
+WBUILD=$(gccpath "$(cd "$BUILD" && pwd)")
+export CFLAGS="${CFLAGS:+$CFLAGS }-ffile-prefix-map=$WSRC/= -ffile-prefix-map=$WBUILD/="
+
 cmake -S "$SRC" -B "$BUILD" -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
     -DCMAKE_BUILD_TYPE=Release \

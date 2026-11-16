@@ -11,6 +11,11 @@ through OpenGL on the console's Mesa driver.
 - It has been played on one console so far; `docs/SWITCH.md` lists what is still
   unchecked.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
+- **Prebuilt:** this repository's Releases page has `TSSM-Dehydrated-0.9-Switch.nro` as
+  *TSSM Dehydrated* 0.9: this branch built under that name, with the port's own icon and
+  no game data (you still need your own game files, below). Copy it as
+  `/switch/tssm/tssm.nro` (below). `docs/SWITCH.md` ("Building the TSSM Dehydrated
+  release") has the exact commands.
 
 This repository and its branches
 --------------------------------

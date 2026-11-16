@@ -1,4 +1,4 @@
-TSSM (port) for Nintendo Switch homebrew -- the files inside the .nro.
+The files inside the .nro (Nintendo Switch homebrew).
 
 This RomFS holds only the port's own files: this note and the licenses of the
 libraries the program is built from (licenses/). It never holds any of the

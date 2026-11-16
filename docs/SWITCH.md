@@ -177,23 +177,70 @@ Everything comes from devkitPro. The build runs in devkitPro's MSYS2 shell
 (`TSSM_SDL=system`), librw's OpenGL 3 backend on Mesa through EGL, no Direct3D
 or Vulkan, no host tools or unit tests. The .nro carries a RomFS with the
 port's own files only (`dist/switch/romfs` and the libraries' licenses), the
-NACP name "TSSM (port)" and a 256x256 icon: `TSSM_ICON_DIR`'s `icon.jpg` when
-one was made (docs/ICON.md), otherwise `dist/switch/default_icon.jpg` (a plain
-sponge block drawn by `tools/switch/draw_default_icon.ps1`). The version shown
-is `TSSM_SWITCH_VERSION` (0.9). CMake caches it, so a build directory
-configured with an older default keeps that one until it is configured again
-or given `-DTSSM_SWITCH_VERSION=0.9`.
+NACP and a 256x256 icon. These CMake options set what the Homebrew Menu shows:
+
+| Option | Default | What |
+|---|---|---|
+| `TSSM_SWITCH_NAME` | `TSSM (port)` | the program's name |
+| `TSSM_SWITCH_AUTHOR` | `TSSM port` | the author line |
+| `TSSM_SWITCH_VERSION` | `0.9` | the version |
+| `TSSM_SWITCH_ICON` | empty | a 256x256 JPEG; empty uses `TSSM_ICON_DIR`'s `icon.jpg` when one was made (docs/ICON.md), otherwise `dist/switch/default_icon.jpg` (a plain sponge block drawn by `tools/switch/draw_default_icon.ps1`) |
+
+CMake caches them, so a build directory keeps what it was configured with
+(including an older default) until it is configured again with `-D...`.
 
 The FFmpeg in a .nro is linked statically. Its notice in the About tab says
-so; the LGPL's terms for a static link (offering the object files for
-relinking) have to be met before any release.
+so, with FFmpeg's copyright line. The LGPL allows a static link when the
+program's users can rebuild it with a changed FFmpeg: this repository holds the
+program's whole source and these steps, and a shared .nro goes out with the
+source of the FFmpeg it was built from (the releases carry it beside the files).
 
 Mesa, libdrm_nouveau and libnx are linked statically too. devkitPro installs no
-license files for them, so `dist/switch/licenses` holds their notes (MIT, MIT,
-ISC), which the About tab and the RomFS's `licenses/` carry. Mesa's and
-libdrm's notes point to the source for the copyright lines; the exact lines
-replace those pointers before any release. newlib and the GCC runtime are in
-the image as well; their notices are part of the same pre-release check.
+license files for them, so `dist/switch/licenses` holds them (MIT, MIT, ISC)
+with the copyright lines of the sources devkitPro's packages build (switch-mesa
+20.1.0-5 is Mesa 20.1.0-rc3; switch-libdrm_nouveau 1.0.1; libnx 4.12.0); the
+About tab and the RomFS's `licenses/` carry them. newlib and the GCC runtime are
+in the image as well: newlib's licences are its COPYING.NEWLIB and
+COPYING.LIBGLOSS, and the GCC runtime's library exception asks nothing of a
+program built with it. A release's THIRD-PARTY-NOTICES.txt has all of them.
+
+## Building the TSSM Dehydrated release
+
+The prebuilt .nro is "TSSM Dehydrated": this program under a neutral name, with
+the drawn sponge-block icon and, like every build, none of the game's files
+(players copy their own, as above). It is an ordinary build with the options
+above, from an empty prefix, in a folder whose path has no spaces and no
+personal names. The scripts and CMake keep the source and build folders out of
+`tssm.nro` (`-ffile-prefix-map`, `-fmacro-prefix-map`, FFmpeg's configure line
+with `<prefix>`, `<source>`, `<build>`); the neutral folder keeps the libraries'
+debug information clean as well. In devkitPro's MSYS2 shell:
+
+    R=/c/tssm-rel/switch    # any folder without spaces or personal names
+    # $R/src/tssm: this branch, checked out with its submodules
+    git clone --branch switch-sdl-3.4 https://github.com/devkitPro/SDL.git $R/src/SDL
+    git -C $R/src/SDL checkout c329016c0e338ab4397ad930f83330c9fe058348
+    # $R/src/FFmpeg-n9.0.2: https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n9.0.2.tar.gz
+    # extracted (sha256 6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9)
+    cd $R/src/tssm
+    sh tools/switch/build_sdl.sh $R/src/SDL $R/sdl-build $R/prefix
+    sh tools/switch/build_ffmpeg.sh $R/src/FFmpeg-n9.0.2 $R/ff-work $R/prefix
+    sh tools/switch/build_port.sh $R/build $R/prefix \
+        "-DTSSM_SWITCH_NAME=TSSM Dehydrated" \
+        -DTSSM_SWITCH_AUTHOR=aidp2 \
+        -DTSSM_SWITCH_VERSION=0.9 \
+        -DTSSM_SWITCH_ICON=$R/src/tssm/dist/switch/default_icon.jpg \
+        "-DTSSM_VERSION_LINE=0.9 (TSSM Dehydrated)"
+
+`TSSM_VERSION_LINE` is the About tab's version line (docs/GUI.md). Checks on
+the result:
+
+    $DEVKITPRO/devkitA64/bin/aarch64-none-elf-strings -n 3 $R/build/tssm.nacp | sort -u
+    grep -a -c -i -F tssm-rel $R/build/tssm.nro
+
+The first prints the name, author and version given above; the second prints 0
+(use the folder's own name). The configure step prints the icon and NACP it
+used (`Switch: icon ...`, `Switch: NACP ...`), and the RomFS is
+`dist/switch/romfs` plus `licenses/`, as for every build.
 
 ## Testing on a console
 
@@ -417,7 +464,7 @@ What is known not to work or not to exist yet, with the place to change it:
 - **Turning a saving off** on the console takes a rebuild: `TSSM_GPU_OPT`,
   `TSSM_GL_VAO` and the rest are environment variables, and the Homebrew Menu
   has no way to set one.
-- **Licences** for a static link: FFmpeg's relinking terms, and the exact
-  Mesa, libdrm_nouveau and newlib notices (Building, above).
+- **newlib's notices** are not in the RomFS's `licenses/`: a shared build
+  passes them on beside the .nro (Building, above).
 - **No CI.** A job in the `devkitpro/devkita64` image would keep the target
   building.

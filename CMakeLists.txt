@@ -113,6 +113,9 @@ endif()
 # TSSM_SWITCH here and __SWITCH__ in the source.
 if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
   set(TSSM_SWITCH ON)
+  # __FILE__ relative to the checkout (librw's messages and assertions carry
+  # it), so tssm.nro does not carry the folder it was built in.
+  add_compile_options("-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
 else()
   set(TSSM_SWITCH OFF)
 endif()
@@ -569,20 +572,27 @@ if(TSSM_GUI)
     ${PC_DIR}/gui/iGuiUtil.cpp
   )
 
-  # The About tab's version line: the branch and `git describe` at configure
-  # time (re-run CMake for a newer one).
-  execute_process(COMMAND git describe --always --dirty --abbrev=10
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  execute_process(COMMAND git rev-parse --abbrev-ref HEAD
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  if(NOT _tssm_describe)
-    set(_tssm_describe "unknown")
-  endif()
-  set(TSSM_GUI_VERSION "${_tssm_describe}")
-  if(_tssm_branch)
-    set(TSSM_GUI_VERSION "${_tssm_branch} ${_tssm_describe}")
+  # The About tab's version line: TSSM_VERSION_LINE when given (a release
+  # build's version), else the branch and `git describe` at configure time
+  # (re-run CMake for a newer one).
+  set(TSSM_VERSION_LINE "" CACHE STRING
+    "The About tab's version line; empty: the branch and git describe")
+  if(TSSM_VERSION_LINE)
+    set(TSSM_GUI_VERSION "${TSSM_VERSION_LINE}")
+  else()
+    execute_process(COMMAND git describe --always --dirty --abbrev=10
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND git rev-parse --abbrev-ref HEAD
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(NOT _tssm_describe)
+      set(_tssm_describe "unknown")
+    endif()
+    set(TSSM_GUI_VERSION "${_tssm_describe}")
+    if(_tssm_branch)
+      set(TSSM_GUI_VERSION "${_tssm_branch} ${_tssm_describe}")
+    endif()
   endif()
   set_source_files_properties(${PC_DIR}/gui/iGuiTabs.cpp PROPERTIES
     COMPILE_DEFINITIONS "TSSM_GUI_VERSION=\"${TSSM_GUI_VERSION}\"")
@@ -602,7 +612,12 @@ if(TSSM_GUI)
     endif()
     string(APPEND _notice_text "  { \"${name}\", \"${license}\", \"${what}\", \"${url}\",\n    R\"tssm_notice(${_body})tssm_notice\" },\n")
   endmacro()
-  tssm_gui_notice("The SpongeBob SquarePants Movie PC port" "CC0 1.0" "This program's own code."
+  if(TSSM_SWITCH)
+    set(_tssm_self "The SpongeBob SquarePants Movie (port)")
+  else()
+    set(_tssm_self "The SpongeBob SquarePants Movie PC port")
+  endif()
+  tssm_gui_notice("${_tssm_self}" "CC0 1.0" "This program's own code."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
   tssm_gui_notice("Dear ImGui" "MIT" "The settings overlay and the launcher."
                   "https://github.com/ocornut/imgui" "${IMGUI_DIR}/LICENSE.txt")
@@ -611,10 +626,10 @@ if(TSSM_GUI)
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
   if(FMV_INCLUDES AND TSSM_SWITCH)
-    # A .nro is one static image. TODO(switch): the LGPL's relinking terms for a
-    # static link (offer the object files) before any release.
+    # A .nro is one static image; the program's whole source is public, so it
+    # can be rebuilt with another FFmpeg (docs/SWITCH.md).
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
-                    "Movie decoding. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "Movie decoding. Copyright (c) 2000-2026 the FFmpeg developers. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
   elseif(FMV_INCLUDES)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
@@ -622,8 +637,8 @@ if(TSSM_GUI)
   endif()
   if(TSSM_SWITCH)
     # The Switch's system libraries, linked statically into the .nro. devkitPro
-    # installs no license files for them, so dist/switch/licenses carries the
-    # notes (TODO(switch) there: the exact copyright lines before any release).
+    # installs no license files for them, so dist/switch/licenses carries them,
+    # with the copyright lines of the versions devkitPro's packages build.
     tssm_gui_notice("Mesa" "MIT" "OpenGL on the Switch (EGL and the nouveau driver). Linked statically."
                     "https://mesa3d.org" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/mesa.txt")
     tssm_gui_notice("libdrm_nouveau" "MIT" "The GPU interface Mesa uses on the Switch. Linked statically."
@@ -970,17 +985,30 @@ if(TSSM_SWITCH)
                    ${TSSM_SWITCH_ROMFS}/licenses/FFmpeg-LGPL-2.1.txt COPYONLY)
   endif()
 
-  # A picture from TSSM_ICON_DIR when one was made (docs/ICON.md), else the
-  # port's own default: a plain sponge block, drawn for the port.
-  if(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
+  # The icon: TSSM_SWITCH_ICON when given, else a picture from TSSM_ICON_DIR
+  # when one was made (docs/ICON.md), else the port's own default: a plain
+  # sponge block, drawn for the port.
+  set(TSSM_SWITCH_ICON "" CACHE FILEPATH
+    "256x256 JPEG for the Homebrew Menu; empty uses TSSM_ICON_DIR's icon.jpg or dist/switch/default_icon.jpg")
+  if(TSSM_SWITCH_ICON)
+    if(NOT EXISTS "${TSSM_SWITCH_ICON}")
+      message(FATAL_ERROR "TSSM_SWITCH_ICON is ${TSSM_SWITCH_ICON}, which does not exist.")
+    endif()
+    set(_nro_icon "${TSSM_SWITCH_ICON}")
+  elseif(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
     set(_nro_icon "${TSSM_ICON_DIR}/icon.jpg")
   else()
     set(_nro_icon "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/default_icon.jpg")
   endif()
   message(STATUS "Switch: icon ${_nro_icon}")
 
+  # What the Homebrew Menu shows for the program (docs/SWITCH.md).
+  set(TSSM_SWITCH_NAME "TSSM (port)" CACHE STRING "The name the Switch's NACP shows")
+  set(TSSM_SWITCH_AUTHOR "TSSM port" CACHE STRING "The author the Switch's NACP shows")
   set(TSSM_SWITCH_VERSION "0.9" CACHE STRING "The version the Switch's NACP shows")
-  nx_generate_nacp(tssm.nacp NAME "TSSM (port)" AUTHOR "TSSM port" VERSION "${TSSM_SWITCH_VERSION}")
+  message(STATUS "Switch: NACP \"${TSSM_SWITCH_NAME}\", \"${TSSM_SWITCH_AUTHOR}\", ${TSSM_SWITCH_VERSION}")
+  nx_generate_nacp(tssm.nacp NAME "${TSSM_SWITCH_NAME}" AUTHOR "${TSSM_SWITCH_AUTHOR}"
+                   VERSION "${TSSM_SWITCH_VERSION}")
   nx_create_nro(tssm NACP tssm.nacp ICON "${_nro_icon}" ROMFS "${TSSM_SWITCH_ROMFS}")
 endif()
 

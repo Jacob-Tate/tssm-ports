@@ -52,13 +52,16 @@ it; `cmake -DTSSM_ICON_DIR=` (or a new build directory) does.
 long-press shortcut use). Without the property the APK has the default icon.
 docs/ANDROID.md.
 
-**Switch.** The Switch build passes `TSSM_ICON_DIR`'s `icon.jpg` to
-`nx_create_nro` when there is one, and otherwise the port's own default,
-`dist/switch/default_icon.jpg` (a plain sponge block drawn from shapes by
-`tools/switch/draw_default_icon.ps1`, registered in `tools/check_icon_art.py`):
+**Switch.** The Switch build passes `TSSM_SWITCH_ICON` (any 256x256 JPEG) to
+`nx_create_nro` when that is set, else `TSSM_ICON_DIR`'s `icon.jpg` when there
+is one, and otherwise the port's own default, `dist/switch/default_icon.jpg` (a
+plain sponge block drawn from shapes by `tools/switch/draw_default_icon.ps1`,
+registered in `tools/check_icon_art.py`):
 
 ```cmake
-if(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
+if(TSSM_SWITCH_ICON)
+  set(_nro_icon "${TSSM_SWITCH_ICON}")
+elseif(TSSM_ICON_DIR AND EXISTS "${TSSM_ICON_DIR}/icon.jpg")
   set(_nro_icon "${TSSM_ICON_DIR}/icon.jpg")
 else()
   set(_nro_icon "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/default_icon.jpg")

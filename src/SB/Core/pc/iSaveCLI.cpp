@@ -14,7 +14,11 @@
 
 static void iSC_usage()
 {
+#ifdef __SWITCH__
+    printf("The SpongeBob SquarePants Movie (port) -- save tools\n"
+#else
     printf("The SpongeBob SquarePants Movie (PC) -- save tools\n"
+#endif
            "\n"
            "  tssm --saves [--all]                   list the save slots (--all: every folder)\n"
            "  tssm --import-save FILE [--slot S] [--pick N] [--force] [--dry-run]\n"

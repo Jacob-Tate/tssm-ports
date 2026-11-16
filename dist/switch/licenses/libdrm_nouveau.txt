@@ -1,12 +1,12 @@
 libdrm_nouveau (devkitPro's switch-libdrm_nouveau package), linked statically
 into tssm.nro: the Nouveau GPU interface Mesa's driver uses on the Switch.
 
-Under the MIT licence below. The copyright notices are in the source files
-themselves; devkitPro's package recipe (source and patches) is under
-switch/libdrm_nouveau in https://github.com/devkitPro/pacman-packages.
+Under the MIT licence below (tag v1.0.1 of
+https://github.com/devkitPro/libdrm_nouveau), with these copyright lines:
 
-TODO(switch): before any release, ship the exact copyright notices from the
-source this build used instead of this pointer.
+Copyright 2012 Red Hat Inc.
+Copyright 2006 Tungsten Graphics, Inc., Bismarck, ND. USA.
+Copyright 2005 Stephane Marchesin.
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
