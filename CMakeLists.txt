@@ -768,7 +768,12 @@ if(TSSM_GUI)
     endif()
     string(APPEND _notice_text "  { \"${name}\", \"${license}\", \"${what}\", \"${url}\",\n    R\"tssm_notice(${_body})tssm_notice\" },\n")
   endmacro()
-  tssm_gui_notice("The SpongeBob SquarePants Movie PC port" "CC0 1.0" "This program's own code."
+  if(TSSM_3DS OR TSSM_SWITCH)
+    set(_tssm_self "The SpongeBob SquarePants Movie (port)")
+  else()
+    set(_tssm_self "The SpongeBob SquarePants Movie PC port")
+  endif()
+  tssm_gui_notice("${_tssm_self}" "CC0 1.0" "This program's own code."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
   tssm_gui_notice("Dear ImGui" "MIT" "The settings overlay and the launcher."
                   "https://github.com/ocornut/imgui" "${IMGUI_DIR}/LICENSE.txt")
@@ -777,10 +782,16 @@ if(TSSM_GUI)
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
   if(FMV_INCLUDES AND TSSM_SWITCH)
-    # A .nro is one static image. TODO(switch): the LGPL's relinking terms for a
-    # static link (offer the object files) before any release.
+    # A .nro is one static image; the program's whole source is public, so it
+    # can be rebuilt with another FFmpeg (the switch branch's docs/SWITCH.md).
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
-                    "Movie decoding. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "Movie decoding. Copyright (c) 2000-2026 the FFmpeg developers. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  elseif(FMV_INCLUDES AND TSSM_3DS)
+    # Linked statically; the program's whole source is public, so it can be
+    # rebuilt with another FFmpeg (docs/3DS.md).
+    tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
+                    "Movie decoding. Copyright (c) 2000-2026 the FFmpeg developers. Linked statically into tssm.3dsx and tssm.cia, built by tools/3ds/build_ffmpeg.sh from the source at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
   elseif(FMV_INCLUDES)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
@@ -788,8 +799,8 @@ if(TSSM_GUI)
   endif()
   if(TSSM_SWITCH)
     # The Switch's system libraries, linked statically into the .nro. devkitPro
-    # installs no license files for them, so dist/switch/licenses carries the
-    # notes (TODO(switch) there: the exact copyright lines before any release).
+    # installs no license files for them, so dist/switch/licenses carries them,
+    # with the copyright lines of the versions devkitPro's packages build.
     tssm_gui_notice("Mesa" "MIT" "OpenGL on the Switch (EGL and the nouveau driver). Linked statically."
                     "https://mesa3d.org" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/mesa.txt")
     tssm_gui_notice("libdrm_nouveau" "MIT" "The GPU interface Mesa uses on the Switch. Linked statically."
@@ -798,8 +809,8 @@ if(TSSM_GUI)
                     "https://github.com/switchbrew/libnx" "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/licenses/libnx.txt")
   endif()
   if(TSSM_3DS)
-    # Linked statically into tssm.3dsx (dist/3ds/licenses; TODO(3ds) there: the
-    # exact copyright lines before any release).
+    # Linked statically into tssm.3dsx (dist/3ds/licenses; libctru.txt also
+    # names newlib's and the GCC runtime's licences).
     tssm_gui_notice("libctru" "zlib" "The 3DS homebrew system library. Linked statically."
                     "https://github.com/devkitPro/libctru" "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/libctru.txt")
     tssm_gui_notice("citro3d" "zlib" "The 3DS's GPU library, which draws the game. Linked statically."
@@ -1268,7 +1279,13 @@ if(TSSM_3DS)
   set(_smdh_icon_args)
   if(_3ds_icon48)
     set(_smdh_icon_args ICON "${_3ds_icon48}")
-    message(STATUS "3DS: icon ${TSSM_3DS_ICON} (made from your own game files: do not share the .3dsx or .cia)")
+    get_filename_component(_3ds_icon_real "${TSSM_3DS_ICON}" REALPATH)
+    get_filename_component(_3ds_own_icon "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/cia_icon.png" REALPATH)
+    if(_3ds_icon_real STREQUAL _3ds_own_icon)
+      message(STATUS "3DS: icon ${TSSM_3DS_ICON} (the port's own)")
+    else()
+      message(STATUS "3DS: icon ${TSSM_3DS_ICON} (made from your own game files: do not share the .3dsx or .cia)")
+    endif()
   elseif(TSSM_ICON_DIR)
     if(NOT EXISTS "${TSSM_ICON_DIR}/icon-48.png")
       message(FATAL_ERROR "TSSM_ICON_DIR is ${TSSM_ICON_DIR}, which has no icon-48.png. "
@@ -1287,10 +1304,32 @@ if(TSSM_3DS)
   # The author the Homebrew Launcher shows (the .3dsx) and the publisher the
   # HOME Menu shows (the .cia).
   set(TSSM_3DS_AUTHOR "aidp2" CACHE STRING "The author and publisher in the 3DS's SMDH")
+  # The name the Homebrew Launcher and the HOME Menu show (the SMDH's short and
+  # long title, the .3dsx's and the .cia's), the heading of the overlay's
+  # About tab and the name on the port's own text screens (no game files, old
+  # 3DS); empty keeps the usual ones. The TSSM Dehydrated release sets it
+  # (docs/3DS.md, "Building the TSSM Dehydrated release").
+  set(TSSM_3DS_TITLE "" CACHE STRING
+    "The game's name on the 3DS (SMDH short and long title, the About tab's heading, the text screens); empty: the usual name")
+  set(_3ds_name "The SpongeBob SquarePants Movie Videogame")
+  if(TSSM_3DS_TITLE)
+    string(LENGTH "${TSSM_3DS_TITLE}" _3ds_name_len)
+    if(_3ds_name_len GREATER 64 OR TSSM_3DS_TITLE MATCHES "\"")
+      message(FATAL_ERROR "3DS: TSSM_3DS_TITLE is longer than the SMDH's 64 characters or has a double quote")
+    endif()
+    set(_3ds_name "${TSSM_3DS_TITLE}")
+    message(STATUS "3DS: title \"${TSSM_3DS_TITLE}\"")
+    set_property(SOURCE ${PC_DIR}/3ds/i3DS.cpp APPEND PROPERTY
+                 COMPILE_DEFINITIONS "TSSM_3DS_TITLE_TEXT=\"${TSSM_3DS_TITLE}\"")
+  endif()
   if(TSSM_GUI)
-    # The overlay's About tab gives the same number.
+    # The overlay's About tab gives the same number (and the same name).
     set_property(SOURCE ${PC_DIR}/gui/iGuiTabs.cpp APPEND PROPERTY
                  COMPILE_DEFINITIONS "TSSM_3DS_VERSION_TEXT=\"${TSSM_3DS_VERSION}\"")
+    if(TSSM_3DS_TITLE)
+      set_property(SOURCE ${PC_DIR}/gui/iGuiTabs.cpp APPEND PROPERTY
+                   COMPILE_DEFINITIONS "TSSM_GUI_TITLE=\"${TSSM_3DS_TITLE}\"")
+    endif()
   endif()
   if(TSSM_3DS_SPIKE)
     # tssm-spike.elf and tssm-spike.3dsx, so the two programs can sit side by
@@ -1317,7 +1356,7 @@ if(TSSM_3DS)
     message(STATUS "3DS: console probe ${TSSM_3DS_PROBE}")
   else()
     ctr_generate_smdh(tssm.smdh
-      NAME "The SpongeBob SquarePants Movie Videogame"
+      NAME "${_3ds_name}"
       DESCRIPTION "Homebrew port ${TSSM_3DS_VERSION}"
       AUTHOR "${TSSM_3DS_AUTHOR}"
       ${_smdh_icon_args})
@@ -1332,9 +1371,16 @@ if(TSSM_3DS)
   # banner is TSSM_3DS_BANNER: a .bnr the player made from their own game
   # files (tools/3ds/banner_from_game_files.py), never one in the repository;
   # the icon likewise TSSM_3DS_ICON (tools/3ds/icon_from_game_files.py).
+  # TSSM_3DS_BANNER may also be a 256x128 PNG picture, made into the banner
+  # with the port's chime (the TSSM Dehydrated release's
+  # dist/3ds/cia_banner_dehydrated.png).
   if(NOT TSSM_3DS_SPIKE)
     set(TSSM_CTR_TOOLS "$ENV{TSSM_CTR_TOOLS}" CACHE PATH "Folder with makerom and bannertool, for tssm.cia")
-    set(TSSM_3DS_BANNER "" CACHE FILEPATH "A .bnr for tssm.cia instead of the port's plain banner (tools/3ds/banner_from_game_files.py)")
+    set(TSSM_3DS_BANNER "" CACHE FILEPATH "A .bnr for tssm.cia instead of the port's plain banner (tools/3ds/banner_from_game_files.py), or a 256x128 PNG to make one with the port's chime")
+    set(_3ds_banner_png OFF)
+    if(TSSM_3DS_BANNER MATCHES "\\.[Pp][Nn][Gg]$")
+      set(_3ds_banner_png ON)
+    endif()
     find_program(TSSM_MAKEROM NAMES makerom HINTS "${TSSM_CTR_TOOLS}" NO_CMAKE_FIND_ROOT_PATH)
     find_program(TSSM_BANNERTOOL NAMES bannertool HINTS "${TSSM_CTR_TOOLS}" NO_CMAKE_FIND_ROOT_PATH)
     if(TSSM_MAKEROM AND TSSM_BANNERTOOL)
@@ -1365,10 +1411,20 @@ if(TSSM_3DS)
       configure_file(tools/3ds/tssm.rsf ${_cia}/tssm.rsf COPYONLY)
       # The banner: the port's picture and chime made into cia/tssm.bnr, or the
       # player's own .bnr copied to cia/banner.bnr (copied when it changes).
-      if(TSSM_3DS_BANNER)
-        if(NOT EXISTS "${TSSM_3DS_BANNER}")
-          message(FATAL_ERROR "3DS: TSSM_3DS_BANNER ${TSSM_3DS_BANNER} does not exist")
+      if(TSSM_3DS_BANNER AND NOT EXISTS "${TSSM_3DS_BANNER}")
+        message(FATAL_ERROR "3DS: TSSM_3DS_BANNER ${TSSM_3DS_BANNER} does not exist")
+      endif()
+      if(_3ds_banner_png)
+        # A PNG's width and height are bytes 16 to 23: 256 and 128.
+        file(READ "${TSSM_3DS_BANNER}" _png_head LIMIT 24 HEX)
+        if(NOT _png_head MATCHES "^89504e470d0a1a0a................0000010000000080$")
+          message(FATAL_ERROR "3DS: TSSM_3DS_BANNER ${TSSM_3DS_BANNER} is not a 256x128 PNG picture")
         endif()
+        configure_file("${TSSM_3DS_BANNER}" ${_cia}/banner.png COPYONLY)
+        set(_cia_bnr cia/tssm.bnr)
+        set(_cia_bnr_make COMMAND "${TSSM_BANNERTOOL}" makebanner -i cia/banner.png -a cia/cia_chime.wav -o cia/tssm.bnr)
+        set(_cia_bnr_deps ${_cia}/banner.png ${_cia}/cia_chime.wav)
+      elseif(TSSM_3DS_BANNER)
         configure_file("${TSSM_3DS_BANNER}" ${_cia}/banner.bnr COPYONLY)
         set(_cia_bnr cia/banner.bnr)
         set(_cia_bnr_make)
@@ -1382,7 +1438,7 @@ if(TSSM_3DS)
       file(GLOB_RECURSE _cia_romfs ${TSSM_3DS_ROMFS}/*)
       # bannertool cuts the short name at 32 characters (the SMDH holds 64), so
       # tools/3ds/smdh_names.py writes the whole name back when Python is found.
-      set(_cia_name "The SpongeBob SquarePants Movie Videogame")
+      set(_cia_name "${_3ds_name}")
       find_program(TSSM_PYTHON NAMES python3 python NO_CMAKE_FIND_ROOT_PATH)
       set(_cia_name_fix)
       if(TSSM_PYTHON)
@@ -1407,7 +1463,9 @@ if(TSSM_3DS)
         VERBATIM)
       add_custom_target(tssm_cia ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tssm.cia)
       message(STATUS "3DS: tssm.cia with ${TSSM_MAKEROM} and ${TSSM_BANNERTOOL}")
-      if(TSSM_3DS_BANNER)
+      if(_3ds_banner_png)
+        message(STATUS "3DS: tssm.cia's banner: the picture ${TSSM_3DS_BANNER} and the port's chime")
+      elseif(TSSM_3DS_BANNER)
         message(STATUS "3DS: tssm.cia's banner: ${TSSM_3DS_BANNER} (made from your own game files: do not share that .cia)")
       endif()
       if(_3ds_icon48)

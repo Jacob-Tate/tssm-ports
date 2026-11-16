@@ -46,8 +46,10 @@ DEFAULTS = {
     # drawn by tools/switch/draw_default_icon.ps1.
     "dist/switch/default_icon.jpg": "88c7a1acb6728499fb0d06ed997ca640b2644af6",
     # The 3DS .cia's banner and icon: the same block and the name,
-    # drawn by tools/3ds/draw_cia_art.ps1.
+    # drawn by tools/3ds/draw_cia_art.ps1; the second banner is the TSSM
+    # Dehydrated release's (docs/3DS.md).
     "dist/3ds/cia_banner.png": "e8ef84983c15b982f852c9ffb02a20ebcb7b9fc4",
+    "dist/3ds/cia_banner_dehydrated.png": "ba4482791aa021447941a63adbb2722be6ec5b3b",
     "dist/3ds/cia_icon.png": "d226450ed38a80e6e56d83a973bb3c425b008ed2",
 }
 

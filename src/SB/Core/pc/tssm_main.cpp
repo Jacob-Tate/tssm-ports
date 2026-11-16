@@ -1093,7 +1093,13 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
+#if defined(__3DS__)
+            printf("tssm: New 3DS port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#elif defined(__SWITCH__)
+            printf("tssm: Switch port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#else
             printf("tssm: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#endif
                    kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
                    iFMVAudioName());
 #ifdef __SWITCH__

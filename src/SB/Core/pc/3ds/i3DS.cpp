@@ -217,6 +217,14 @@ namespace
 
     // ------------------------------------------------------------ the model
 
+    // The name on the port's own text screens (this one and the game-files
+    // screen): the build's TSSM_3DS_TITLE when it has one (CMakeLists.txt).
+#ifdef TSSM_3DS_TITLE_TEXT
+#define TSSM_3DS_SCREEN_NAME(indent) indent TSSM_3DS_TITLE_TEXT "\n"
+#else
+#define TSSM_3DS_SCREEN_NAME(indent) indent "The SpongeBob SquarePants Movie\n" indent "(homebrew port)\n"
+#endif
+
     // New 3DS only: an Old 3DS has a third of the CPU and half the memory a .3dsx gets
     // on a New one. Said on the console's own text screen, before SDL or the
     // log exist, and then the program ends.
@@ -226,8 +234,7 @@ namespace
         consoleInit(GFX_TOP, NULL);
 
         printf("\n\n"
-               "  The SpongeBob SquarePants Movie\n"
-               "  (homebrew port)\n"
+               TSSM_3DS_SCREEN_NAME("  ")
                "\n"
                "  This console is not supported.\n"
                "\n"
@@ -4537,7 +4544,7 @@ void i3DSGameFilesScreen(const char* folder, const char* file, int unreadable, i
 
     // The bottom screen: the details.
     char text[1400];
-    BoxLine("\n The SpongeBob SquarePants Movie\n (homebrew port)\n\n");
+    BoxLine("\n" TSSM_3DS_SCREEN_NAME(" ") "\n");
     if (noFolder)
     {
         snprintf(text, sizeof(text), "There is no %s folder on the SD card.", card);

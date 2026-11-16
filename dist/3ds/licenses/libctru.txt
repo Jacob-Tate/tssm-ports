@@ -1,12 +1,16 @@
 libctru, the 3DS homebrew system library (devkitPro's libctru package),
 linked statically into tssm.3dsx.
 
-libctru is under the zlib licence below. The copyright notices are in its
-repository: https://github.com/devkitPro/libctru.
+libctru is under the zlib licence below, as its README.md gives it (tag
+v2.7.0 of https://github.com/devkitPro/libctru); libctru names no copyright
+holder.
 
-TODO(3ds): before any release, ship the exact copyright line from the libctru
-source this build used instead of this pointer, and the notices of newlib and
-the GCC runtime, which are in the image as well.
+devkitARM's C library (newlib) and the GCC runtime (libgcc, libstdc++) are in
+the image as well. newlib's licences are in its COPYING.NEWLIB and
+COPYING.LIBGLOSS (https://github.com/devkitPro/newlib, branch devkitPro); the
+GCC runtime is under the GPL 3 with the GCC Runtime Library Exception 3.1
+(https://www.gnu.org/licenses/gcc-exception-3.1.html), which asks nothing of
+programs built with it.
 
 This software is provided 'as-is', without any express or implied warranty.
 In no event will the authors be held liable for any damages arising from the

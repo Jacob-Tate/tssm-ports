@@ -1,15 +1,20 @@
 Mesa 3D (devkitPro's switch-mesa package: libEGL, libglapi and the nouveau
 OpenGL driver), linked statically into tssm.nro.
 
-Mesa's core library and drivers are under the MIT licence below; a few other
-parts are under other permissive licences. Mesa's own licence page lists them:
-https://docs.mesa3d.org/license.html. The copyright notices are in the source
-files themselves: https://gitlab.freedesktop.org/mesa/mesa; devkitPro's
-package recipe (source and patches) is under switch/mesa in
-https://github.com/devkitPro/pacman-packages.
+switch-mesa 20.1.0-5 is Mesa 20.1.0-rc3
+(https://archive.mesa3d.org/older-versions/20.x/mesa-20.1.0-rc3.tar.xz) with
+devkitPro's patches (switch/mesa in https://github.com/devkitPro/pacman-packages).
+Mesa's core library and drivers are under the MIT licence below, Mesa's
+default licence (its docs/license.html):
 
-TODO(switch): before any release, ship the exact copyright notices from the
-switch-mesa source this build used instead of this pointer.
+Copyright (C) 1999-2007  Brian Paul   All Rights Reserved.
+
+Each source file carries its own copyright lines under that licence. The parts
+this program links that are under other terms: src/util/softfloat.c (Berkeley
+SoftFloat 3e, BSD 3-clause, Copyright 2011-2018 The Regents of the University
+of California), src/util/xxhash.h (BSD 2-clause, Copyright (C) 2012-2016, Yann
+Collet), src/util/sha1 (public domain) and include/c11/threads*.h (Boost
+Software License 1.0).
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),

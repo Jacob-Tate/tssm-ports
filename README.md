@@ -17,6 +17,12 @@ screen.
   `tssm.cia` for the HOME Menu.
 - This branch still builds the Windows version too. It started from an early copy of the
   Switch port and still carries that copy: for the Switch, use the `switch` branch.
+- **Prebuilt:** this repository's Releases page has `TSSM-Dehydrated-0.9-3DS.3dsx` and
+  `TSSM-Dehydrated-0.9-3DS.cia` as *TSSM Dehydrated* 0.9: this branch built under that
+  name, with the port's own icon, banner and chime and no game data (you still need your
+  own game files, below). Install them as `tssm.3dsx` and `tssm.cia` below (the .3dsx
+  renamed to `tssm.3dsx`). `docs/3DS.md` ("Building the TSSM Dehydrated release") has the
+  exact commands.
 
 This repository and its branches
 --------------------------------

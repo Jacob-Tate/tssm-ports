@@ -38,7 +38,10 @@ extern "C" {
 
 void iGui::DrawAbout()
 {
-#if TSSM_GUI_CONSOLE
+#if defined(TSSM_GUI_TITLE)
+    // A build's own name (the 3DS's TSSM_3DS_TITLE, CMakeLists.txt).
+    ImGui::SeparatorText(TSSM_GUI_TITLE);
+#elif TSSM_GUI_CONSOLE
     ImGui::SeparatorText("The SpongeBob SquarePants Movie (port)");
 #else
     ImGui::SeparatorText("The SpongeBob SquarePants Movie: PC port");

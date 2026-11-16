@@ -82,6 +82,8 @@ namespace
 #ifdef __SWITCH__
         ImGui::TextDisabled("Choose the folder with the game's files on the SD card (normally "
                             "/switch/tssm/assets), check the settings, then Play.");
+#elif defined(__3DS__)
+        ImGui::TextDisabled("Choose where the game's files are, check the settings, then Play.");
 #else
         ImGui::TextDisabled("PC port. Choose where the game's files are, check the settings, "
                             "then Play.");

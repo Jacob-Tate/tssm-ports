@@ -22,7 +22,8 @@ on the screen.
 ### What you need
 
 1. A New 3DS, New 3DS XL or New 2DS XL running Luma3DS.
-2. `tssm.cia` or `tssm.3dsx` (or both), built as described under *Building*.
+2. `tssm.cia` or `tssm.3dsx` (or both): the prebuilt *TSSM Dehydrated* ones from this
+   repository's Releases page, or your own, built as described under *Building*.
 3. Your own copy of the game's **Xbox** files (the same files the PC, Android and Switch
    builds use).
 4. For sound, the console's DSP firmware dump, `sdmc:/3ds/dspfirm.cdc`. Make it once:
@@ -33,8 +34,9 @@ on the screen.
 
 **The .cia.** Copy `tssm.cia` anywhere on the SD card (for example `/cias/`), open a CIA
 installer such as FBI, find the file and choose *Install CIA*. The HOME Menu then has
-"The SpongeBob SquarePants Movie Videogame" with a sponge block icon (or an icon made from
-your own game files: see *An icon from your own game files*). A newer `tssm.cia` installs
+"The SpongeBob SquarePants Movie Videogame" ("TSSM Dehydrated" for the prebuilt one) with
+a sponge block icon (or an icon made from your own game files: see *An icon from your own
+game files*). A newer `tssm.cia` installs
 over the old one the same way; the settings and saves are files on the SD card
 and stay. To remove it: System Settings, Data Management, Nintendo 3DS, Software (or FBI's
 Titles, Delete Title). The `.cia` file itself can be deleted once installed.
@@ -284,8 +286,9 @@ of `CMakeLists.txt` (`CMAKE_SYSTEM_NAME` `Nintendo3DS`, from devkitPro's `3DS.cm
 SDL 3 from the prefix, the citro3d renderer (`TSSM_RENDER_BACKENDS=C3D`), the settings
 menu on the bottom screen (`TSSM_GUI`), FFmpeg's movie decoder when the prefix has it, no
 host tools or unit tests. The .3dsx carries a RomFS with the libraries' licences only, an
-SMDH with the name "The SpongeBob SquarePants Movie Videogame", the description "Homebrew
-port <version>" (`TSSM_3DS_VERSION`), the author "aidp2" (`TSSM_3DS_AUTHOR`) and a 48x48
+SMDH with the name "The SpongeBob SquarePants Movie Videogame" (`TSSM_3DS_TITLE` replaces
+it), the description "Homebrew port <version>" (`TSSM_3DS_VERSION`), the author "aidp2"
+(`TSSM_3DS_AUTHOR`) and a 48x48
 icon: the one made from your own game files with `TSSM_3DS_ICON` (see *An icon from your
 own game files*), or else `TSSM_ICON_DIR`'s `icon-48.png` when one was made
 (`docs/ICON.md`), otherwise libctru's default.
@@ -300,8 +303,9 @@ bannertool cuts at 32 characters) and a banner. The banner picture, the icon and
 banner's sound are the port's own, made by `tools/3ds/draw_cia_art.ps1` (a sponge block
 and the name) and `tools/3ds/make_chime.py` (a two-note chime) into `dist/3ds/cia_*`;
 nothing of the game's or anyone's logo goes in, and `tools/check_icon_art.py` knows the
-two pictures. A banner and an icon made from your own game files can replace the plain
-ones: see the next two sections.
+pictures. A banner and an icon made from your own game files can replace the plain ones:
+see *An animated HOME Menu banner from your own game files* and *An icon from your own
+game files*.
 
 | RSF setting | Value | Why |
 |---|---|---|
@@ -323,6 +327,51 @@ At run time only where closing goes differs: libctru's exit returns an installed
 the HOME Menu and a .3dsx to the Homebrew Launcher. The log's start says which it is, and
 the settings menu's Quit names that menu. makerom v0.19.0 stores the title version 0.1.0
 as 0.0.0; the SMDH's description carries the real one.
+
+### Building the TSSM Dehydrated release
+
+The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSSM
+Dehydrated*, are this build with five settings: the name "TSSM Dehydrated"
+(`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
+Menu, the About tab's heading and the game-files screen), version 0.9, author "aidp2", the
+port's own icon for both files (`dist/3ds/cia_icon.png`) and the banner picture
+`dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
+256x128 PNG as well as a .bnr). `tools/3ds/draw_cia_art.ps1 -OutDir dist\3ds -Subtitle
+Dehydrated -BannerFile cia_banner_dehydrated.png -BannerOnly` draws that picture. Nothing
+of the game is in either file: the RomFS holds the licence texts only. The .cia keeps the
+title ID `000400000F755300`, so it installs over an earlier build's .cia (the settings and
+saves are files on the SD card and stay).
+
+The program keeps source file names (in its assert messages; `build_ffmpeg.sh` maps
+FFmpeg's folders out itself and names them by their role in FFmpeg's configure line), so
+build in a work folder whose path has no spaces and nothing private in it, from a
+checkout of this branch inside it. In devkitPro's MSYS2 shell, with makerom and
+bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work folder:
+
+    R=/c/tssm-rel/3ds     # the work folder
+    S=$R/src              # this branch, checked out with its submodules (Building, step 2)
+    cd $S
+    MAP="-ffile-prefix-map=$(cygpath -m $R)/= -ffile-prefix-map=$R/="
+    CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_sdl.sh third_party/SDL $R/sdl $R/prefix
+    sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
+    CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
+      -DTSSM_PYTHON=/c/Python314/python.exe \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9 -DTSSM_3DS_AUTHOR=aidp2 \
+      -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
+      -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png
+
+`-DTSSM_PYTHON` names any Python 3 (step 6). On Linux or macOS, `MAP` is
+`-ffile-prefix-map=$R/=`. The files are `$R/build/tssm.3dsx` and `$R/build/tssm.cia`;
+keep `$R/build/tssm.elf` for crash reports. Before sharing them, look for your own folder
+and user names in both files, and in the .cia's program, which makerom compresses: unpack
+it with ctrtool (Project_CTR, tested v1.3.0). `x/exefs/icon.bin` is the SMDH (names,
+publisher, icon), and the RomFS holds the `licenses/` texts only:
+
+    cd $R/build && mkdir -p x
+    ctrtool --contents=x/c tssm.cia
+    ctrtool -t ncch --exefsdir=x/exefs --romfsdir=x/romfs x/c.0000.*
+    arm-none-eabi-strings -a tssm.3dsx x/exefs/code.bin | grep -i -e <your user name> -e Users
+    find x/romfs -type f
 
 ### An animated HOME Menu banner from your own game files
 
@@ -694,7 +743,10 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
 - **This branch started from an early copy of the Switch port** and still carries that
   copy (`docs/SWITCH.md`, `src/SB/Core/pc/switch`, `tools/switch`). For the Switch, use
   the `switch` branch.
-- **Licences:** before anyone shares a built `.3dsx` or `.cia`, the exact copyright lines
-  of libctru and citro3d (`dist/3ds/licenses`) and the notices of newlib and the GCC
-  runtime have to be added, and FFmpeg, which is linked into the program, needs what the
-  LGPL asks for (for example the object files to relink it).
+- **Licences when you share a build:** the RomFS carries libctru's and citro3d's licences
+  (`dist/3ds/licenses`, with citro3d's copyright line; libctru names no holder), and
+  `libctru.txt` names newlib's and the GCC runtime's. newlib's notices are not in the
+  RomFS: pass them on beside the files. FFmpeg is linked into the program statically; the
+  LGPL allows that because anyone can rebuild the program from this source with a changed
+  FFmpeg, so share the source of the FFmpeg you built with beside the files too. The
+  releases do both (THIRD-PARTY-NOTICES.txt and FFmpeg's source tarball).

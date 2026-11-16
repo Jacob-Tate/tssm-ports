@@ -1,11 +1,10 @@
 citro3d, the 3DS homebrew GPU library (devkitPro's citro3d package), linked
 statically into tssm.3dsx: the game is drawn through it.
 
-citro3d is under the zlib licence below. The copyright notices are in its
-repository: https://github.com/devkitPro/citro3d.
+citro3d is under the zlib licence below (LICENSE of tag v1.7.1 of
+https://github.com/devkitPro/citro3d):
 
-TODO(3ds): before any release, ship the exact copyright line from the citro3d
-source this build used instead of this pointer.
+Copyright (C) 2014-2018 fincs
 
 This software is provided 'as-is', without any express or implied warranty.
 In no event will the authors be held liable for any damages arising from the

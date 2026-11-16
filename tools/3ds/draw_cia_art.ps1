@@ -3,7 +3,12 @@
 # (tools/switch/draw_default_icon.ps1's shapes) on sea blue, and the name.
 # Shapes and text only; no picture goes in. Windows PowerShell:
 #   powershell -ExecutionPolicy Bypass -File tools\3ds\draw_cia_art.ps1 -OutDir dist\3ds
-param([string]$OutDir)
+# The TSSM Dehydrated release's banner (docs/3DS.md) is the same picture with
+# "Dehydrated" under the name:
+#   powershell -ExecutionPolicy Bypass -File tools\3ds\draw_cia_art.ps1 -OutDir dist\3ds `
+#     -Subtitle Dehydrated -BannerFile cia_banner_dehydrated.png -BannerOnly
+param([string]$OutDir, [string]$Subtitle = '(port)', [string]$BannerFile = 'cia_banner.png',
+      [switch]$BannerOnly)
 Add-Type -AssemblyName System.Drawing
 
 function RoundRect([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
@@ -32,14 +37,16 @@ function DrawBlock($g, [float]$ox, [float]$oy, [float]$s) {
 $blue = [System.Drawing.Color]::FromArgb(255, 0x1E, 0x6F, 0xAF)
 
 # icon: 48x48, the block filling the square
-$ic = New-Object System.Drawing.Bitmap 48, 48
-$g = [System.Drawing.Graphics]::FromImage($ic)
-$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$g.Clear($blue)
-DrawBlock $g 0 0 (48.0 / 256.0)
-$g.Dispose()
-$ic.Save((Join-Path $OutDir 'cia_icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$ic.Dispose()
+if (-not $BannerOnly) {
+  $ic = New-Object System.Drawing.Bitmap 48, 48
+  $g = [System.Drawing.Graphics]::FromImage($ic)
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.Clear($blue)
+  DrawBlock $g 0 0 (48.0 / 256.0)
+  $g.Dispose()
+  $ic.Save((Join-Path $OutDir 'cia_icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+  $ic.Dispose()
+}
 
 # banner: 256x128, the block on the left, the title on the right
 $bn = New-Object System.Drawing.Bitmap 256, 128
@@ -52,7 +59,7 @@ $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
 $f1 = New-Object System.Drawing.Font 'Segoe UI', 26, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
 $f2 = New-Object System.Drawing.Font 'Segoe UI', 15, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
 $g.DrawString('TSSM', $f1, $white, 128, 36)
-$g.DrawString('(port)', $f2, $white, 131, 68)
+$g.DrawString($Subtitle, $f2, $white, 131, 68)
 $g.Dispose()
-$bn.Save((Join-Path $OutDir 'cia_banner.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$bn.Save((Join-Path $OutDir $BannerFile), [System.Drawing.Imaging.ImageFormat]::Png)
 $bn.Dispose()
