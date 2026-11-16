@@ -88,13 +88,21 @@ if [ -z "$HOST_CC" ]; then
     fi
 fi
 
+# The source and work folders as the compiler sees them (on MSYS2 it is handed
+# Windows paths). __FILE__, which FFmpeg's assertions carry, then starts at the
+# source folder, so libmain.so does not carry the folders FFmpeg was built in.
+winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+WSRC=$(winpath "$(cd "$SRC" && pwd)")
+WWORK=$(winpath "$(pwd)")
+MAP_FLAGS="-ffile-prefix-map=$WSRC/= -ffile-prefix-map=$WWORK/="
+
 "$SRC/configure" \
     --prefix="$PREFIX" \
     --host-cc="$HOST_CC" \
     --enable-cross-compile --target-os=android --arch=$ARCH --cpu=$CPU \
     --cc="$TC/clang$EXE" --ar="$TC/llvm-ar$EXE" --nm="$TC/llvm-nm$EXE" \
     --ranlib="$TC/llvm-ranlib$EXE" --strip="$TC/llvm-strip$EXE" \
-    --extra-cflags="--target=$TRIPLE$API $ABI_FLAGS -fPIC -O2" \
+    --extra-cflags="--target=$TRIPLE$API $ABI_FLAGS -fPIC -O2 $MAP_FLAGS" \
     --extra-ldflags="--target=$TRIPLE$API" \
     --enable-static --disable-shared --enable-pic \
     --disable-autodetect --disable-programs --disable-doc --disable-debug \
@@ -108,6 +116,21 @@ fi
     --enable-parser=vorbis,opus,flac,mpegaudio \
     --enable-protocol=file \
     $ABI_CONFIG
+
+# The configure line is compiled in as well (avcodec_configuration()): keep it,
+# with the folders named by their role instead of their paths.
+sedesc() { printf '%s' "$1" | sed 's/[][\.*^$|]/\\&/g'; }
+sed -i -e "/^#define FFMPEG_CONFIGURATION /{
+s|$(sedesc "$PREFIX")|<prefix>|g
+s|$(sedesc "$(winpath "$PREFIX")")|<prefix>|g
+s|$(sedesc "$ANDROID_NDK_HOME")|<ndk>|g
+s|$(sedesc "$(winpath "$ANDROID_NDK_HOME")")|<ndk>|g
+s|$(sedesc "$WSRC")|<source>|g
+s|$(sedesc "$(cd "$SRC" && pwd)")|<source>|g
+s|$(sedesc "$WWORK")|<build>|g
+s|$(sedesc "$(pwd)")|<build>|g
+}" config.h
+grep '^#define FFMPEG_CONFIGURATION ' config.h
 
 JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 make -j"$JOBS"

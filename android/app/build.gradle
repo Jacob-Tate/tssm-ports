@@ -19,6 +19,15 @@ plugins {
 //                  outside the repository (docs/ICON.md). Its android/res
 //                  overrides the launcher icon; without it the APK keeps the
 //                  default one in src/main/res.
+//   tssm.label     The app's name (its label): under the launcher icon, in
+//                  the recent apps and in Settings. Plain text. Default
+//                  "SpongeBob Movie Port" (app_name in src/main/res/values/
+//                  strings.xml).
+//   tssm.releaseDebugKey
+//                  true: the release APKs are signed with the SDK's debug
+//                  key, the one debug builds use (~/.android/debug.keystore).
+//                  Default false: they are left unsigned
+//                  (app-<abi>-release-unsigned.apk), for a key of your own.
 
 // third_party/SDL's own Java half, compiled straight out of the submodule so
 // the two halves of SDL cannot drift apart.
@@ -45,6 +54,9 @@ if (!tssmIcon.isEmpty()) {
     }
     logger.lifecycle("tssm: launcher icon from ${tssmIconRes}")
 }
+
+def tssmLabel = (project.findProperty('tssm.label') ?: '').trim()
+def tssmReleaseDebugKey = (project.findProperty('tssm.releaseDebugKey') ?: 'false').toString().toBoolean()
 
 def cmakeArgs = [
     // The game is C++ and librw is C++; the shared runtime would be a second
@@ -75,6 +87,11 @@ android {
         versionCode = 16
         versionName = '0.9'
 
+        // A generated app_name, which takes the place of strings.xml's.
+        if (!tssmLabel.isEmpty()) {
+            resValue 'string', 'app_name', tssmLabel
+        }
+
         externalNativeBuild {
             cmake {
                 arguments(*cmakeArgs)
@@ -103,6 +120,19 @@ android {
         release {
             minifyEnabled = false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
+            // The native code compiled as the debug build type compiles it
+            // (RelWithDebInfo: -O2, symbols stripped in the APK), the code
+            // the phone tests ran; CMake's Release is -O3.
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+                }
+            }
+
+            if (tssmReleaseDebugKey) {
+                signingConfig = signingConfigs.debug
+            }
         }
         debug {
             jniDebuggable = true
@@ -142,6 +172,13 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+
+    // No dependency-info block in the APK's signing block (AGP adds one by
+    // default, encrypted for Google Play).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     externalNativeBuild {

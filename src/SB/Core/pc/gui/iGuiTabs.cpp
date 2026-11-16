@@ -35,8 +35,12 @@ extern "C" {
 
 void iGui::DrawAbout()
 {
+#ifdef __ANDROID__
+    ImGui::SeparatorText("The SpongeBob SquarePants Movie (port)");
+#else
     ImGui::SeparatorText(TouchWords() ? "The SpongeBob SquarePants Movie (port)" :
                                         "The SpongeBob SquarePants Movie: PC port");
+#endif
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
 #ifdef NDEBUG
     const char* config = "release";

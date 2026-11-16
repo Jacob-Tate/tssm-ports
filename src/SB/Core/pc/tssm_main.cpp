@@ -1067,7 +1067,11 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
+#ifdef __ANDROID__
+            printf("tssm: Android port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#else
             printf("tssm: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+#endif
                    kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
                    iFMVAudioName());
             // TSSM_TEST_CRASH: at startup, or at a frame when it is a number

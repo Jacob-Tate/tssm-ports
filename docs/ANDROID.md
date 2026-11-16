@@ -3,7 +3,7 @@
 The PC port (`src/SB/Core/pc`), built as an Android app. It is treedome's
 Android layer (the BfBB PC port, CC0), adapted to TSSM.
 
-- App name: **SpongeBob Movie Port**
+- App name: **SpongeBob Movie Port** (`-Ptssm.label` gives a build another)
 - Package (application id): `io.github.tssmport.game`
 - No game data in the APK. The player supplies the files from their own copy
   of the Xbox release of The SpongeBob SquarePants Movie (about 1 GB).
@@ -11,7 +11,8 @@ Android layer (the BfBB PC port, CC0), adapted to TSSM.
 ## Status
 
 - Both APKs build: `arm64-v8a` (64-bit ARM) and `armeabi-v7a` (32-bit ARM).
-- Neither has been run on a device or an emulator yet.
+- arm64-v8a has been played on one phone; armeabi-v7a has not run on a
+  device yet.
 - **arm64-v8a is the one for 64-bit phones** (Pixel 7 and later, and most
   phones sold since, run only 64-bit apps). It loads the game as the Windows
   x64 build does: the asset data that keeps pointers in 4-byte slots is
@@ -71,6 +72,22 @@ from the `.so` in the APK.
 | `-Ptssm.backends` | `GL3` | Passed as `TSSM_RENDER_BACKENDS`: `GL3`, `VULKAN` or `GL3;VULKAN`. |
 | `-Ptssm.ffmpeg` | none | A folder holding `<abi>/include` and `<abi>/lib` for each ABI, from `tools/android/build_ffmpeg.sh`. Passed as `TSSM_FFMPEG_ROOT`. The environment variable `TSSM_FFMPEG_ANDROID` works too. Without it the movies are skipped. |
 | `-Ptssm.icon` | none | A folder made by `tools/make_icons.ps1` from a picture, outside the repository. Its `android/res` overrides the launcher icon (debug and release). Without it the APK has the default icon. [ICON.md](ICON.md). |
+| `-Ptssm.releaseDebugKey` | `false` | `true` signs the release APKs with the SDK's debug key (`~/.android/debug.keystore`), the key the debug APKs have, so either kind updates the other in place and the co-op app's save sharing (same key only) still works. Without it the release APKs are unsigned. |
+| `-Ptssm.label` | `SpongeBob Movie Port` | The app's name (its label), as plain text: under the launcher icon, in the recent apps, in Settings and in the import screen's All files access hint. It replaces `app_name` from `src/main/res/values/strings.xml`. |
+
+### Release APKs
+
+```
+cd android
+gradle assembleRelease -Ptssm.releaseDebugKey=true -Ptssm.ffmpeg=<folder>
+```
+
+They are written to `android/app/build/outputs/apk/release/`:
+`app-<abi>-release.apk` with `-Ptssm.releaseDebugKey=true`,
+`app-<abi>-release-unsigned.apk` without it (sign them with `apksigner`
+after `zipalign`). They differ from the debug APKs only in that the app is
+not debuggable (no `run-as`, no debugger, no test launches through `adb`).
+The native code is compiled the same way, as `RelWithDebInfo`.
 
 ### What CMake does differently on Android
 
@@ -86,6 +103,9 @@ Each is an `if(ANDROID)` block in `CMakeLists.txt`.
 - SDL is the vendored submodule, linked statically into `libmain.so`.
 - `TSSM_HOST_TOOLS` is off: no `save_selftest`, `tssm_input_test`,
   `tssm_sndtest` or `tssm_modtest`.
+- `-fmacro-prefix-map` makes `__FILE__` (in librw's and the game's messages)
+  relative to the checkout, so `libmain.so` does not carry the folder it was
+  built in.
 - `main` and `tssm_platform` link `liblog`; `main` also links `libandroid`.
 - With `TSSM_FFMPEG_ROOT`, FFmpeg is found in `<root>/<abi>` (the NDK
   toolchain otherwise searches only its own sysroot) and linked statically,
@@ -830,4 +850,5 @@ The picker itself needs a person's hands.
 - GL3 has no recovery if the driver loses the EGL context: the game says
   so and closes (above).
 - Using a folder in place needs All files access, which Google Play does not
-  grant to games. The APKs are debug-signed and not meant for a store.
+  grant to games. The APKs are signed with a debug key and not meant for a
+  store.

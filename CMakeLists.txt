@@ -102,6 +102,9 @@ endif()
 
 if(ANDROID)
   set(TSSM_HOST_TOOLS OFF)
+  # __FILE__ relative to the checkout (librw's messages and assertions carry
+  # it), so libmain.so does not carry the folder it was built in.
+  add_compile_options("-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
 else()
   set(TSSM_HOST_TOOLS ON)
 endif()
@@ -556,10 +559,17 @@ if(TSSM_GUI)
   )
 
   # The About tab's version line: the branch and `git describe` at configure
-  # time (re-run CMake for a newer one).
-  execute_process(COMMAND git describe --always --dirty --abbrev=10
+  # time (re-run CMake for a newer one). "-dirty" leaves out changes inside
+  # submodules: the librw patches the build applies are in every checkout.
+  execute_process(COMMAND git describe --always --abbrev=10
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                   OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  execute_process(COMMAND git diff --quiet --ignore-submodules=dirty HEAD --
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  RESULT_VARIABLE _tssm_dirty OUTPUT_QUIET ERROR_QUIET)
+  if(_tssm_describe AND _tssm_dirty EQUAL 1)
+    set(_tssm_describe "${_tssm_describe}-dirty")
+  endif()
   execute_process(COMMAND git rev-parse --abbrev-ref HEAD
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                   OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
@@ -588,7 +598,12 @@ if(TSSM_GUI)
     endif()
     string(APPEND _notice_text "  { \"${name}\", \"${license}\", \"${what}\", \"${url}\",\n    R\"tssm_notice(${_body})tssm_notice\" },\n")
   endmacro()
-  tssm_gui_notice("The SpongeBob SquarePants Movie PC port" "CC0 1.0" "This program's own code."
+  if(ANDROID)
+    set(_tssm_self "The SpongeBob SquarePants Movie (port)")
+  else()
+    set(_tssm_self "The SpongeBob SquarePants Movie PC port")
+  endif()
+  tssm_gui_notice("${_tssm_self}" "CC0 1.0" "This program's own code."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
   tssm_gui_notice("Dear ImGui" "MIT" "The settings overlay and the launcher."
                   "https://github.com/ocornut/imgui" "${IMGUI_DIR}/LICENSE.txt")
@@ -598,7 +613,7 @@ if(TSSM_GUI)
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
   if(FMV_INCLUDES AND ANDROID)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
-                    "Movie decoding. Linked statically into libmain.so, built by tools/android/build_ffmpeg.sh from the source at ffmpeg.org."
+                    "Movie decoding. Copyright (c) 2000-2026 the FFmpeg developers. Linked statically into libmain.so, built by tools/android/build_ffmpeg.sh from the source at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
   elseif(FMV_INCLUDES)
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."

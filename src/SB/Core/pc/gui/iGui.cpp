@@ -430,8 +430,12 @@ namespace
         // A phone's build reads as made for it (and TSSM_GUI_TOUCH=1 shows
         // that on a desktop).
         const bool touch = iGui::TouchWords();
+#ifdef __ANDROID__
+        const char* title = "The SpongeBob SquarePants Movie###tssm_overlay";
+#else
         const char* title = touch ? "The SpongeBob SquarePants Movie###tssm_overlay" :
                                     "The SpongeBob SquarePants Movie  |  PC port###tssm_overlay";
+#endif
         if (ImGui::Begin(title, NULL, flags))
         {
             if (iGui::SaveError() != NULL)

@@ -208,7 +208,7 @@ public class ImportActivity extends Activity {
 
         mAwaitingPermission = true;
         if (Build.VERSION.SDK_INT >= 30) {
-            mStatus.setText(R.string.link_permission);
+            mStatus.setText(getString(R.string.link_permission, getString(R.string.app_name)));
             try {
                 startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                         Uri.parse("package:" + getPackageName())));

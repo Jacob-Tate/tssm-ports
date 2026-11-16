@@ -11,6 +11,13 @@ game files.
   phones today) and `armeabi-v7a` (older 32-bit phones). The 64-bit app has been played
   on one phone so far; the 32-bit one is build-checked only.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
+- **Prebuilt:** this repository's Releases page has both APKs as *TSSM Dehydrated* 0.9
+  (`TSSM-Dehydrated-0.9-Android.apk` for 64-bit phones, `TSSM-Dehydrated-0.9-Android-32bit.apk`
+  for older 32-bit-only ones), with no game data (you still need your own game files,
+  below): this branch's release build (`docs/ANDROID.md`, "Release APKs") with
+  `-Ptssm.releaseDebugKey=true`, `"-Ptssm.label=TSSM Dehydrated"`, FFmpeg for the movies
+  and the port's own icon (`tools/make_icons.ps1 -Background '#1E6FB0'` on the `switch`
+  branch's `dist/switch/default_icon.jpg`, passed as `-Ptssm.icon`).
 
 This repository and its branches
 --------------------------------

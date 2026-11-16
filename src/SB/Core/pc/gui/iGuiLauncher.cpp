@@ -67,8 +67,12 @@ namespace
         ImGui::PushFont(NULL, ImGui::GetStyle().FontSizeBase * 1.6f);
         ImGui::TextColored(ImVec4(0.96f, 0.82f, 0.25f, 1.0f), "The SpongeBob SquarePants Movie");
         ImGui::PopFont();
+#ifdef __ANDROID__
+        ImGui::TextDisabled("Choose where the game's files are, check the settings, then Play.");
+#else
         ImGui::TextDisabled("PC port. Choose where the game's files are, check the settings, "
                             "then Play.");
+#endif
         ImGui::Spacing();
 
         const float footer = ImGui::GetFrameHeightWithSpacing() * 1.4f;
