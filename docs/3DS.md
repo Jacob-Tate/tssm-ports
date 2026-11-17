@@ -349,8 +349,9 @@ as 0.0.0; the SMDH's description carries the real one.
 The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSSM
 Dehydrated*, are this build with five settings: the name "TSSM Dehydrated"
 (`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
-Menu, the About tab's heading and the game-files screen), version 0.9, author "aidp2", the
-port's own icon for both files (`dist/3ds/cia_icon.png`) and the banner picture
+Menu, the About tab's heading and the game-files screen), the release's version
+(`TSSM_3DS_VERSION`, 0.9.1 for TSSM Dehydrated 0.9.1), author "aidp2", the port's own
+icon for both files (`dist/3ds/cia_icon.png`) and the banner picture
 `dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
 256x128 PNG as well as a .bnr). `tools/3ds/draw_cia_art.ps1 -OutDir dist\3ds -Subtitle
 Dehydrated -BannerFile cia_banner_dehydrated.png -BannerOnly` draws that picture. Nothing
@@ -372,7 +373,7 @@ bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work fold
     sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
     CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
       -DTSSM_PYTHON=/c/Python314/python.exe \
-      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9 -DTSSM_3DS_AUTHOR=aidp2 \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.1 -DTSSM_3DS_AUTHOR=aidp2 \
       -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
       -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png
 
