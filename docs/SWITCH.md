@@ -7,10 +7,6 @@ froze on Quit (changed since; untested). The builds after that compile, link
 and pack but wait for their own run on the console; "Stubs and gaps" below
 says what is still unchecked.
 
-Using custom firmware online can get a console banned. Play offline (airplane
-mode, or an emuMMC setup), except for co-op, which needs Wi-Fi: read
-"Keeping the console safe on Wi-Fi" below first.
-
 This branch builds the co-op program, `tssm-coop.nro`: the same game with
 home-network co-op, as a separate file beside `tssm.nro` (section "Co-op on
 the home network").
@@ -196,31 +192,6 @@ then "TSSM co-op (port)".
   joining player joins again by themselves for a minute. After sleep the
   console's Wi-Fi takes a few seconds to come back; co-op makes its network
   connections again by itself.
-
-### Keeping the console safe on Wi-Fi
-
-Co-op needs the Switch on Wi-Fi. A Switch with custom firmware that connects to
-Nintendo's servers can be banned from Nintendo's online services (the eShop,
-online play, updates), for good. That is about the console, not the game:
-
-- **The game contacts nothing but the other player's device.** Only numeric
-  addresses on your home network (or the one you type to join over the
-  internet); no names are looked up, nothing signs in, and nothing is sent to
-  Nintendo or anyone else. The questions "is there a game here?" go only to
-  your home network's broadcast address.
-- **The console's own system software does** contact Nintendo whenever it can:
-  update checks, error reports, news, a signed-in account. With Wi-Fi on, that
-  happens in the background, whichever program runs.
-
-So before turning Wi-Fi on for co-op, make sure the console cannot reach
-Nintendo: run the game from an emuMMC (the custom-firmware system on the SD
-card), never sign into a Nintendo Account or the eShop there, and block
-Nintendo's servers on it (Atmosphere's DNS blocking in `/atmosphere/hosts/`,
-or a blocking DNS server in the Internet settings), and check that the block
-works. Airplane Mode (Flight Mode in some regions) alone does not help:
-co-op needs Wi-Fi, and a Switch can turn Wi-Fi back on inside it. If you are
-not sure the console is
-protected, play co-op on a PC and a phone only.
 
 ## Building
 

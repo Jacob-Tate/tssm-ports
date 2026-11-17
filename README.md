@@ -6,8 +6,7 @@
 built with devkitPro for the Switch: the same game code and platform layer, drawing
 through OpenGL on the console's Mesa driver.
 
-- For consoles running custom firmware (Atmosphere) and the Homebrew Menu. Using custom
-  firmware online can get a console banned: play offline.
+- For consoles running custom firmware (Atmosphere) and the Homebrew Menu.
 - It has been played on one console so far; `docs/SWITCH.md` lists what is still
   unchecked.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.

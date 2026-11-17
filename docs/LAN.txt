@@ -172,21 +172,3 @@ Only one of the two can be open at a time.
   above. The code pad works with the stick, the d-pad and touch.
 - If the tab says Wi-Fi is off, turn it on in System Settings (Airplane Mode,
   called Flight Mode in some regions, turns it off).
-
-Keeping the console safe on Wi-Fi. Playing co-op on a Switch with custom
-firmware means that Switch is on Wi-Fi. A console with custom firmware that
-connects to Nintendo can be banned from Nintendo's online service. The game
-itself never contacts Nintendo, but the console's system software does if it
-can. So:
-
-- Run the game from an emuMMC (the custom-firmware system on the SD card),
-  and keep your normal system (sysMMC) for Nintendo's online services. Never
-  sign into a Nintendo Account or the eShop on the emuMMC.
-- On the emuMMC, block Nintendo's servers: Atmosphere's DNS blocking (its
-  hosts files under /atmosphere/hosts/) or a DNS-blocking service set in the
-  emuMMC's Internet settings. Follow your custom-firmware guide's "blocking
-  Nintendo's servers" page, and check it works before turning Wi-Fi on.
-- Airplane Mode alone is not enough: co-op needs Wi-Fi, and a Switch can turn
-  Wi-Fi back on inside Airplane Mode, and then it reaches the internet again.
-- If you are not sure your setup is protected, play co-op on the PC and the
-  phone only.
