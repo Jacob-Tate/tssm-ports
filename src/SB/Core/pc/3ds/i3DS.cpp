@@ -64,6 +64,15 @@ static_assert(sizeof(SDL_GamepadDeviceEvent) == 24 &&
 // written for; 1 MB, as the Windows and Switch builds have.
 extern "C" {
 u32 __stacksize__ = 1024 * 1024;
+
+// dsp.c's, global in libctru and in no header: the DSP's sleep, wake and
+// cancel as apt.c calls them (the test stand-ins below call them the same way).
+bool aptDspSleep(void);
+void aptDspWakeup(void);
+void aptDspCancel(void);
+// libctru's threadCreate past the port's wrapper (below).
+Thread __real_threadCreate(ThreadFunc entrypoint, void* arg, size_t stack_size, int prio,
+                           int core_id, bool detached);
 }
 
 namespace
@@ -267,13 +276,42 @@ namespace
     bool sAway;
     int sResumes;
 
+    // One "tssm: 3ds: ..." line to the log file, synced to the card at once,
+    // and to 3dslink, as the quit's lines are: for the moments after which
+    // the game may never write again (sleep, wake, the DSP's sleep and wake).
+    // Past stdio, so APT's thread never waits on stdout's lock.
+    void SyncedLine(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+    void SyncedLine(const char* fmt, ...)
+    {
+        char line[256];
+        int n = snprintf(line, sizeof(line), "tssm: 3ds: ");
+        va_list ap;
+        va_start(ap, fmt);
+        const int m = vsnprintf(line + n, sizeof(line) - (size_t)n - 1, fmt, ap);
+        va_end(ap);
+        if (m < 0)
+        {
+            return;
+        }
+        n += m;
+        if (n > (int)sizeof(line) - 2)
+        {
+            n = (int)sizeof(line) - 2;
+        }
+        line[n++] = '\n';
+        line[n] = '\0';
+        i3DSLogWrite(line, (size_t)n);
+        i3DSLinkWrite(line, (size_t)n);
+    }
+
     // SDL's 3DS video driver sends no background or foreground events, so the
     // hook stands in for SDL_EVENT_WILL_ENTER_BACKGROUND and
     // DID_ENTER_FOREGROUND (iPadHostSDL.cpp's WatchBackground on Android), as
     // the Switch's applet hook does: the game clock stops while the HOME menu
     // is open or the console sleeps (the lid is closed), so the first frame
-    // back is an ordinary frame and not the whole absence. Coming back
-    // restarts the audio devices.
+    // back is an ordinary frame and not the whole absence. Coming back from
+    // the HOME menu restarts the audio devices; waking from sleep does not
+    // (iHost3DS.cpp, i3DSGameBack).
     //
     // Runs on the game thread: SDL calls aptMainLoop from SDL_PumpEvents.
     void Away(const char* why)
@@ -282,18 +320,19 @@ namespace
         {
             sAway = true;
             i3DSGameAway();
-            printf("tssm: 3ds: %s; the game clock is paused\n", why);
+            SyncedLine("%s; the game clock is paused", why);
         }
     }
 
-    void Back(const char* why)
+    void Back(const char* why, bool fromSleep)
     {
         if (sAway)
         {
             sAway = false;
             sResumes++;
-            i3DSGameBack();
-            printf("tssm: 3ds: %s; the game clock runs again\n", why);
+            i3DSGameBack(fromSleep ? 1 : 0);
+            SyncedLine("%s; the game clock runs again%s", why,
+                       fromSleep ? "; the audio devices stay open (libctru woke the DSP)" : "");
         }
     }
 
@@ -308,10 +347,10 @@ namespace
             Away("the console is asleep");
             break;
         case APTHOOK_ONRESTORE:
-            Back("back from the HOME menu");
+            Back("back from the HOME menu", false);
             break;
         case APTHOOK_ONWAKEUP:
-            Back("woke from sleep");
+            Back("woke from sleep", true);
             break;
         case APTHOOK_ONEXIT:
             printf("tssm: 3ds: the system asked the game to close\n");
@@ -1157,13 +1196,168 @@ namespace
         return on;
     }
 
+    // ------------------------------------------------------------------ ndsp
+    // The game holds an ndsp reference of its own from start-up to the quit,
+    // so ndsp (its thread, the DSP's component, the game's event with the
+    // DSP) lives as long as the game. SDL's audio driver takes one and drops
+    // it at every open and close of its device; with the game's held, an
+    // audio restart only resets and reopens SDL's channel. Without it, every
+    // restart ran ndspExit and ndspInit, which wait with no time limit for
+    // ndsp's thread to see one more DSP frame (libctru 2.7.0 ndsp.c:579, the
+    // thread at 407), for the DSP to say it has stopped (306-318) and for it
+    // to start again (258). Sleep and HOME need no restart for ndsp's sake:
+    // libctru puts ndsp to sleep and wakes it itself (dsp.c:86-108,
+    // ndsp.c:336-360). TSSM_3DS_NDSP_HOLD=off leaves ndsp to SDL alone.
+    bool sNdspHeld;
+
+    // Set by the ONCANCEL hook: the system cancelled the DSP's wake (APT's
+    // WAKEUP_CANCEL or WAKEUP_CANCELALL after HOME), so the DSP's component
+    // stays unloaded and ndsp stays cancelled, with no sound, until its last
+    // reference goes (libctru 2.7.0 ndsp.c:363-372, 400-404, 576-588). The
+    // game's hold never lets that happen; the next audio restart drops the
+    // hold and takes it again (RenewNdsp).
+    bool sNdspCancelled;
+
+    // Hooks on either side of ndsp's own: libctru calls the newest first, so
+    // the one made before ndspInit runs after ndsp's, and the one made after
+    // runs before it. On APT's thread at sleep and wake (the game thread for
+    // HOME); their lines say whether ndsp's part ended.
+    dspHookCookie sDspBefore;
+    dspHookCookie sDspAfter;
+
+    void OnDspBefore(DSP_HookType hook)
+    {
+        switch (hook)
+        {
+        case DSPHOOK_ONSLEEP:
+            SyncedLine("dsp: to sleep (ndsp waits for the DSP to stop)");
+            break;
+        case DSPHOOK_ONWAKEUP:
+            SyncedLine("dsp: waking (ndsp waits for the DSP to start again)");
+            break;
+        case DSPHOOK_ONCANCEL:
+            __atomic_store_n(&sNdspCancelled, true, __ATOMIC_RELEASE);
+            SyncedLine("dsp: the system cancelled the DSP's wake; ndsp starts afresh at the next "
+                       "audio restart (unless the game is closing)");
+            break;
+        default:
+            break;
+        }
+    }
+
+    void OnDspAfter(DSP_HookType hook)
+    {
+        switch (hook)
+        {
+        case DSPHOOK_ONSLEEP:
+            SyncedLine("dsp: asleep");
+            break;
+        case DSPHOOK_ONWAKEUP:
+            SyncedLine("dsp: awake (ndsp runs again)");
+            break;
+        default:
+            break;
+        }
+    }
+
+    // At start-up, once the DSP's firmware is known to be there: only when
+    // SDL will open ndsp.
+    void HoldNdsp()
+    {
+        const char* hold = getenv("TSSM_3DS_NDSP_HOLD");
+        const char* drv = getenv("SDL_AUDIO_DRIVER");
+        const char* audio = getenv("TSSM_AUDIO");
+        if (hold != NULL && strcmp(hold, "off") == 0)
+        {
+            printf("tssm: 3ds: audio: ndsp left to SDL (TSSM_3DS_NDSP_HOLD=off): each audio "
+                   "restart stops and starts the DSP\n");
+            return;
+        }
+        if ((drv != NULL && drv[0] != '\0' && strcmp(drv, "n3ds") != 0) ||
+            (audio != NULL && audio[0] == '0'))
+        {
+            return;
+        }
+        dspHook(&sDspAfter, OnDspAfter);
+        const Result r = ndspInit();
+        if (R_FAILED(r))
+        {
+            dspUnhook(&sDspAfter);
+            printf("tssm: 3ds: audio: ndspInit failed (%#lx); SDL's driver tries again\n",
+                   (unsigned long)r);
+            return;
+        }
+        dspHook(&sDspBefore, OnDspBefore);
+        sNdspHeld = true;
+        printf("tssm: 3ds: audio: ndsp held by the game until the quit; an audio restart "
+               "reopens SDL's channel only\n");
+    }
+
+    void ReleaseNdsp()
+    {
+        if (!sNdspHeld)
+        {
+            return;
+        }
+        Step("closing ndsp (the game's hold: its thread joined, the DSP stopped, the game's "
+             "event unregistered, the component unloaded)");
+        dspUnhook(&sDspBefore);
+        ndspExit();
+        dspUnhook(&sDspAfter);
+        sNdspHeld = false;
+    }
+
+    // Between an audio restart's close and its reopen, after a cancel. SDL's
+    // reference is gone then, so the game's is the last: ndspExit takes ndsp
+    // down (its thread, which only idles while cancelled, joined; no stop
+    // sent to the DSP, whose component is gone) and ndspInit starts it
+    // afresh, the component loaded again. Not while the game is closing
+    // (WAKEUP_CANCEL sets that): nothing would play, and the quit drops the
+    // hold anyway.
+    void RenewNdsp()
+    {
+        if (!sNdspHeld || !__atomic_exchange_n(&sNdspCancelled, false, __ATOMIC_ACQ_REL))
+        {
+            return;
+        }
+        if (aptShouldClose())
+        {
+            SyncedLine("dsp: ndsp left cancelled: the game is closing");
+            return;
+        }
+        if (SDL_WasInit(SDL_INIT_AUDIO) != 0)
+        {
+            SyncedLine("dsp: ndsp left cancelled: SDL's audio is still up and holds it too");
+            return;
+        }
+        const u64 t0 = svcGetSystemTick();
+        SyncedLine("dsp: after the cancel: the game's ndsp hold dropped (ndsp's thread joined, "
+                   "the DSP service closed), then taken again");
+        dspUnhook(&sDspBefore);
+        ndspExit();
+        const Result r = ndspInit();
+        const unsigned ms = (unsigned)((svcGetSystemTick() - t0) / (SYSCLOCK_ARM11 / 1000));
+        if (R_FAILED(r))
+        {
+            dspUnhook(&sDspAfter);
+            sNdspHeld = false;
+            SyncedLine("dsp: ndspInit failed after the cancel (%#lx, %u ms); ndsp left to SDL's "
+                       "driver",
+                       (unsigned long)r, ms);
+            return;
+        }
+        dspHook(&sDspBefore, OnDspBefore);
+        SyncedLine("dsp: ndsp started afresh after the cancel (%u ms)", ms);
+    }
+
     void StopAudio()
     {
         // SDL's audio thread runs on the system core and mixes the game's
         // sound state; ndsp's thread wakes every DSP frame. Each user of
         // audio holds a reference, so it is released until SDL has stopped
         // both (SDL's CloseDevice ends in ndspExit, which waits for the DSP
-        // to stop, unregisters the game's event and unloads the component).
+        // to stop, unregisters the game's event and unloads the component;
+        // with the game's own hold, that is ReleaseNdsp).
         if (SDL_WasInit(SDL_INIT_AUDIO) != 0)
         {
             Step("stopping audio (SDL's audio thread, then ndsp)");
@@ -1172,8 +1366,277 @@ namespace
                 SDL_QuitSubSystem(SDL_INIT_AUDIO);
             }
         }
+        ReleaseNdsp();
     }
 
+    // ------------------------------------------------------------ test stand-ins
+    // TSSM_TEST_AUDIO_RESTART's @home, @cancel, @sleep and @stuck (iAudioSDLTest.h), for
+    // an emulator: Azahar has no sleep, and no HOME without the HOME Menu's
+    // title. Nothing here runs unless a test entry asks.
+
+    void NoAptHook(APT_HookType, void*)
+    {
+    }
+
+    // Every APT hook, newest first, as apt.c's aptCallHook: a cookie hooked in
+    // front holds the rest of the chain.
+    void CallAptHooks(APT_HookType hook)
+    {
+        aptHookCookie head;
+        aptHook(&head, NoAptHook, NULL);
+        for (aptHookCookie* c = &head; c != NULL && c->callback != NULL; c = c->next)
+        {
+            c->callback(hook, c->param);
+        }
+        aptUnhook(&head);
+    }
+
+    // A hook after every other (aptHook puts a new one first): the chain's end
+    // (the cookie with no callback) is given it, and a new empty end. Taken
+    // off again with aptUnhook(&sTestTailEnd).
+    aptHookCookie sTestTailEnd;
+    aptHookCookie sTestTailOnly; // when there was no hook at all
+    bool sTestTailOn;
+    bool sTestTailAlone;
+
+    void HookLast(aptHookFn fn)
+    {
+        aptHookCookie head;
+        aptHook(&head, NoAptHook, NULL);
+        aptHookCookie* end = &head;
+        while (end->callback != NULL && end->next != NULL)
+        {
+            end = end->next;
+        }
+        sTestTailAlone = end == &head;
+        if (!sTestTailAlone)
+        {
+            memset(&sTestTailEnd, 0, sizeof(sTestTailEnd));
+            end->callback = fn;
+            end->param = NULL;
+            end->next = &sTestTailEnd;
+        }
+        aptUnhook(&head);
+        if (sTestTailAlone)
+        {
+            aptHook(&sTestTailOnly, fn, NULL);
+        }
+        sTestTailOn = true;
+    }
+
+    void UnhookLast()
+    {
+        if (sTestTailOn)
+        {
+            aptUnhook(sTestTailAlone ? &sTestTailOnly : &sTestTailEnd);
+            sTestTailOn = false;
+        }
+    }
+
+    double TestMs(u64 ticks)
+    {
+        return (double)ticks * 1000.0 / (double)SYSCLOCK_ARM11;
+    }
+
+    // @home: aptJumpToHomeMenu's order, with a library applet (errorDisp;
+    // Azahar's HLE error applet closes at once) in the HOME Menu's place: the
+    // ONSUSPEND hooks, the DSP's sleep after them (the last hook), the time
+    // away with the game thread held there, GSP's right given and taken back,
+    // the ONRESTORE hooks, the DSP's wake after them (aptWaitForWakeUp).
+    int sTestHomes;
+    u32 sTestAwayMs;
+    bool sTestHomeActive;
+    bool sTestHomeDsp;
+
+    void OnTestLast(APT_HookType hook, void*)
+    {
+        if (hook != APTHOOK_ONSUSPEND || !sTestHomeActive)
+        {
+            return;
+        }
+        sTestHomeDsp = aptDspSleep();
+        svcSleepThread((s64)sTestAwayMs * 1000000ll);
+    }
+
+    // @sleep: libctru's sleep, replayed. APT's thread (a stand-in at its
+    // priority, 0x31, on the game's core): SLEEP_ENTER's aptDspSleep, then the
+    // game thread's aptHandleSleep at its next aptMainLoop (SDL_PumpEvents runs
+    // the queued call just before it): the ONSLEEP hooks, the screens black
+    // until SLEEP_WAKEUP (aptDspWakeup on APT's thread), the screens on, the
+    // ONWAKEUP hooks.
+    int sTestSleeps;
+    u32 sTestAsleepMs;
+    bool sTestSleepDsp;
+    Thread sTestApt;
+    LightEvent sTestAsleep; // the game's ReplySleepNotificationComplete
+    LightEvent sTestWoke; // apt.c's aptSleepEvent
+    volatile bool sTestSleepBusy;
+
+    void SDLCALL TestSleepGame(void*)
+    {
+        SyncedLine("test: sleep stand-in %d: the game thread's aptHandleSleep: the ONSLEEP hooks",
+                   sTestSleeps);
+        CallAptHooks(APTHOOK_ONSLEEP);
+        GSPGPU_SetLcdForceBlack(1);
+        LightEvent_Signal(&sTestAsleep);
+        LightEvent_Wait(&sTestWoke);
+        GSPGPU_SetLcdForceBlack(0);
+        CallAptHooks(APTHOOK_ONWAKEUP);
+        SyncedLine("test: sleep stand-in %d over: the ONWAKEUP hooks ran", sTestSleeps);
+    }
+
+    void TestAptMain(void*)
+    {
+        SyncedLine("test: sleep stand-in %d: APT's SLEEP_ENTER: aptDspSleep (APT's thread)",
+                   sTestSleeps);
+        sTestSleepDsp = aptDspSleep();
+        SDL_RunOnMainThread(TestSleepGame, NULL, false);
+        LightEvent_Wait(&sTestAsleep);
+        svcSleepThread((s64)sTestAsleepMs * 1000000ll);
+        SyncedLine("test: sleep stand-in %d: APT's SLEEP_WAKEUP after %lu ms: %s", sTestSleeps,
+                   (unsigned long)sTestAsleepMs,
+                   sTestSleepDsp ? "aptDspWakeup" : "the DSP was not asleep (no component loaded)");
+        if (sTestSleepDsp)
+        {
+            aptDspWakeup();
+        }
+        LightEvent_Signal(&sTestWoke);
+        __atomic_store_n(&sTestSleepBusy, false, __ATOMIC_RELEASE);
+    }
+
+    // @stuck: SDL's ndsp channel (0) paused, so the wave buffers it has queued
+    // never come back done: the audio thread waits in the driver's
+    // WaitDevice, and a device close joins it there. Held until the time is
+    // up (paused again after every reset of the channel, which an audio
+    // restart does), or, with no time, until the next reset.
+    u64 sTestStuckUntil;
+    int sTestStuckRepauses;
+    bool sTestStuckHeld; // the time not yet up (atomic: set by the test's thread)
+
+    // @cancel: HOME ended by APT's WAKEUP_CANCELALL (aptWaitForWakeUp): the
+    // ONSUSPEND hooks, the DSP's sleep, the time away, then the ONRESTORE
+    // hooks and aptDspCancel instead of the DSP's wake, so its component
+    // stays unloaded. No applet: libctru's own wake-up would wake the DSP.
+    int sTestCancels;
+} // namespace
+
+void i3DSNdspRenewIfCancelled()
+{
+    RenewNdsp();
+}
+
+void i3DSTestCancel(uint32_t awayMs)
+{
+    sTestCancels++;
+    SyncedLine("test: cancel stand-in %d: the ONSUSPEND hooks, the DSP asleep, %lu ms away, then "
+               "APT's WAKEUP_CANCELALL: the ONRESTORE hooks and aptDspCancel",
+               sTestCancels, (unsigned long)awayMs);
+    const u64 t0 = svcGetSystemTick();
+    CallAptHooks(APTHOOK_ONSUSPEND);
+    const bool slept = aptDspSleep();
+    svcSleepThread((s64)awayMs * 1000000ll);
+    CallAptHooks(APTHOOK_ONRESTORE);
+    if (slept)
+    {
+        aptDspCancel();
+    }
+    SyncedLine("test: cancel stand-in %d over after %.0f ms; %s", sTestCancels,
+               TestMs(svcGetSystemTick() - t0),
+               slept ? "the DSP was cancelled and its component stays unloaded" :
+                       "the DSP was not asleep (no component loaded); nothing cancelled");
+}
+
+void i3DSTestHome(uint32_t awayMs)
+{
+    sTestHomes++;
+    sTestAwayMs = awayMs;
+    SyncedLine("test: HOME stand-in %d: libctru's library applet suspend (errorDisp) with the "
+               "DSP asleep after the ONSUSPEND hooks, %lu ms away",
+               sTestHomes, (unsigned long)awayMs);
+    const u64 t0 = svcGetSystemTick();
+    static errorConf conf;
+    errorInit(&conf, ERROR_TEXT, CFG_LANGUAGE_EN);
+    errorText(&conf, "TSSM test: a HOME stand-in (TSSM_TEST_AUDIO_RESTART @home)");
+    sTestHomeDsp = false;
+    HookLast(OnTestLast);
+    sTestHomeActive = true;
+    errorDisp(&conf);
+    sTestHomeActive = false;
+    UnhookLast();
+    // aptWaitForWakeUp's own aptDspWakeup has run after the ONRESTORE hooks;
+    // this one does nothing then.
+    if (sTestHomeDsp)
+    {
+        aptDspWakeup();
+    }
+    SyncedLine("test: HOME stand-in %d over after %.0f ms; the DSP %s", sTestHomes,
+               TestMs(svcGetSystemTick() - t0),
+               sTestHomeDsp ? "slept after the ONSUSPEND hooks and woke after the ONRESTORE hooks" :
+                              "was not asleep (no component loaded)");
+}
+
+void i3DSTestSleep(uint32_t asleepMs)
+{
+    if (__atomic_exchange_n(&sTestSleepBusy, true, __ATOMIC_ACQ_REL))
+    {
+        SyncedLine("test: sleep stand-in: one runs already; this one skipped");
+        return;
+    }
+    sTestSleeps++;
+    sTestAsleepMs = asleepMs;
+    LightEvent_Init(&sTestAsleep, RESET_ONESHOT);
+    LightEvent_Init(&sTestWoke, RESET_ONESHOT);
+    // apt.c's event thread: priority 0x31 on the game's core. __real_: not
+    // one of the threads the wrapper below logs or moves.
+    sTestApt = __real_threadCreate(TestAptMain, NULL, 16 * 1024, 0x31, -2, true);
+    if (sTestApt == NULL)
+    {
+        SyncedLine("test: sleep stand-in %d: its APT thread was REFUSED", sTestSleeps);
+        __atomic_store_n(&sTestSleepBusy, false, __ATOMIC_RELEASE);
+    }
+}
+
+void i3DSTestStuck(uint32_t ms)
+{
+    ndspChnSetPaused(0, true);
+    sTestStuckRepauses = 0;
+    sTestStuckUntil = svcGetSystemTick() + (u64)ms * (SYSCLOCK_ARM11 / 1000);
+    __atomic_store_n(&sTestStuckHeld, ms > 0, __ATOMIC_RELEASE);
+    SyncedLine("test: stuck: SDL's ndsp channel 0 paused: its queued wave buffers never come back "
+               "done%s",
+               ms > 0 ? "; paused again after every channel reset until the time is up" :
+                        " (until the channel's next reset)");
+    if (ms > 0)
+    {
+        SyncedLine("test: stuck: held for %lu ms", (unsigned long)ms);
+    }
+}
+
+void i3DSTestFrame()
+{
+    if (!__atomic_load_n(&sTestStuckHeld, __ATOMIC_ACQUIRE))
+    {
+        return;
+    }
+    if (svcGetSystemTick() >= sTestStuckUntil)
+    {
+        __atomic_store_n(&sTestStuckHeld, false, __ATOMIC_RELEASE);
+        ndspChnSetPaused(0, false);
+        SyncedLine("test: stuck: over (paused again %d time(s) after a channel reset); SDL's ndsp "
+                   "channel 0 runs again",
+                   sTestStuckRepauses);
+    }
+    else if (!ndspChnIsPaused(0))
+    {
+        ndspChnSetPaused(0, true);
+        sTestStuckRepauses++;
+        SyncedLine("test: stuck: the channel was reset (an audio restart); paused again (%d)",
+                   sTestStuckRepauses);
+    }
+}
+
+namespace
+{
     // Logged, not set: pm sets it to 0 itself once the program is gone
     // (Luma3DS's pm, at termination and at the next launch), and 0 is meant
     // for before an application is created; set while the game still runs
@@ -1398,7 +1861,8 @@ namespace
         // SDL's audio thread runs on the system core and mixes the game's
         // sound state; ndsp's thread wakes every DSP frame. Each user of
         // audio holds a reference, so it is released until SDL has stopped
-        // both (SDL's CloseDevice ends in ndspExit).
+        // both (SDL's CloseDevice ends in ndspExit; the game's own hold is
+        // ReleaseNdsp).
         if (SDL_WasInit(SDL_INIT_AUDIO) != 0)
         {
             Step("stopping audio (SDL's audio thread, then ndsp)");
@@ -1407,6 +1871,7 @@ namespace
                 SDL_QuitSubSystem(SDL_INIT_AUDIO);
             }
         }
+        ReleaseNdsp();
         u32 limit = 0;
         if (sNew3DS && R_SUCCEEDED(APT_GetAppCpuTimeLimit(&limit)))
         {
@@ -4476,6 +4941,10 @@ void i3DSStartup()
             SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
             printf("tssm: 3ds: audio: SDL's silent driver\n");
         }
+    }
+    else
+    {
+        HoldNdsp();
     }
     fflush(stdout);
 }

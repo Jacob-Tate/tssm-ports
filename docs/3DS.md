@@ -209,11 +209,22 @@ sound: on the 3DS a frame that is already late is skipped. Movies need the FFmpe
 step below; without it they are skipped. The game's own sounds pause while a movie plays,
 as on the console.
 
+### Sleep and the HOME Menu
+
+Closing the lid or pressing HOME pauses the game: its clock stops, and the sound stops with
+it. When you come back it carries on from the same moment. Back from the HOME Menu the
+sound starts again by itself. After a sleep the sound simply carries on; if it has not
+come back after about a second, the game starts it again. (An earlier build could hang
+after the lid was opened, both screens black and no button working, while it restarted the
+sound after the sleep.)
+
 ### If something goes wrong
 
 - `last_run.log` (and `last_run.prev.log`) in `/3ds/tssm/` say what happened. Closing the
   game writes a `tssm: 3ds: quit:` line before each step, so a console that goes wrong
-  while closing leaves the step it was in as the last line.
+  while closing leaves the step it was in as the last line. Sleep and wake are written the
+  same way, each line saved to the SD card at once, so if the screens stay black after the
+  lid is opened, the log's last line is the step the game stopped at.
 - A crash writes the registers and the code addresses on the stack to `crash.log`;
   Luma3DS's own exception screen and dump (`/luma/dumps/arm11/`) follow. Both packages run
   at the address the ELF was linked at, so the addresses are `tssm.elf`'s:
@@ -243,9 +254,14 @@ MSYS2 shell (Windows) or any shell with `DEVKITPRO` set (Linux, macOS, the
        git submodule update --init --depth 1
 
 3. **SDL 3**: upstream SDL's own 3DS port, from this repository's `third_party/SDL`,
-   built static:
+   built static, with the patches in `tools/3ds/sdl/` applied to that source first (they
+   put time limits on the 3DS audio driver's waits, so a wake from sleep cannot leave it
+   waiting for ever):
 
        sh tools/3ds/build_sdl.sh third_party/SDL <sdl build dir> <prefix>
+
+   The script applies the patches itself and skips one that is already applied, so git
+   shows `third_party/SDL` as modified afterwards; that is expected.
 
 4. **FFmpeg** (optional, for the movies): the decoder-only LGPL build the Switch and
    Android use, for armv6k, from an FFmpeg release (tested: n9.0.2), installed into the
@@ -389,7 +405,12 @@ You need:
 - **pycgfx** (MIT licence, <https://github.com/skyfloogle/pycgfx>, tested at commit
   6c2e0cd), which turns the model into the HOME Menu's 3D banner format, with its two
   Python packages, gltflib (MIT) and Pillow (MIT-CMU), in a venv of **Python 3.10 or
-  later** (pycgfx does not run on older ones).
+  later** (pycgfx does not run on older ones). The script runs it through
+  `tools/3ds/pycgfx_aligned.py`, which changes only where pycgfx puts the textures and
+  lookup tables in the file: on 128-byte boundaries (pycgfx puts them on 16). A HOME Menu
+  froze, each time the title was selected, on a banner whose textures were 32 bytes past
+  such a boundary, and showed the same banner properly with them on it. pycgfx's own files
+  are not changed.
 - **bannertool** (1.2.0, the diasurgical fork; GPL) and **makerom** (Project_CTR; MIT), the
   same two tools the `.cia` already needs (step 6 above).
 
@@ -446,9 +467,15 @@ The steps, run from this repository's folder:
 **Keep it to yourself.** The banner folder, the `.bnr` files and any `.cia` built with them
 contain the game's model, textures and voice from your copy: do not share or upload them.
 
-**Not yet tried on a console.** The default 3D banner (about 800 KB) is bigger than any
-banner a console has shown so far (about 700 KB). If the HOME Menu shows no banner for the
-game, or its sound is garbled, build with `banner_flat.bnr` instead.
+The script keeps the 3D banner to what the HOME Menu loads: the model file at most 512 KB,
+its textures and lookup tables on 128-byte boundaries (it checks the file pycgfx made and
+stops before making the `.bnr` if one is not), the sound stereo and at most 3 seconds.
+
+**Tried on a console:** the car driving (`--anim patty_wagon_drive.anm --fit`, below)
+shows properly on a New 3DS XL's HOME Menu. **Not yet tried on a console:** the default 3D
+banner (about 800 KB) is bigger than any banner a console has shown so far (about 700 KB).
+If the HOME Menu shows no banner for the game, or its sound is garbled, build with
+`banner_flat.bnr` instead.
 
 Options:
 
@@ -463,6 +490,12 @@ Options:
   moving parts (smaller, but thin cracks can show as it moves); `--no-preview` skips the
   pictures; `--skinned` is for experiments only (that kind of banner has been reported to
   freeze the HOME Menu).
+- `--two-sided-sheets off` leaves out the back sides the script gives the car's thin
+  single-layer pieces: the propeller, the flag's cloth, the windshield and a small flat
+  piece under the front. The game shows these from both sides, but the banner hides the
+  back of every face, so without a back side of their own they vanish when they turn away
+  (the flag seen from the car's right, the propeller from behind). With `off` the car is
+  made as earlier versions of this script made it, without those back sides.
 
 ### An icon from your own game files
 
@@ -531,6 +564,7 @@ as the player set it up, and `config.ini` is never changed by a test. For exampl
 | `TSSM_INPUT`, `TSSM_CAPTURE_FRAMES`, `TSSM_CAPTURE_DIR`, `TSSM_FIXED_STEP=30` | the PC's scripted input, frame captures (the `captures/` folder must exist) and a fixed time step, so frame N of a 3DS run and a PC run show the same moment |
 | `TSSM_3DS_LOG_SERVER=on` | serve `last_run.log` on TCP port 28772 while the game runs |
 | `TSSM_SND_METER=1` | a line a second with the level of each sound source |
+| `TSSM_TEST_AUDIO_RESTART=f<frame>*<count>/<gap ms>@home~<ms>` (also `@sleep`, `@cancel`, `@stuck`) | stand-ins for an emulator, which has no sleep and no HOME: HOME, a sleep, HOME ended by the system's cancel of the DSP, or a stuck sound channel, `ms` long, `count` times from that frame (for example `f400*34/3000@home~1200`; `src/SB/Core/pc/iAudioSDLTest.h`) |
 | `TSSM_C3D_STATS=1` | a line a second of renderer counts (draws, memory, VRAM) and a `frame times` line (CPU, GPU and waits); `TSSM_C3D_STATS=<n>` writes them every n seconds |
 | `TSSM_C3D_STEREO=off/auto/always/force[:<depth>]`, `TSSM_C3D_STEREO_GUARD=on/off` | 3D for one run, over `[video] stereo`: `force` takes the slider as at its top, with the speed guard off unless `TSSM_C3D_STEREO_GUARD=on` |
 | `TSSM_C3D_PIPE=off`, `TSSM_C3D_FAST=off`, `TSSM_C3D_REFRESH=off`, `TSSM_C3D_SKINTRIM=off`, `TSSM_C3D_EYESKIP=off`, `TSSM_C3D_SAVEVRAM=off`, `TSSM_AUDIO_CORE=1` | the speed work left out, for measuring: frame pipelining, the per-draw caches, changed vertices rewritten in place, the shorter skinning path, the right eye's skipped shadow pass, the 3D starting picture's copy in VRAM (*The renderer*, below); SDL's audio thread left on core 1 |
@@ -636,12 +670,21 @@ take about 25, 35 and 50 minutes; in an emulator, which cannot restart them, a f
 - **Sockets never wait.** libctru's socket calls share one session with the system, so a
   call that waits there holds up every other thread's; every socket is non-blocking.
 - **HOME and sleep.** SDL's 3DS video driver sends no background or foreground events, so
-  an APT hook stops the game clock while the HOME Menu is open or the console sleeps, and
-  restarts the audio on return.
+  an APT hook stops the game clock while the HOME Menu is open or the console sleeps. Back
+  from the HOME Menu the audio devices restart; after a sleep they stay open, as libctru
+  stops and starts the DSP itself, and the mixer's one-second check restarts them if the
+  sound does not come back. Sleep, wake, the DSP's own sleep and wake and each step of an
+  audio restart are logged and synced to the SD card as they happen.
 - **Sound.** SDL's 3DS audio (ndsp) with the port's own mixer. SDL asks for its audio
   thread on core 1 with a 30% time limit; the game makes it on core 2 of a New 3DS
   instead, which is the game's alone (on core 1 if core 2 is refused; `TSSM_AUDIO_CORE=1`
-  keeps SDL's choice). The log's first audio line names the mixer's core.
+  keeps SDL's choice). The log's first audio line names the mixer's core. The game holds
+  ndsp itself from start-up to the quit, so an audio restart closes and opens SDL's device
+  only, never the DSP (ndsp's start and stop wait for the DSP with no time limit). If the
+  system cancels the DSP's wake after HOME, the next audio restart lets go of ndsp and
+  takes it again, so the DSP starts afresh. SDL's driver is patched (`tools/3ds/sdl/`):
+  its waits wake every 50 ms, its close is bounded, and it resets its channel after such
+  a cancel. `TSSM_3DS_NDSP_HOLD=off` leaves ndsp to SDL alone.
 - **Closing.** Every `exit()` goes through one quit path (`-Wl,--wrap=exit`) that stops,
   one logged step at a time, everything that runs beside the main thread (the audio
   thread and ndsp, the log server, citro3d after a wait for the GPU, SDL, the sockets, the

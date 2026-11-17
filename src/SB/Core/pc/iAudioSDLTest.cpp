@@ -19,6 +19,10 @@
 
 #include "iAudioSDL.h"
 
+#ifdef __3DS__
+#include "3ds/i3DS.h"
+#endif
+
 #include <SDL3/SDL.h>
 
 #ifdef TSSM_AUDIO_SDL_INTERNALS
@@ -64,11 +68,16 @@ namespace
         kDrop,
         kStall,
         kAllLost,
-        kSwapFail
+        kSwapFail,
+        kHome,
+        kSleep,
+        kStuck,
+        kCancel
     };
 
-    const char* const kHowNames[] = { "event", "lost", "swap",  "default", "other",
-                                      "bg",    "drop", "stall", "alllost", "swapfail" };
+    const char* const kHowNames[] = { "event", "lost",     "swap", "default", "other",
+                                      "bg",    "drop",     "stall", "alllost", "swapfail",
+                                      "home",  "sleep",    "stuck", "cancel" };
 
     struct Entry
     {
@@ -388,6 +397,21 @@ namespace
         SDL_PushEvent(&e);
     }
 
+#ifdef __3DS__
+    // @home (iAudioSDLTest.h): i3DS.cpp's HOME stand-in, `userdata` ms away.
+    void SDLCALL Home(void* userdata)
+    {
+        i3DSTestHome((uint32_t)(uintptr_t)userdata);
+    }
+
+    // @cancel: i3DS.cpp's stand-in for HOME ended by a cancel, `userdata` ms
+    // away.
+    void SDLCALL Cancel(void* userdata)
+    {
+        i3DSTestCancel((uint32_t)(uintptr_t)userdata);
+    }
+#endif
+
 #ifdef TSSM_AUDIO_SDL_INTERNALS
     const int kMaxDevices = 32;
 
@@ -459,7 +483,8 @@ namespace
         const SDL_AudioDeviceID otherId = other >= 0 ? devs[other].id : 0;
 #else
         const SDL_AudioDeviceID oursId = 0;
-        if (how != kEvent && how != kBackground && how != kDrop && how != kStall)
+        if (how != kEvent && how != kBackground && how != kDrop && how != kStall && how != kHome &&
+            how != kSleep && how != kStuck && how != kCancel)
         {
             printf("tssm: test: audio: @%s needs SDL's internals, which this build does not "
                    "have; done as @event\n",
@@ -510,6 +535,31 @@ namespace
 
         case kStall:
             iAudioSDLRestart(iAUDIOSDL_STALLED);
+            break;
+
+        case kHome:
+        case kSleep:
+        case kStuck:
+        case kCancel:
+#ifdef __3DS__
+            if (how == kHome || how == kCancel)
+            {
+                // On the game thread inside SDL_PumpEvents, just before
+                // aptMainLoop, where libctru's own HOME suspend runs.
+                SDL_RunOnMainThread(how == kHome ? Home : Cancel,
+                                    (void*)(uintptr_t)(e.swapDelay > 0 ? e.swapDelay : 1000), false);
+            }
+            else if (how == kSleep)
+            {
+                i3DSTestSleep(e.swapDelay > 0 ? e.swapDelay : 5000);
+            }
+            else
+            {
+                i3DSTestStuck(e.swapDelay);
+            }
+#else
+            printf("tssm: test: audio: @%s is a 3DS stand-in; nothing done here\n", kHowNames[how]);
+#endif
             break;
 
 #ifdef TSSM_AUDIO_SDL_INTERNALS
@@ -872,6 +922,9 @@ void iAudioSDLTestFrame(S32 frame)
     sFirstFrame = true;
     Note(kFrame, NULL, frame);
     Level(frame);
+#ifdef __3DS__
+    i3DSTestFrame();
+#endif
 }
 
 void iAudioSDLTestMovie(const char* path, S32 what)

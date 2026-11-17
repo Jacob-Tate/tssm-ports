@@ -71,4 +71,10 @@ void iAudioSDLRestart(iAudioSDLReason why);
 // The restarts carried out so far, for tests and the log.
 U32 iAudioSDLRestarts();
 
+// One line of a close or open of every device ("tssm: audio: step: ..."),
+// from a user while this file closes or opens it, and nothing at any other
+// time. On the 3DS each line is synced to the card at once, so a close or
+// open that never ends shows the step it stopped in.
+void iAudioSDLStep(const char* fmt, ...);
+
 #endif

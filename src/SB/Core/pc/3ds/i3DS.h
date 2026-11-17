@@ -101,10 +101,11 @@ void i3DSLogClose();
 void i3DSHoldHome(int hold);
 
 // The game side's half of the APT hook (iHost3DS.cpp): the clock stops while
-// the game is not in front (iTimeSuspend), and coming back starts it again and
-// restarts the audio devices (iTimeResume, iAudioSDLRestart).
+// the game is not in front (iTimeSuspend), and coming back starts it again
+// (iTimeResume); coming back from the HOME menu, not from sleep (`fromSleep`),
+// also restarts the audio devices (iAudioSDLRestart).
 void i3DSGameAway();
-void i3DSGameBack();
+void i3DSGameBack(int fromSleep);
 
 // How many times the game has come back from the HOME menu or sleep, for
 // what is drawn only when it changes (the overlay's bottom screen).
@@ -122,6 +123,34 @@ int i3DSAudioMixTake(uint32_t* calls, uint64_t* totalNs, uint64_t* maxNs);
 // The core the thread asked for on core 1 (SDL's audio) was made on: 2 when
 // threadCreate's wrapper moved it there, else 1.
 int i3DSAudioCore();
+// Between an audio restart's close of every device and its reopen
+// (iAudioSDL.cpp), on the game thread: if the system cancelled the DSP's wake
+// since the last restart, ndsp is stuck without its DSP for as long as anyone
+// holds it, so the game's own hold is dropped and taken again and ndsp starts
+// afresh. Nothing otherwise, or while the game is closing.
+void i3DSNdspRenewIfCancelled();
+
+// TSSM_TEST_AUDIO_RESTART's 3DS stand-ins (iAudioSDLTest.h), for an emulator,
+// which has no sleep and no HOME Menu. Test runs only.
+//   i3DSTestHome   the game thread: libctru's suspend for HOME (a library
+//                  applet in the HOME Menu's place), the DSP asleep `awayMs`
+//                  after the ONSUSPEND hooks, then the ONRESTORE hooks and the
+//                  DSP's wake.
+//   i3DSTestCancel the game thread: HOME ended by APT's WAKEUP_CANCELALL: the
+//                  ONSUSPEND hooks, the DSP asleep `awayMs`, the ONRESTORE
+//                  hooks, then aptDspCancel instead of the DSP's wake.
+//   i3DSTestSleep  any thread: libctru's sleep replayed (APT's SLEEP_ENTER on
+//                  a thread at APT's priority, the game thread's ONSLEEP and
+//                  ONWAKEUP hooks at its next SDL_PumpEvents), `asleepMs` long.
+//   i3DSTestStuck  any thread: SDL's ndsp channel paused, so its wave buffers
+//                  never come back done; held `ms` (paused again after every
+//                  channel reset), or with 0 until the next reset.
+//   i3DSTestFrame  the game thread, every presented frame: @stuck's hold.
+void i3DSTestHome(uint32_t awayMs);
+void i3DSTestCancel(uint32_t awayMs);
+void i3DSTestSleep(uint32_t asleepMs);
+void i3DSTestStuck(uint32_t ms);
+void i3DSTestFrame();
 
 // ---------------------------------------------------------------- the spike
 // The libctru half of the speed test (iSpike.h; i3DSSpike.cpp). Text comes

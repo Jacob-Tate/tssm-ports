@@ -11,7 +11,7 @@ OUT_DIR inside a git work tree, so the game's files cannot end up in a commit by
 
     python3 tools/3ds/banner_from_game_files.py GAME_FILES OUT_DIR
             --pycgfx PYCGFX_DIR --pycgfx-python PYCGFX_VENV_PYTHON --bannertool BANNERTOOL
-            [--anim NAME.anm] [--skinned | --no-seam-fix] [--no-preview]
+            [--anim NAME.anm] [--skinned | --no-seam-fix] [--no-preview] [--two-sided-sheets off]
             [--scale S --offset X,Y,Z | --fit [--top-margin T --bottom-margin B]]
 
 Then build the .cia with it: -DTSSM_3DS_BANNER=OUT_DIR/banner.bnr (or banner_flat.bnr) on
@@ -27,27 +27,37 @@ same folder that goes to the SD card's 3ds/tssm/files). OUT_DIR gets:
                            CGFX, with their skirts over the seams, or the skin with --skinned)
                            from the HOME Menu's banner camera
     banner_flat.png        256x128 picture for a flat banner (bannertool -i), the fallback
-    banner.cgfx            with --pycgfx: the 3D banner model (CGFX, at most 512 KB)
+    banner.cgfx            with --pycgfx: the 3D banner model (CGFX, at most 512 KB, its
+                           textures and lookup tables on 128-byte boundaries); back faces
+                           culled, the car's single sheets (the propeller, the flag's cloth,
+                           the windshield and a small flat piece under the front) given back
+                           faces
     banner.bnr             with --bannertool: the banner (CBMD with the CGFX, BCWAV)
     banner_flat.bnr        with --bannertool: the flat fallback banner with the same sound
     banner_report.txt      what was found, sizes against the limits
 
 Needs Python 3.8+ (python3; on Windows python or py) and the standard library only. The CGFX
 step runs pycgfx (MIT, github.com/skyfloogle/pycgfx, tested at commit 6c2e0cd; it needs Python
-3.10+ with gltflib and Pillow, so it gets its own interpreter); the .bnr step runs bannertool
-(GPL). Made and tested with the US Xbox files (it reads MN/mnui_US.hip).
+3.10+ with gltflib and Pillow, so it gets its own interpreter) through
+tools/3ds/pycgfx_aligned.py, which puts the textures and lookup tables on 128-byte
+boundaries; the .bnr step runs bannertool (GPL). Made and tested with the US Xbox files (it
+reads MN/mnui_US.hip).
 
 Placement: the HOME Menu draws the banner only between its bars (about rows 40 to 212 of the
 top screen), so the default scale and offset keep the whole loop inside them, the top 15 % of
 that height clear; the report checks every frame of the loop against it.
 
 Banner limits it keeps to: the CGFX at most 0x80000 bytes (the HOME Menu does not load a
-bigger one); the sound stereo and at most 3 seconds (longer clips play garbled or stop the
-model loading); textures at most 256x256, RGBA4 in the CGFX; the flat picture 256x128.
+bigger one); its textures' and lookup tables' data on 128-byte boundaries in the file (the
+HOME Menu froze on a banner whose textures and lookup table were 32 bytes past one; pycgfx
+alone aligns them to 16 only), checked after the build; the sound stereo and at most 3 seconds
+(longer clips play garbled or stop the model loading); textures at most 256x256, RGBA4 in the
+CGFX; the flat picture 256x128.
 """
 
 import argparse
 import base64
+import copy
 import json
 import math
 import os
@@ -62,6 +72,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import modkit  # noqa: E402  (tools/modkit.py: the HIP/HOP reader)
 
 CGFX_LIMIT = 0x80000
+# Where the CGFX's textures and lookup tables must start in the file: the HOME Menu froze on a
+# banner whose textures and lookup table were 32 bytes past a multiple of 128, and showed the
+# same CGFX with them moved onto 128 (on a console, 2026-11-16).
+CGFX_DATA_ALIGN = 128
+PYCGFX_ALIGNED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pycgfx_aligned.py")
 SOUND_LIMIT_SEC = 3.0
 TEX_SIZE = 128  # the car's two 256x256 textures, halved: 32 KB each as RGBA4
 # The clip is mastered near full scale (its peak is 31,971 of 32,767); 3 dB down keeps it from
@@ -1200,7 +1215,9 @@ def rigid_parts(clump, anim, place=None, seams=True, motion=None, report=None):
                     nrm.append(tuple(x / ln for x in d))
                     uv.append(tuple(sum(l * clump.uv[v][i] for v, l in mix) for i in range(2)))
                 idx.append(remap[key])
-        parts.append(dict(bone=bone, material=m, pos=pos, nrm=nrm, uv=uv, idx=idx))
+        # src: the skin triangle each of the part's triangles is (or, in the skirt, is a piece of)
+        parts.append(dict(bone=bone, material=m, pos=pos, nrm=nrm, uv=uv, idx=idx,
+                          src=[t for t, _ in tris]))
     return parts
 
 
@@ -1220,6 +1237,135 @@ def posed_mesh(clump, anim, time, parts=None):
         tris += [(base + ix[k], base + ix[k + 1], base + ix[k + 2], part["material"])
                  for k in range(0, len(ix), 3)]
     return pts, nrms, uvs, tris
+
+
+# ---------------------------------------------------------------------------
+# Two-sided sheets. The game draws the car without face culling: zEntPlayer_Render draws it with
+# the model buckets off (src/SB/Game/zEntPlayer.cpp:10230-10233) under
+# zRenderState(SDRS_OpaqueModels) (src/SB/Game/zScene.cpp:3167; the player is drawn at 3209),
+# which leaves rwCULLMODECULLNONE, so both sides of every face show. The CGFX keeps pycgfx's
+# back-face culling: the car's closed parts look the same either way, but its single sheets (the
+# propeller, the flag's cloth, the windshield and a small flat piece under the front) vanish from
+# behind. A sheet is an open piece of the skin that is near flat: every face within 60 degrees of
+# the piece's mean (the car's other open pieces are curved).
+# The sheets get back faces of their own: each of their triangles once more, wound the other way,
+# with its normals turned round, on the same bone with the same UVs. Culling none in the CGFX
+# would light those back faces black (they would keep the front's normals) and still leave the
+# glTF one-sided in a viewer.
+SHEET_MIN_DOT = 0.5  # cos 60 degrees: a sheet's faces against its mean face normal
+
+
+def sheet_triangles(clump, report):
+    """{triangle} of the car's single sheets: the pieces of the skin (triangles joined by shared
+    edges, corners at the same position being one) that have a border (an edge only one triangle
+    has) and whose faces' normals (in the bind pose) are all within 60 degrees of the piece's
+    mean (SHEET_MIN_DOT). A triangle that already has a reversed twin (two-sided already) is
+    left out."""
+    wid, key = [], {}
+    for p in clump.pos:
+        wid.append(key.setdefault(tuple(round(x, 5) for x in p), len(key)))
+    edges = {}
+    for t, (a, b, c, m) in enumerate(clump.tris):
+        for u, v in ((a, b), (b, c), (c, a)):
+            edges.setdefault(tuple(sorted((wid[u], wid[v]))), []).append(t)
+
+    def bone_of(t):
+        w = {}
+        for v in clump.tris[t][:3]:
+            for i, x in zip(clump.bone_idx[v], clump.bone_w[v]):
+                w[i] = w.get(i, 0.0) + x
+        return max(sorted(w), key=lambda i: w[i])
+
+    def wound(a, b, c):  # the same for the same corners in the same turning order
+        return min((a, b, c), (b, c, a), (c, a, b))
+
+    faces = {wound(*(wid[v] for v in tri[:3])) for tri in clump.tris}
+
+    def face_normal(t):
+        a, b, c = (clump.pos[v] for v in clump.tris[t][:3])
+        u, v = [b[i] - a[i] for i in range(3)], [c[i] - a[i] for i in range(3)]
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        ln = math.sqrt(sum(x * x for x in n)) or 1.0
+        return tuple(x / ln for x in n)
+
+    seen, sheet = set(), set()
+    for start in range(len(clump.tris)):
+        if start in seen:
+            continue
+        piece, todo = set(), [start]
+        seen.add(start)
+        while todo:
+            t = todo.pop()
+            piece.add(t)
+            a, b, c = clump.tris[t][:3]
+            for u, v in ((a, b), (b, c), (c, a)):
+                for n in edges[tuple(sorted((wid[u], wid[v])))]:
+                    if n not in seen:
+                        seen.add(n)
+                        todo.append(n)
+        bones = sorted({bone_of(t) for t in piece})
+        border = sum(1 for ts in edges.values() if len(ts) == 1 and ts[0] in piece)
+        twins = {t for t in piece if wound(*(wid[v] for v in clump.tris[t][2::-1])) in faces}
+        if not border:
+            continue
+        ns = [face_normal(t) for t in piece]
+        mean = [sum(n[i] for n in ns) for i in range(3)]
+        ml = math.sqrt(sum(x * x for x in mean)) or 1.0
+        flat = min(sum(n[i] * mean[i] for i in range(3)) / ml for n in ns)
+        if flat < SHEET_MIN_DOT:
+            continue
+        sheet |= piece - twins
+        log(report, "  sheet (bone%s %s): %d triangles, %d border edges, flatness %.2f, %d with a "
+            "reversed twin: %d back faces" % ("s" if len(bones) > 1 else "",
+                                              ",".join(map(str, bones)), len(piece), border, flat,
+                                              len(twins), len(piece - twins)))
+    return sheet
+
+
+def back_faces(count, tris, sheet):
+    """For triangles (a, b, c, src) over `count` corners: (origin, the triangles with a back face
+    after them for each one whose src is in `sheet`). The back faces' corners are new ones
+    numbered from `count` on, the k-th standing for corner origin[k] (the caller gives it the
+    same place and UV and the normal turned round); they are wound a, c, b and shared as their
+    originals are."""
+    origin, copy_of, out = [], {}, list(tris)
+    for a, b, c, src in tris:
+        if src in sheet:
+            for v in (a, b, c):
+                if v not in copy_of:
+                    copy_of[v] = count + len(origin)
+                    origin.append(v)
+            out.append((copy_of[a], copy_of[c], copy_of[b], src))
+    return origin, out
+
+
+def two_sided(parts, clump, sheet):
+    """The rigid parts (or with parts None, a copy of the clump: the skin, for --skinned) with
+    back faces for the sheet's triangles, the skirt pieces of them too. Returns (parts or skin,
+    back faces added)."""
+    def turned(nrm, origin):
+        return nrm + [tuple(-x for x in nrm[v]) for v in origin]
+
+    if parts is None:
+        skin = copy.copy(clump)
+        tris = [(a, b, c, t) for t, (a, b, c, m) in enumerate(clump.tris)]
+        origin, tris = back_faces(len(clump.pos), tris, sheet)
+        for name in ("pos", "uv", "bone_idx", "bone_w"):
+            setattr(skin, name, getattr(clump, name) + [getattr(clump, name)[v] for v in origin])
+        skin.nrm = turned(clump.nrm, origin)
+        skin.tris = [(a, b, c, clump.tris[t][3]) for a, b, c, t in tris]
+        return skin, len(skin.tris) - len(clump.tris)
+    out, added = [], 0
+    for part in parts:
+        ix = part["idx"]
+        tris = [(ix[k], ix[k + 1], ix[k + 2], part["src"][k // 3]) for k in range(0, len(ix), 3)]
+        origin, tris = back_faces(len(part["pos"]), tris, sheet)
+        added += len(tris) - len(ix) // 3
+        out.append(dict(part, pos=part["pos"] + [part["pos"][v] for v in origin],
+                        nrm=turned(part["nrm"], origin),
+                        uv=part["uv"] + [part["uv"][v] for v in origin],
+                        idx=[v for t in tris for v in t[:3]], src=[t[3] for t in tris]))
+    return out, added
 
 
 # ---------------------------------------------------------------------------
@@ -1380,8 +1526,9 @@ def build_gltf(clump, anim, textures, place, out_dir, parts, report, fps=60, ani
 # Preview: a small software renderer from the banner camera
 
 
-def render(clump, mesh, textures, place, w, h, aspect, bg, yfov=None):
-    """Draws a posed_mesh() from the banner camera."""
+def render(clump, mesh, textures, place, w, h, aspect, bg, yfov=None, cull="none"):
+    """Draws a posed_mesh() from the banner camera; cull "back" leaves out back faces, as the
+    CGFX does (cull "none" draws both sides, as the game does)."""
     scale, rot, offset = place
     pts, nrms, uvs, tris = mesh
 
@@ -1412,7 +1559,8 @@ def render(clump, mesh, textures, place, w, h, aspect, bg, yfov=None):
         minx, maxx = max(0, int(min(A[0], B[0], C[0]))), min(w - 1, int(max(A[0], B[0], C[0])) + 1)
         miny, maxy = max(0, int(min(A[1], B[1], C[1]))), min(h - 1, int(max(A[1], B[1], C[1])) + 1)
         area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0])
-        if area == 0 or minx > maxx or miny > maxy:
+        # Front faces are counter-clockwise on the y-up screen: area < 0 here (y down).
+        if area == 0 or (cull == "back" and area > 0) or minx > maxx or miny > maxy:
             continue
         ua, ub, uc = uvs[a], uvs[b], uvs[c]
         ia, ib_, ic = 1 / A[2], 1 / B[2], 1 / C[2]
@@ -1451,6 +1599,53 @@ def sea_bg(w, h):
 
 def home_bg(x, y):
     return (235, 235, 235, 255)
+
+
+# ---------------------------------------------------------------------------
+# The CGFX as written: where its textures and lookup tables start
+
+
+def cgfx_data_positions(b):
+    """(kind, name, file position, length) of each texture's pixels and each lookup table's
+    commands in a CGFX. The DATA block's dictionaries start at 0x1C, 8 bytes each (a count and
+    a self-relative offset of the DICT): textures at 0x24, lookup-table sets at 0x2C. A DICT's
+    entries are 16 bytes from its +0x1C, with self-relative offsets of the name at +8 and of
+    the object at +12. A texture's image is at +56 of its TXOB, the pixels' length and offset
+    at +8 and +12 of the image; a set's tables are a DICT at +24 of the LUTS, a table's
+    commands' length and offset at +12 and +16 of it."""
+    def i32(o):
+        if not 0 <= o <= len(b) - 4:
+            raise ValueError("offset 0x%x outside the CGFX" % o)
+        return struct.unpack_from("<i", b, o)[0]
+
+    def rel(o):
+        v = i32(o)
+        return o + v if v else None
+
+    def entries(o):
+        out = []
+        d = rel(o + 4)
+        for k in range(i32(o) if d is not None else 0):
+            node = d + 12 + 16 * (k + 1)
+            name = rel(node + 8)
+            out.append((b[name:b.index(b"\0", name)].decode("latin-1"), rel(node + 12)))
+        return out
+
+    if b[:4] != b"CGFX" or b[0x14:0x18] != b"DATA":
+        raise ValueError("not a CGFX")
+    found = []
+    for name, tex in entries(0x24):
+        if i32(tex) != 0x20000011:  # an image texture (a reference texture has no pixels)
+            continue
+        img = rel(tex + 56)
+        found.append(("texture", name, rel(img + 12), i32(img + 8)))
+    for _, luts in entries(0x2C):
+        for name, table in entries(luts + 24):
+            found.append(("lookup table", name, rel(table + 16), i32(table + 12)))
+    for kind, name, pos, n in found:
+        if pos is None or pos + n > len(b):
+            raise ValueError("%s %s: data outside the CGFX" % (kind, name))
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -1502,6 +1697,12 @@ def main():
                     help="keep the skin (smooth skinning) instead of rigid parts on the bones; "
                          "for trying only (smooth skinning is reported to freeze the HOME Menu)")
     ap.add_argument("--no-preview", action="store_true", help="skip the preview pictures")
+    ap.add_argument("--two-sided-sheets", choices=("on", "off"), default="on",
+                    help="back faces for the car's single sheets (the propeller, the flag's "
+                         "cloth, the windshield and a small flat piece under the front), which "
+                         "the game shows from both sides and the CGFX's back-face culling would "
+                         "hide from behind (default on; off makes the CGFX of earlier versions "
+                         "of this script)")
     ap.add_argument("--no-seam-fix", action="store_true",
                     help="each triangle's bone chosen alone and no skirts over the seams "
                          "between the parts (smaller CGFX; cracks can show while it moves)")
@@ -1586,20 +1787,31 @@ def main():
     log(report, "placement (%s): scale %.4f, offset %.4f, %.4f, %.4f" % ((how, scale) + tuple(offset)))
     if not fit_check(loop, scale, offset, report, args.top_margin if args.fit else FIT_TOP):
         log(report, "  the model leaves the HOME Menu's visible area: try --fit")
+    model = clump  # with --skinned, the skin with the sheets' back faces
+    if args.two_sided_sheets == "on":
+        log(report, "two-sided sheets (the CGFX culls back faces, the game none):")
+        sheet = sheet_triangles(clump, report)
+        drawn, added = two_sided(parts, clump, sheet)
+        if parts is None:
+            model = drawn
+        else:
+            parts = drawn
+        log(report, "  %d back faces for %d sheet triangles%s" % (
+            added, len(sheet), " and their skirt pieces" if parts is not None and seams else ""))
     label = os.path.splitext(args.anim)[0].lower()
     label = label[len("patty_wagon_"):] if label.startswith("patty_wagon_") else label
-    build_gltf(clump, anim, textures, place, args.out_dir, parts, report,
+    build_gltf(model, anim, textures, place, args.out_dir, parts, report,
                anim_label="boost" if label == "fast" else label)
 
     if not args.no_preview:
         # The 3D banner's look on the top screen (400x240): the model that goes into the CGFX
-        # (its rigid parts, or the skin with --skinned) at four of its 60 Hz frames, with the
-        # HOME Menu's bars shaded.
+        # (its rigid parts, or the skin with --skinned) at four of its 60 Hz frames, back faces
+        # culled as the CGFX culls them, with the HOME Menu's bars shaded.
         frames = len(loop)
         shown = (0, frames // 3, frames // 2, frames * 2 // 3)
         for i, frame in enumerate(shown):
-            mesh = posed_mesh(clump, anim, anim.duration * frame / frames, parts)
-            img = render(clump, mesh, textures, place, 400, 240, 5 / 3, home_bg)
+            mesh = posed_mesh(model, anim, anim.duration * frame / frames, parts)
+            img = render(model, mesh, textures, place, 400, 240, 5 / 3, home_bg, cull="back")
             for y in range(240):
                 if VISIBLE_ROWS[0] <= y + 0.5 <= VISIBLE_ROWS[1]:
                     continue
@@ -1621,7 +1833,9 @@ def main():
     log(report, "flat: banner_flat.png (256x128)")
 
     if args.pycgfx:
-        r = subprocess.run([args.pycgfx_python, "-E", "-s", os.path.join(args.pycgfx, "main.py"),
+        # pycgfx with its writer changed to put the textures and lookup tables on 128-byte
+        # boundaries (CGFX_DATA_ALIGN); pycgfx's own files are used as they are.
+        r = subprocess.run([args.pycgfx_python, "-E", "-s", PYCGFX_ALIGNED, args.pycgfx,
                             out("banner_model.gltf"), out("banner.cgfx")],
                            cwd=args.pycgfx, capture_output=True, text=True)
         sys.stdout.write(r.stdout)
@@ -1633,6 +1847,31 @@ def main():
             size, CGFX_LIMIT, "" if size <= CGFX_LIMIT else "  ** TOO BIG **"))
         if size > CGFX_LIMIT:
             raise SystemExit("the CGFX is over the HOME Menu's limit")
+        with open(out("banner.cgfx"), "rb") as f:
+            cgfx = f.read()
+        try:
+            placed = cgfx_data_positions(cgfx)
+        except (ValueError, TypeError, IndexError, struct.error) as e:
+            raise SystemExit("banner.cgfx: cannot read where its textures and lookup tables "
+                             "are (%s); not making the .bnr" % e)
+        if not any(kind == "texture" for kind, _, _, _ in placed):
+            raise SystemExit("banner.cgfx: no textures found in it; not making the .bnr")
+        starts = []
+        bad = []
+        for kind, name, pos, _ in placed:
+            past = pos % CGFX_DATA_ALIGN
+            starts.append("%s %s at 0x%x%s" % (kind, name, pos,
+                                                " ** %d past **" % past if past else ""))
+            if past:
+                bad.append("the %s %s (at 0x%x, %d past)" % (kind, name, pos, past))
+        log(report, "  where its data starts (each a multiple of %d needed): %s" % (
+            CGFX_DATA_ALIGN, ", ".join(starts)))
+        if bad:
+            raise SystemExit(
+                "banner.cgfx: %s not on a %d-byte boundary in the file; the HOME Menu has frozen "
+                "on such a banner, so no .bnr is made. pycgfx_aligned.py should have put them "
+                "there: check that --pycgfx is pycgfx at commit 6c2e0cd."
+                % (", ".join(bad), CGFX_DATA_ALIGN))
     if args.bannertool:
         if args.pycgfx:
             subprocess.run([args.bannertool, "makebanner", "-ci", out("banner.cgfx"),

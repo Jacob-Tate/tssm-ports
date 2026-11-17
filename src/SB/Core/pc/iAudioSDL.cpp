@@ -1,7 +1,13 @@
 #include "iAudioSDL.h"
 
+#ifdef __3DS__
+#include "3ds/i3DS.h"
+#include "iLog.h"
+#endif
+
 #include <SDL3/SDL.h>
 
+#include <stdarg.h>
 #include <stdio.h>
 
 // See iAudioSDL.h for why this exists.
@@ -220,13 +226,32 @@ namespace
         }
     }
 
+    // A line of the restart's own, out at once: on the 3DS synced to the
+    // card, which a hang that ends in holding POWER would otherwise lose.
+    void Line(const char* text)
+    {
+        printf("tssm: audio: %s\n", text);
+        fflush(stdout);
+#ifdef __3DS__
+        iLogDrain(0);
+#endif
+    }
+
+    U32 MsSince(Uint64 startNs)
+    {
+        return (U32)((SDL_GetTicksNS() - startNs) / SDL_NS_PER_MS);
+    }
+
     // Last user first, so the order is the reverse of opening.
     void CloseAll()
     {
         sBusy = true;
         for (int i = sNumUsers - 1; i >= 0; i--)
         {
+            const Uint64 t0 = SDL_GetTicksNS();
+            iAudioSDLStep("closing device user %d of %d", sNumUsers - i, sNumUsers);
             sUsers[i](false);
+            iAudioSDLStep("device user %d closed (%u ms)", sNumUsers - i, (unsigned)MsSince(t0));
         }
         sBusy = false;
         sDown = true;
@@ -249,7 +274,12 @@ namespace
         sBusy = true;
         for (int i = 0; i < sNumUsers; i++)
         {
-            if (!sUsers[i](true))
+            const Uint64 t0 = SDL_GetTicksNS();
+            iAudioSDLStep("opening device user %d of %d", i + 1, sNumUsers);
+            const bool up = sUsers[i](true);
+            iAudioSDLStep("device user %d %s (%u ms)", i + 1, up ? "open" : "NOT open",
+                          (unsigned)MsSince(t0));
+            if (!up)
             {
                 ok = false;
             }
@@ -521,22 +551,45 @@ void iAudioSDLPoll()
 
     if (why != iAUDIOSDL_RETRY)
     {
-        printf("tssm: audio: restarting the audio devices (%s)\n", ReasonName(why));
-        fflush(stdout);
+        char line[96];
+        snprintf(line, sizeof(line), "restarting the audio devices (%s)", ReasonName(why));
+        Line(line);
     }
 
     CloseAll();
+#ifdef __3DS__
+    // A DSP the system cancelled stays silent while ndsp is held; with every
+    // device closed, ndsp can start afresh (3ds/i3DS.h).
+    i3DSNdspRenewIfCancelled();
+#endif
     OpenAll();
 
     if (!sDown)
     {
         const char* driver = SDL_GetCurrentAudioDriver();
-        printf("tssm: audio: devices open again (%s)\n", driver != NULL ? driver : "?");
-        fflush(stdout);
+        char line[96];
+        snprintf(line, sizeof(line), "devices open again (%s; %u ms)", driver != NULL ? driver : "?",
+                 (unsigned)MsSince(now));
+        Line(line);
     }
 }
 
 U32 iAudioSDLRestarts()
 {
     return sRestarts;
+}
+
+void iAudioSDLStep(const char* fmt, ...)
+{
+    if (!sBusy)
+    {
+        return;
+    }
+    char line[200];
+    int n = snprintf(line, sizeof(line), "step: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line + n, sizeof(line) - (size_t)n, fmt, ap);
+    va_end(ap);
+    Line(line);
 }

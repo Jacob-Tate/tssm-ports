@@ -451,13 +451,24 @@ void i3DSGameAway()
     iTimeSuspend();
 }
 
-void i3DSGameBack()
+void i3DSGameBack(int fromSleep)
 {
     iTimeResume();
-    // As Android's foreground and the Switch's: every audio device closed and
-    // opened again, so whatever the system did to them while the game was
-    // away cannot matter.
-    iAudioSDLRestart(iAUDIOSDL_FOREGROUND);
+    // Back from the HOME menu, as Android's foreground and the Switch's:
+    // every audio device closed and opened again, so whatever the system did
+    // to them while the game was away cannot matter.
+    //
+    // Not after a sleep. libctru stops ndsp before the console sleeps and
+    // starts it again before the game wakes (dsp.c:86-108, ndsp.c:336-360),
+    // so the devices are as they were; the restart right after a wake is
+    // where the game once hung for good, both screens black (SDL joining its
+    // audio thread). If the sound does not come back, the mixer's check
+    // restarts the devices a second later (iSndHostSDL.cpp, iSndHostUpdate:
+    // "the device stopped asking for audio").
+    if (!fromSleep)
+    {
+        iAudioSDLRestart(iAUDIOSDL_FOREGROUND);
+    }
 }
 
 int i3DSAudioMixTake(uint32_t* calls, uint64_t* totalNs, uint64_t* maxNs)

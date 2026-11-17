@@ -17,3 +17,6 @@ tools/librw/*.patch text eol=lf
 
 # Patches applied to the Switch SDL3 source by tools/switch/build_sdl.sh
 tools/switch/sdl/*.patch text eol=lf
+
+# Patches applied to the 3DS SDL3 source by tools/3ds/build_sdl.sh
+tools/3ds/sdl/*.patch text eol=lf

@@ -1,0 +1,44 @@
+Local fix for SDL 3.4.14 (147a8ee32dbf9ac02f3794964490687b6bbda1bc, the
+port's third_party/SDL), Nintendo 3DS audio driver (src/audio/n3ds), built
+with devkitARM r68 and libctru 2.7.0. Independent of 0001.
+
+N3DSAUDIO_CloseDevice skipped ndspChnReset(0) when the DSP had been
+cancelled (DSPHOOK_ONCANCEL: the system cancelled the DSP's wake, APT's
+WAKEUP_CANCEL or WAKEUP_CANCELALL). ndsp's channel 0 then still listed the
+device's wave buffers, which live in device->hidden and are freed a few
+lines later. That was harmless only while SDL held the last ndsp reference:
+ndspExit then took ndsp down, and the next ndspInit cleared the list
+(ndsp-channel.c, ndspiInitChn). When the program holds its own ndsp
+reference as well, as the 3DS port does (3ds/i3DS.cpp), ndsp outlives the
+device, and the next OpenDevice's ndspChnReset(0) walks the stale list:
+it writes NDSP_WBUF_DONE into freed memory and follows its next pointers.
+ndspChnReset only clears ndsp's CPU-side record of the channel under the
+channel's lock and never waits for the DSP, so it is now done after a
+cancel too.
+
+Apply with: git -C <SDL clone> apply <this file> (tools/3ds/build_sdl.sh does)
+
+diff --git a/src/audio/n3ds/SDL_n3dsaudio.c b/src/audio/n3ds/SDL_n3dsaudio.c
+index ded98ea..c14865f 100644
+--- a/src/audio/n3ds/SDL_n3dsaudio.c
++++ b/src/audio/n3ds/SDL_n3dsaudio.c
+@@ -227,11 +227,14 @@ static void N3DSAUDIO_CloseDevice(SDL_AudioDevice *device)
+     dspUnhook(&dsp_hook);
+     ndspSetCallback(NULL, NULL);
+ 
+-    if (!device->hidden->isCancelled) {
+-        ndspChnReset(0);
+-        SDL_memset(device->hidden->waveBuf, 0, sizeof(ndspWaveBuf) * NUM_BUFFERS);
+-        CondVar_Broadcast(&device->hidden->cv);
+-    }
++    // Also after a cancel: ndspChnReset only clears ndsp's own record of the
++    // channel, under the channel's lock, and never waits for the DSP. Left
++    // out, the channel still lists the wave buffers in device->hidden, freed
++    // below; if ndsp outlives this device (something else holds it too), the
++    // next ndspChnReset(0), OpenDevice's, walks that list in freed memory.
++    ndspChnReset(0);
++    SDL_memset(device->hidden->waveBuf, 0, sizeof(ndspWaveBuf) * NUM_BUFFERS);
++    CondVar_Broadcast(&device->hidden->cv);
+ 
+     contextUnlock(device);
+ 

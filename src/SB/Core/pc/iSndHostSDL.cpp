@@ -1049,8 +1049,12 @@ static void iTeardownDevice()
     // may run while it could still be in flight.
     if (sStream != NULL)
     {
+        // A restart's lines (iAudioSDL.h); nothing at start-up or the quit.
+        iAudioSDLStep("game sound: SDL closes its stream (joins its audio thread, then the "
+                      "driver closes)");
         SDL_DestroyAudioStream(sStream);
         sStream = NULL;
+        iAudioSDLStep("game sound: stream closed");
     }
 
     free(sMixBuffer);
@@ -1126,8 +1130,11 @@ static bool iBringUpDevice()
 
     // Opened paused, so the mix buffer above is guaranteed to exist before the
     // first callback and the reverb below is built before it is heard.
+    iAudioSDLStep("game sound: SDL opens a stream (the driver opens, then SDL starts its audio "
+                  "thread)");
     sStream =
         SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, iStreamCallback, NULL);
+    iAudioSDLStep("game sound: stream %s", sStream != NULL ? "open" : "NOT open");
 
     if (sStream == NULL)
     {

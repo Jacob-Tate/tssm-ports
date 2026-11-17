@@ -1,0 +1,68 @@
+Local fixes for SDL 3.4.14 (147a8ee32dbf9ac02f3794964490687b6bbda1bc, the
+port's third_party/SDL), Nintendo 3DS audio driver (src/audio/n3ds), built
+with devkitARM r68 and libctru 2.7.0.
+
+1. N3DSAUDIO_WaitDevice waited on its condition with no time limit. The
+   condition is signalled only when the DSP hands a wave buffer back
+   (AudioFrameFinished, from ndsp's thread), on a DSP cancel, and in
+   N3DSAUDIO_CloseDevice, which SDL calls only after it has joined the audio
+   thread (SDL_audio.c, ClosePhysicalAudioDevice). A buffer the DSP never hands
+   back -- one queued across a sleep that the DSP did not resume -- left the
+   audio thread waiting for ever, and SDL_CloseAudioDevice waiting for the
+   audio thread. The wait now wakes every 50 ms and looks at the shutdown flag
+   and the buffer again; while the DSP keeps playing nothing changes.
+2. N3DSAUDIO_CloseDevice freed the wave buffers right after ndspExit, which is
+   safe only when ndspExit really stops ndsp (it then joins ndsp's thread and
+   stops the DSP). When the program holds its own ndsp reference as well, as
+   the 3DS port does (3ds/i3DS.cpp), ndspExit only drops SDL's reference, and
+   the DSP may still be reading the buffers for the frame it is on. Wait for
+   two ndsp frames first (one to send the channel reset, one for the DSP to
+   act on it), at most about 20 ms.
+
+Apply with: git -C <SDL clone> apply <this file> (tools/3ds/build_sdl.sh does)
+
+diff --git a/src/audio/n3ds/SDL_n3dsaudio.c b/src/audio/n3ds/SDL_n3dsaudio.c
+index ded98ea..d72c8f5 100644
+--- a/src/audio/n3ds/SDL_n3dsaudio.c
++++ b/src/audio/n3ds/SDL_n3dsaudio.c
+@@ -200,12 +200,20 @@ static bool N3DSAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer, i
+     return true;
+ }
+ 
++// The condition is only signalled when the DSP hands a buffer back
++// (AudioFrameFinished), on a cancel, or by CloseDevice, which SDL calls only
++// after it has joined this thread. A buffer the DSP never hands back (one
++// queued across a sleep that the DSP did not resume) would leave this thread
++// here for ever, and SDL_CloseAudioDevice waiting for it. So the wait wakes
++// now and then to look at the shutdown flag (and the buffer) again.
++#define N3DSAUDIO_WAIT_SLICE_NS (50LL * 1000000LL)
++
+ static bool N3DSAUDIO_WaitDevice(SDL_AudioDevice *device)
+ {
+     contextLock(device);
+     while (!device->hidden->isCancelled && !SDL_GetAtomicInt(&device->shutdown) &&
+            device->hidden->waveBuf[device->hidden->nextbuf].status != NDSP_WBUF_FREE) {
+-        CondVar_Wait(&device->hidden->cv, &device->hidden->lock);
++        CondVar_WaitTimeout(&device->hidden->cv, &device->hidden->lock, N3DSAUDIO_WAIT_SLICE_NS);
+     }
+     contextUnlock(device);
+     return true;
+@@ -235,6 +243,18 @@ static void N3DSAUDIO_CloseDevice(SDL_AudioDevice *device)
+ 
+     contextUnlock(device);
+ 
++    // When something else also holds ndsp, ndspExit below neither stops the
++    // DSP nor joins ndsp's thread, so the DSP may still read the wave buffers
++    // for the frame it is on. Give ndsp's thread two frames (one to send the
++    // channel reset, one for the DSP to act on it) before they are freed: at
++    // most about 20 ms, as the frame count stands still while the DSP sleeps.
++    {
++        const u32 frame = ndspGetFrameCount();
++        for (int i = 0; i < 10 && (u32)(ndspGetFrameCount() - frame) < 2; i++) {
++            svcSleepThread(2LL * 1000000LL);
++        }
++    }
++
+     ndspExit();
+ 
+     if (device->hidden->waveBuf[0].data_vaddr) {

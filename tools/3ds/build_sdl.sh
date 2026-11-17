@@ -10,8 +10,10 @@
 #   install prefix  where include/, lib/ and lib/cmake/SDL3 go
 #
 # Run it from the devkitPro MSYS2 shell (pacman: 3ds-dev, 3ds-cmake,
-# 3ds-pkg-config). Unlike the Switch, nothing is patched: the 3DS port is
-# upstream.
+# 3ds-pkg-config). The 3DS port is upstream's; tools/3ds/sdl/*.patch are
+# applied to the source first, as on the Switch (skipped when already
+# applied): the audio driver's waits made finite (0001), its channel reset
+# also after the system cancelled the DSP (0002).
 #
 # What SDL is for on the 3DS: input (the video driver scans the buttons and
 # turns "close" into SDL_EVENT_QUIT; the joystick driver reads them), audio
@@ -31,7 +33,21 @@ fi
 SRC=$1
 BUILD=$2
 PREFIX=$3
+HERE=$(cd "$(dirname "$0")" && pwd)
 DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}
+
+for p in "$HERE"/sdl/*.patch; do
+    [ -f "$p" ] || continue
+    if git -C "$SRC" apply --check "$p" 2>/dev/null; then
+        git -C "$SRC" apply "$p"
+        echo "SDL: applied $(basename "$p")"
+    elif git -C "$SRC" apply --check -R "$p" 2>/dev/null; then
+        echo "SDL: $(basename "$p") already applied"
+    else
+        echo "SDL: $(basename "$p") does not apply" >&2
+        exit 1
+    fi
+done
 
 cmake -S "$SRC" -B "$BUILD" -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/3DS.cmake" \

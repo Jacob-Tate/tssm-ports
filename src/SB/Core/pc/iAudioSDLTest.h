@@ -87,6 +87,31 @@
 //                    block-on-pause holds it, then _WILL_ and
 //                    _DID_ENTER_FOREGROUND (a restart at the next poll).
 //                    AAudio's own pause and resume are not part of it.
+//            home[~<ms>]  (3DS) libctru's suspend for HOME, on the game thread
+//                    inside SDL_PumpEvents just before aptMainLoop: the ONSUSPEND
+//                    hooks, the DSP put to sleep after them, the game thread
+//                    held there <ms> (1000), a library applet (errorDisp) in the
+//                    HOME Menu's place, the ONRESTORE hooks, the DSP woken after
+//                    them; the game's hook then restarts the audio as for HOME
+//                    (3ds/i3DS.cpp, i3DSTestHome).
+//            cancel[~<ms>]  (3DS) HOME ended by APT's WAKEUP_CANCELALL, on the
+//                    game thread as home: the ONSUSPEND hooks, the DSP put to
+//                    sleep, the thread held <ms> (1000), the ONRESTORE hooks,
+//                    then aptDspCancel instead of the DSP's wake (its component
+//                    stays unloaded; i3DSTestCancel). The restarts that follow
+//                    (HOME's, SDL's removed device) start ndsp afresh.
+//            sleep[~<ms>]  (3DS) libctru's sleep replayed, <ms> (5000) asleep:
+//                    aptDspSleep on a thread at APT's priority, the ONSLEEP
+//                    hooks on the game thread, the screens black, aptDspWakeup,
+//                    the ONWAKEUP hooks (i3DSTestSleep).
+//            stuck[~<ms>]  (3DS) SDL's ndsp channel paused, so the wave
+//                    buffers it queued never come back done and its audio thread
+//                    waits in the driver: held <ms>, paused again after every
+//                    reset of the channel (an audio restart), or with no <ms>
+//                    until the next reset (i3DSTestStuck). The mixer's stall
+//                    check restarts the audio a second later.
+//            Elsewhere home, cancel, sleep and stuck do nothing (a line says
+//            so).
 //
 //   Paired with default~r (e.g. movie/story1+2000@stall,movie/story1+2000@
 //   default:steam~r), drop and stall start a restart while SDL moves the
