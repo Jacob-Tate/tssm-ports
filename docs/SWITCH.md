@@ -7,9 +7,6 @@ froze on Quit (changed since; untested). The builds after that compile, link
 and pack but wait for their own run on the console; "Stubs and gaps" below
 says what is still unchecked.
 
-Using custom firmware online can get a console banned. Play offline (airplane
-mode, or an emuMMC setup).
-
 ## For players
 
 You need:
