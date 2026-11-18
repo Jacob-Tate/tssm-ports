@@ -62,6 +62,7 @@ namespace iGui
     void DrawSettings();
     void SettingsGameFiles();
     void SettingsDisplay();
+    void SettingsExtras();
     void SettingsAudio();
     void SettingsGame();
     void SettingsInterface();
@@ -96,7 +97,8 @@ namespace iGui
     // --- the game's files -------------------------------------------------------
 
     // Whether `dir` holds the game's files: boot.HIP and FONT.HIP, in any case,
-    // from the Xbox release. `why` gets a sentence either way.
+    // from the Xbox or GameCube release, directly or (a GameCube disc extracted
+    // with Dolphin) in its files folder. `why` gets a sentence either way.
     bool CheckAssetFolder(const char* dir, char* why, size_t whySize);
 
     // --- folders and files --------------------------------------------------------

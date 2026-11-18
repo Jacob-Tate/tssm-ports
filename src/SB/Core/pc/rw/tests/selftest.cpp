@@ -696,20 +696,32 @@ static void test_images()
     check(RwImageSetFromRaster(NULL, NULL) == NULL, "RwImageSetFromRaster(NULL, NULL) is refused");
 }
 
-// A GameCube native texture's STRUCT: 0x6C bytes of big-endian header with the
-// size and GX formats filled in, then `payload`.
-static void makeGCTexture(RwUInt8* out, int w, int h, int fmt, int palfmt, const RwUInt8* payload,
-                          size_t n)
+// A GameCube native texture's STRUCT: 0x68 bytes of big-endian header with the
+// size, one level and the GX formats filled in, then `payload`: for C8 the
+// 512-byte palette first. The big-endian size of the texels goes after the
+// palette (C8) or at 0x68, so `payload` lands at 0x6C, or at 0x68 + 512 + 4
+// with a palette -- the same bytes, one word further on for C8.
+static size_t makeGCTexture(RwUInt8* out, int w, int h, int fmt, int palfmt, const RwUInt8* payload,
+                            size_t n)
 {
-    memset(out, 0, 0x6C);
+    memset(out, 0, 0x68);
     out[3] = 6;
     out[0x5C] = (RwUInt8)(w >> 8);
     out[0x5D] = (RwUInt8)w;
     out[0x5E] = (RwUInt8)(h >> 8);
     out[0x5F] = (RwUInt8)h;
+    out[0x61] = 1;
     out[0x62] = (RwUInt8)fmt;
     out[0x63] = (RwUInt8)palfmt;
-    memcpy(out + 0x6C, payload, n);
+    size_t pal = fmt == 9 ? 512 : 0;
+    memcpy(out + 0x68, payload, pal);
+    size_t texels = n - pal;
+    out[0x68 + pal + 0] = (RwUInt8)(texels >> 24);
+    out[0x68 + pal + 1] = (RwUInt8)(texels >> 16);
+    out[0x68 + pal + 2] = (RwUInt8)(texels >> 8);
+    out[0x68 + pal + 3] = (RwUInt8)texels;
+    memcpy(out + 0x68 + pal + 4, payload + pal, texels);
+    return 0x68 + pal + 4 + texels;
 }
 
 static const RwUInt8* gcTexel(rw::Image* img, int x, int y)
@@ -740,8 +752,8 @@ static void test_gc_textures()
     }
 
     RwUInt8 buf[0x6C + 512 + 32];
-    makeGCTexture(buf, 8, 8, 14, 0xFF, cmpr, sizeof(cmpr));
-    rw::Image* img = rw::readGCTextureImage(buf, 0x6C + sizeof(cmpr));
+    size_t len = makeGCTexture(buf, 8, 8, 14, 0xFF, cmpr, sizeof(cmpr));
+    rw::Image* img = rw::readGCTextureImage(buf, (rw::uint32)len);
     check(img != NULL && img->width == 8 && img->height == 8 && img->depth == 32,
           "a CMPR texture decodes to an 8x8 RGBA image");
     if (img != NULL)
@@ -768,8 +780,8 @@ static void test_gc_textures()
     c8[512 + 0] = 1;
     c8[512 + 1] = 2;
     c8[512 + 8] = 1; // second row
-    makeGCTexture(buf, 8, 4, 9, 2, c8, sizeof(c8));
-    img = rw::readGCTextureImage(buf, 0x6C + sizeof(c8));
+    len = makeGCTexture(buf, 8, 4, 9, 2, c8, sizeof(c8));
+    img = rw::readGCTextureImage(buf, (rw::uint32)len);
     check(img != NULL, "a C8 texture decodes");
     if (img != NULL)
     {
@@ -784,10 +796,10 @@ static void test_gc_textures()
         img->destroy();
     }
 
-    check(rw::readGCTextureImage(buf, 0x6C + 100) == NULL,
+    check(rw::readGCTextureImage(buf, (rw::uint32)len - 1) == NULL,
           "a struct too short for its texels is refused rather than overrun");
-    makeGCTexture(buf, 8, 8, 7, 0xFF, cmpr, sizeof(cmpr));
-    check(rw::readGCTextureImage(buf, 0x6C + sizeof(cmpr)) == NULL,
+    len = makeGCTexture(buf, 8, 8, 7, 0xFF, cmpr, sizeof(cmpr));
+    check(rw::readGCTextureImage(buf, (rw::uint32)len) == NULL,
           "and so is a GX format this does not know");
 }
 

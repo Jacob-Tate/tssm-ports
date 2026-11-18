@@ -71,6 +71,17 @@ void iWindowSetFrameRateCeiling(S32 fps)
     (void)fps;
 }
 
+// Nothing is paced here, so the GameCube's hold paces nothing either.
+void iWindowSetFrameLock(S32 count)
+{
+    (void)count;
+}
+
+S32 iWindowGetFrameLock()
+{
+    return 0;
+}
+
 S32 iWindowGetFrameRate()
 {
     return sFrameRate;

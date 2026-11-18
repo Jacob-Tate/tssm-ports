@@ -36,6 +36,14 @@ namespace
     const F32 kNone = 0.0f;
 }
 
+// The [extras] default: the Xbox release's version everywhere but the 3DS, where
+// each one waits until it has been timed on the console (docs/EXTRAS.md).
+#ifdef __3DS__
+#define TSSM_EXTRAS_DEFAULT "gamecube"
+#else
+#define TSSM_EXTRAS_DEFAULT "xbox"
+#endif
+
 const iConfigSetting kConfigSettings[] = {
     // TSSM-ADAPTED: treedome's table less the settings of BfBB features this
     // port did not import (toon, hipoly, world lighting, day/night, fonts,
@@ -44,8 +52,9 @@ const iConfigSetting kConfigSettings[] = {
     // nothing reads would be written into every config.ini as if it did
     // something. src/SB/Core/pc/PORTING.md lists what was removed.
     { "assets", "path", "",
-      "Folder containing boot.HIP, font.HIP and FMV/. Empty: the folder the game\n"
-      "; starts in. TSSM_ASSETS overrides this.",
+      "Folder containing boot.HIP, font.HIP and FMV/, from the Xbox or GameCube\n"
+      "; disc (for a Dolphin extraction, its files/ folder or the one above it).\n"
+      "; Empty: the folder the game starts in. TSSM_ASSETS overrides this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "assets", "mod", "",
       "Mod folder with the same layout as the asset folder. Its files replace the\n"
@@ -116,13 +125,44 @@ const iConfigSetting kConfigSettings[] = {
     // TSSM: the console's screen passes, drawn by the port (src/SB/Core/pc/iHDRGlow.h,
     // iScreenWarp.h).
     { "video", "hdr_glow", "on",
-      "The glow around bright and glowing things, as on the GameCube. Off: no\n"
-      "; glow.",
+      "The glow around bright and glowing things: on (the glow [extras] glow picks,\n"
+      "; the Xbox's or the GameCube's) or off (no glow).",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "video", "screen_warp", "on",
       "The ripple of the picture around shockwaves, explosions and heat, as on the\n"
       "; GameCube. Off: none.",
       ICONFIG_BOOL, NULL, kNone, kNone },
+    // TSSM: features of the Xbox release, each beside the GameCube release's own
+    // (src/SB/Core/pc/iExtras.h, docs/EXTRAS.md).
+    { "extras", "glow", TSSM_EXTRAS_DEFAULT,
+      "The glow around bright things: xbox (the Xbox release's wide, soft glow,\n"
+      "; stronger in some levels) or gamecube (the GameCube release's tighter,\n"
+      "; fainter glow). video.hdr_glow = off turns either off.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "spotlights", TSSM_EXTRAS_DEFAULT,
+      "Spotlights: xbox (as the Xbox release: the moving spotlights of No Cheese!,\n"
+      "; Bubble Blowing Baby Hunt and Turn the Tables on Plankton are on, and every\n"
+      "; spotlight lights what it shines on and has a lamp flare) or gamecube (as\n"
+      "; the GameCube release: those lights are off, and a spotlight is its cone\n"
+      "; only). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "crowds", TSSM_EXTRAS_DEFAULT,
+      "The fish crowds in No Cheese! and Sandwich Driving 101: xbox (they move) or\n"
+      "; gamecube (they stand still, as on the GameCube). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "water", TSSM_EXTRAS_DEFAULT,
+      "Water in the levels whose Xbox files have a water body (SC02's tanks and\n"
+      "; B301's sea): xbox (the Xbox release's water: reflections, refraction and\n"
+      "; moving ripples) or gamecube (the GameCube release's water). Without the\n"
+      "; Xbox files, on Direct3D 9's fixed path or on Vulkan, gamecube is used.\n"
+      "; Applies when a level loads. An older file's [video] water is read as this.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "frame_lock", TSSM_EXTRAS_DEFAULT,
+      "The driving levels, Bubble Blowing Baby Hunt and Google-Eyes and Smelly\n"
+      "; Knick Knacks: xbox (at the frame-rate cap, like every other level) or\n"
+      "; gamecube (held at 30 frames a second, as on the GameCube). In both, the\n"
+      "; Patty Wagon drives as it does at 60 frames a second, as on the Xbox.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
     { "input", "controller", "auto",
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
       ICONFIG_INT, "auto", 1.0f, 4.0f },

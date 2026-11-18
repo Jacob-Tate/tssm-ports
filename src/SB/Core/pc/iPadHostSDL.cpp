@@ -26,6 +26,7 @@
 #include "iPadSettings.h"
 #include "iPadTokens.h"
 #include "iPadTouch.h"
+#include "iPerf.h"
 #include "iTime.h"
 #include "xPad.h"
 
@@ -634,7 +635,9 @@ void iPadHostPoll()
         //
         // Only the joystick and gamepad range is taken: SDL has one queue per
         // process and iWindowSDL.cpp reads the rest of it.
+        iPerfPumpBegin();
         SDL_PumpEvents();
+        iPerfPumpEnd();
 
         SDL_Event e;
         while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_JOYSTICK_AXIS_MOTION,
@@ -654,6 +657,7 @@ void iPadHostPoll()
             }
         }
 
+        iPerfInputRead();
         const bool leftAlone = OtherCopyInFront();
         for (S32 i = 0; i < IPAD_MAX_CONTROLLERS; i++)
         {

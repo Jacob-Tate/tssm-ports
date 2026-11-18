@@ -21,7 +21,20 @@
 #include "xutil.h"
 #include "xMemMgr.h"
 #ifdef PLATFORM_PC
+#include "iExtras.h"
 #include "iFloatByte.h"
+#include "iLightVolume.h"
+#include "iPadPrompts.h"
+
+// PC: the lights a level's GameCube files keep off where its Xbox files switch them on, kept off
+// here with [extras] spotlights = gamecube (iExtrasSpotlightKeptOff). Xbox files only: GameCube
+// files keep their own lights off with their own links.
+static bool pc_kept_off(U32 id)
+{
+    return iExtrasInForce(iEXTRAS_SPOTLIGHTS) == iEXTRAS_GAMECUBE &&
+           iExtrasLevelFiles() == iEXTRAS_FILES_XBOX && globals.sceneCur != NULL &&
+           iExtrasSpotlightKeptOff(globals.sceneCur->sceneID, id);
+}
 #endif
 #include "xMemory.h"
 #include "xDebug.h"
@@ -74,6 +87,101 @@ namespace
     S32 light_cone_atomics_size;
     S32 aura_cone_atomics_size;
 } // namespace
+
+#ifdef PLATFORM_PC
+namespace
+{
+    // PC: the Xbox's zSpotlight::render_flares (DEFAULT.XBE 0x60110), which the GameCube leaves
+    // out. Each flare is a square `size` across, spanned by the light's right and up axes and
+    // centred on the lamp, in the flare's colour with add_flare's alpha, texture coordinates 0
+    // to 1. It draws in the cones' states (adding, no depth write, alpha writes on), as triangle
+    // strips: one a run of flares with the same raster (render_all sorted them by it), the
+    // squares joined by repeated vertices. A flare with no texture (every one but some of
+    // TT01's) is drawn untextured, a plain square, as on the Xbox.
+    //
+    // The alpha test is the Xbox's at that point: the GameCube's xFXHighDynamicRangeSetGlowClamp
+    // (every pixel passes here) is empty on the Xbox, which leaves RenderWare's own, alpha
+    // greater than 0 (its D3D8 driver's default, 0x1c2566; the particle tanks' restore,
+    // 0x134c07, sets it again). So a flare shows only while its alpha is above 0: while its lamp
+    // faces the camera (add_flare), and then at full colour, the blend being adding.
+    const S32 kFlareStripVerts = 96;
+
+    RwIm3DVertex flare_strip[kFlareStripVerts];
+
+    void flush_flares(S32 count)
+    {
+        if (count > 0 && RwIm3DTransform(flare_strip, count, NULL,
+                                         rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+            RwIm3DEnd();
+        }
+    }
+
+    void set_flare_vert(RwIm3DVertex* v, const xVec3& pos, const xColor_tag& c, F32 u, F32 tv)
+    {
+        RwIm3DVertexSetPos(v, pos.x, pos.y, pos.z);
+        RwIm3DVertexSetRGBA(v, c.r, c.g, c.b, c.a);
+        RwIm3DVertexSetUV(v, u, tv);
+    }
+
+    void pc_render_flares()
+    {
+        S32 used = 0;
+        RwRaster* raster = NULL;
+
+        RwInt32 oldFunc = rwALPHATESTFUNCTIONALWAYS;
+        RwInt32 oldRef = 0;
+        RwRenderStateGet(rwRENDERSTATEALPHATESTFUNCTION, &oldFunc);
+        RwRenderStateGet(rwRENDERSTATEALPHATESTFUNCTIONREF, &oldRef);
+        RwGameCubeSetAlphaCompare(GX_GEQUAL, 1, GX_AOP_AND, GX_ALWAYS, 0);
+
+        for (S32 i = 0; i < flares_used; i++)
+        {
+            const flare_element& f = flares[i];
+
+            if (i == 0 || f.raster != raster)
+            {
+                flush_flares(used);
+                used = 0;
+                raster = f.raster;
+                RwRenderStateSet(rwRENDERSTATETEXTURERASTER, raster);
+            }
+            else if (used + 6 > kFlareStripVerts)
+            {
+                flush_flares(used);
+                used = 0;
+            }
+
+            const xMat4x3& m = *f.mat;
+            const F32 size = f.size;
+            const xVec3 right = m.right * size;
+            const xVec3 up = m.up * size;
+            const xVec3 corner = m.pos - (up + right) * 0.5f;
+
+            if (used > 0)
+            {
+                // The join: the last corner again, then this square's first twice.
+                flare_strip[used] = flare_strip[used - 1];
+                used++;
+                set_flare_vert(&flare_strip[used++], corner, f.color, 0.0f, 0.0f);
+            }
+
+            set_flare_vert(&flare_strip[used++], corner, f.color, 0.0f, 0.0f);
+            set_flare_vert(&flare_strip[used++], corner + up, f.color, 0.0f, 1.0f);
+            set_flare_vert(&flare_strip[used++], corner + right, f.color, 1.0f, 0.0f);
+            set_flare_vert(&flare_strip[used++], corner + up + right, f.color, 1.0f, 1.0f);
+        }
+
+        flush_flares(used);
+
+        RwGameCubeSetAlphaCompare(oldFunc == rwALPHATESTFUNCTIONGREATEREQUAL ? GX_GEQUAL :
+                                  oldFunc == rwALPHATESTFUNCTIONLESS         ? GX_LESS :
+                                                                               GX_ALWAYS,
+                                  (RwUInt8)oldRef, GX_AOP_AND, GX_ALWAYS, 0);
+    }
+} // namespace
+#endif
 
 namespace
 {
@@ -423,6 +531,12 @@ inline void zSpotlight::scene_exit()
 
 void zSpotlight::setup_all()
 {
+#ifdef PLATFORM_PC
+    // PC: the cones made below start white; the Xbox light volumes' colours for the last
+    // level's cones go with them (iLightVolume.h).
+    iLightVolumeForgetCones();
+#endif
+
     light_cone_atomics_size = 0;
     aura_cone_atomics_size = 0;
     flares = NULL;
@@ -664,6 +778,12 @@ void zSpotlight::render_all()
             xFXHighDynamicRangeSetGlowClamp(xFXHighDynamicRangeGetBackgroundGlow(), false);
             RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
             render_auras();
+#ifdef PLATFORM_PC
+            if (iExtrasInForce(iEXTRAS_SPOTLIGHTS) == iEXTRAS_XBOX)
+            {
+                pc_render_flares();
+            }
+#endif
             // The PS2 demo also rendered the flares here; the GC retail build only collects and
             // sorts them.
             xFXHighDynamicRangeResetGlowClamp();
@@ -692,6 +812,13 @@ void zSpotlight::reset()
     {
         flags |= 0x1;
     }
+
+#ifdef PLATFORM_PC
+    if (pc_kept_off(id))
+    {
+        flags &= ~0x1;
+    }
+#endif
 
     flags &= ~0x2;
 
@@ -742,6 +869,14 @@ void zSpotlight::activate()
         return;
     }
 
+#ifdef PLATFORM_PC
+    // PC: the GameCube files send this light Off, or have no such light.
+    if (pc_kept_off(id))
+    {
+        return;
+    }
+#endif
+
     reset();
 
     if (!(flags & 0x1))
@@ -766,6 +901,13 @@ void zSpotlight::reload_asset()
     {
         flags &= ~0x1;
     }
+
+#ifdef PLATFORM_PC
+    if (pc_kept_off(id))
+    {
+        flags &= ~0x1;
+    }
+#endif
 
     slope = itan(asset->view_angle);
     end_radius = asset->radius + asset->max_dist * slope;
@@ -793,7 +935,13 @@ void zSpotlight::load_textures()
 {
     RwTexture* texture_flare =
         asset->flare.texture == 0 ? NULL : (RwTexture*)xSTFindAsset(asset->flare.texture, NULL);
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: TT01's flares are a button picture (pad_button1), whose raster the port's
+    // prompts swap for the device's glyph; a flare keeps the disc's (iPadPromptsDiscRaster).
+    raster_flare = iPadPromptsDiscRaster(texture_flare);
+#else
     raster_flare = texture_flare == NULL ? NULL : texture_flare->raster;
+#endif
 
     if (raster_flare != NULL)
     {
@@ -852,7 +1000,22 @@ void zSpotlight::render_aura()
     xRenderFixUntexturedBegin(aura_atomic);
     RwRenderStateSet(rwRENDERSTATECULLMODE,
                      (void*)(light_volume->inside ? rwCULLMODECULLFRONT : rwCULLMODECULLBACK));
+#ifdef PLATFORM_PC
+    // PC: the Xbox's (0x60020) draws the cone with alpha writes off, so the cone itself does not
+    // glow; with [extras] spotlights = xbox, so does this.
+    const bool xbox = iExtrasInForce(iEXTRAS_SPOTLIGHTS) == iEXTRAS_XBOX;
+    if (xbox)
+    {
+        iDrawSetFBMSK(0xFF000000, 0xFFFFFFFF, true);
+    }
+#endif
     RpAtomicRender(aura_atomic);
+#ifdef PLATFORM_PC
+    if (xbox)
+    {
+        iDrawSetFBMSK(0, 0xFFFFFFFF, true);
+    }
+#endif
     RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)rwCULLMODECULLNONE);
     xRenderFixUntexturedEnd(aura_atomic);
 }

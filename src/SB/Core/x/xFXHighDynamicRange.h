@@ -90,4 +90,12 @@ U32 xFXHighDynamicRangeBrightenPtank(RpAtomic* ptank, bool bright);
 void xFXHighDynamicRangeRestorePtank(RpAtomic* ptank, U32 oldtest);
 void xFXHighDynamicRangeTunePalette(RwRaster* raster, F32 base_alpha, bool additive);
 
+#ifdef PLATFORM_PC
+// PC-only: the Xbox release's glow on the title and pause menus (zUIMgr.cpp). Whether the menus
+// glow ([extras] glow = xbox, video.hdr_glow on), and the menus' glow pass, in place of
+// xFXHighDynamicRangeRender at the end of the menu's elements (the Xbox's 0x12f220).
+bool xFXHighDynamicRangeMenuGlow();
+void xFXHighDynamicRangeRenderMenu(RwCamera* camera);
+#endif
+
 #endif

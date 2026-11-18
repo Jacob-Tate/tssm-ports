@@ -2,6 +2,9 @@
 // docs/MODDING.md for the modder's side.
 #include "iMod.h"
 
+#include "iGCPackage.h"
+#include "iGCSwap.h"
+
 #include "iConfig.h"
 #include "iHost.h"
 #include "iModAudio.h"
@@ -225,6 +228,24 @@ namespace
 
     // Built packages by lower-case path; NULL for one nothing replaces.
     std::map<std::string, iModPkg*> sPackages;
+
+    // GameCube packages' views (iModOpenPackage), newest first, each with a
+    // reference of its own. A view holds every converted asset of its package
+    // (a level's HOP up to about 10 MB; boot, menus, player and level about
+    // 7-25 MB together), and one level load opens some 15 packages, which the
+    // sound layer opens again for each stream it plays. So the views of a
+    // level load and the shared ones are kept, bounded by count and bytes, not
+    // converted again on the main thread while the level plays. The key
+    // carries the file's size and time, so a changed file is converted again.
+    struct GCView
+    {
+        std::string key;
+        iModPkg* pkg; // NULL when the package needed no conversion
+        bool failed; // it cannot be converted; said so once
+    };
+    std::vector<GCView> sGCViews;
+    const size_t kMaxGCViews = 32;
+    const U64 kMaxGCViewBytes = 64ull << 20;
     bool sOpenedPackage;
     bool sChangedAfterOpen;
 
@@ -473,6 +494,11 @@ namespace
             iModPkgRelease(it->second); // open files keep their own reference
         }
         sPackages.clear();
+        for (size_t i = 0; i < sGCViews.size(); i++)
+        {
+            iModPkgRelease(sGCViews[i].pkg);
+        }
+        sGCViews.clear();
     }
 
     void BuildIndex()
@@ -766,6 +792,270 @@ namespace
         }
         out->bytes.swap(data);
         return true;
+    }
+
+    // --- GameCube packages ---------------------------------------------------------------
+
+    const U32 kTypeRWTX = 0x52575458; // 'RWTX'
+    const U32 kTypeTEXS = 0x54455853; // 'TEXS'
+    const U32 kTypeMODL = 0x4D4F444C; // 'MODL'
+
+    // The sources of a GameCube view's own replacements, for the log.
+#define kGCConverted "the GameCube conversion"
+#define kGCNamed "its texture name"
+
+    std::string Format(const char* fmt, ...)
+    {
+        char buf[768];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, ap);
+        va_end(ap);
+        return buf;
+    }
+
+    struct GCCtx
+    {
+        PkgCtx mod; // for PkgLookup
+        bool mods; // whether any mod replaces assets in this package
+        FILE* fp; // the package itself, for each asset's own bytes
+        U32 fileSize;
+        S32 converted;
+        S32 named;
+        S32 asIs;
+        S32 replaced; // by a mod
+        bool failed;
+        std::string why;
+    };
+
+    // Each asset of a GameCube package as the port reads it: a mod's
+    // replacement if there is one (Xbox layout, like every mod's assets),
+    // otherwise the asset converted to the Xbox layout (iGCSwap.h), with the
+    // texture names the disc lacks (iGCPackage.h). RenderWare and sound data
+    // are left as they are; librw and the sound layer read the GameCube's own.
+    // An asset with no rule, or one that does not fit its own counts, fails
+    // the whole package: a package half converted is never handed out.
+    bool GCLookup(void* vctx, const iModPkgAsset& a, iModPkgReplacement* out)
+    {
+        GCCtx* ctx = (GCCtx*)vctx;
+        if (ctx->failed)
+        {
+            return false;
+        }
+        if (ctx->mods && PkgLookup(&ctx->mod, a, out))
+        {
+            ctx->replaced++;
+            return true;
+        }
+
+        char tn[5];
+        const char* name = a.name != NULL ? a.name : "";
+        const bool texture = a.type == kTypeRWTX || a.type == kTypeTEXS;
+        const bool model = a.type == kTypeMODL;
+        const iGCSwapResult rule = iGCSwapRule(a.type);
+        if (rule == IGCSWAP_UNKNOWN)
+        {
+            ctx->failed = true;
+            ctx->why = Format("asset %08X '%s' is a %s, which the port cannot convert from the "
+                              "GameCube layout yet",
+                              a.id, name, iGCSwapTypeName(a.type, tn));
+            return false;
+        }
+        if ((rule == IGCSWAP_ASIS && !texture && !model) || a.size == 0)
+        {
+            ctx->asIs++;
+            return false;
+        }
+
+        // Checked before anything is allocated: a damaged size would
+        // otherwise ask for up to 4 GB, which a 32-bit build cannot have.
+        if (a.off > ctx->fileSize || a.size > ctx->fileSize - a.off)
+        {
+            ctx->failed = true;
+            ctx->why = Format("asset %08X '%s' runs past the end of the file", a.id, name);
+            return false;
+        }
+        std::vector<U8> bytes(a.size);
+        if (fseek(ctx->fp, (long)a.off, SEEK_SET) != 0 ||
+            fread(&bytes[0], 1, a.size, ctx->fp) != a.size)
+        {
+            ctx->failed = true;
+            ctx->why = Format("asset %08X '%s' runs past the end of the file", a.id, name);
+            return false;
+        }
+
+        // A model is read as it is, but read through by the game whatever
+        // librw makes of it (zAssetTypes.cpp, Model_Read): one that does not
+        // hold together fails the package here, as a damaged asset of a
+        // converted type does.
+        if (model)
+        {
+            if (!iGCPackageModelFits(&bytes[0], a.size))
+            {
+                ctx->failed = true;
+                ctx->why = Format("asset %08X '%s' (MODL) holds no model that can be read", a.id,
+                                  name);
+                return false;
+            }
+            ctx->asIs++;
+            return false;
+        }
+
+        if (texture)
+        {
+            if (iGCPackageRestoreTextureNames(&bytes[0], a.size, name) == 0)
+            {
+                ctx->asIs++;
+                return false;
+            }
+            ctx->named++;
+            out->bytes.swap(bytes);
+            out->source = kGCNamed;
+            return true;
+        }
+
+        const iGCSwapResult r = iGCSwapAsset(a.type, &bytes[0], a.size);
+        if (r == IGCSWAP_ASIS)
+        {
+            ctx->asIs++;
+            return false;
+        }
+        if (r != IGCSWAP_DONE)
+        {
+            ctx->failed = true;
+            ctx->why = Format("asset %08X '%s' (%s) %s", a.id, name, iGCSwapTypeName(a.type, tn),
+                              r == IGCSWAP_UNKNOWN ? "is of a kind the port cannot convert from "
+                                                     "the GameCube layout yet"
+                                                   : "does not fit its own sizes and counts");
+            return false;
+        }
+        ctx->converted++;
+        out->bytes.swap(bytes);
+        out->source = kGCConverted;
+        return true;
+    }
+
+    iModPkg* OpenGameCubePackage(const char* path, bool* failed)
+    {
+        iHostFileInfo info;
+        if (!iHostStat(path, &info) || !info.is_file)
+        {
+            return NULL;
+        }
+        std::string key = Format("%s|%llu|%lld", Lower(Slashes(path)).c_str(),
+                                 (unsigned long long)info.size, (long long)info.mtime);
+        for (size_t i = 0; i < sGCViews.size(); i++)
+        {
+            if (sGCViews[i].key == key)
+            {
+                GCView v = sGCViews[i];
+                sGCViews.erase(sGCViews.begin() + i);
+                sGCViews.insert(sGCViews.begin(), v);
+                if (v.failed && failed != NULL)
+                {
+                    *failed = true;
+                }
+                iModPkgRetain(v.pkg);
+                return v.pkg;
+            }
+        }
+
+        const U64 t0 = iHostMonotonicNs();
+        GCCtx ctx;
+        ctx.mod.label = Leaf(Slashes(path));
+        ctx.mod.scope = Lower(Stem(ctx.mod.label));
+        ctx.mods = sGlobalOn && !sScopes.empty() &&
+                   (std::find(sScopes.begin(), sScopes.end(), std::string()) != sScopes.end() ||
+                    std::find(sScopes.begin(), sScopes.end(), ctx.mod.scope) != sScopes.end());
+        ctx.fp = fopen(path, "rb");
+        ctx.fileSize = 0;
+        ctx.converted = ctx.named = ctx.asIs = ctx.replaced = 0;
+        ctx.failed = ctx.fp == NULL;
+        if (ctx.fp == NULL)
+        {
+            ctx.why = "it cannot be opened";
+        }
+        else if (fseek(ctx.fp, 0, SEEK_END) == 0)
+        {
+            long len = ftell(ctx.fp);
+            ctx.fileSize = len > 0 && (unsigned long)len <= 0xFFFFFFFFul ? (U32)len : 0;
+        }
+        if (ctx.mods)
+        {
+            sOpenedPackage = true;
+        }
+
+        iModPkg* pkg = NULL;
+        std::vector<std::string> log;
+        if (!ctx.failed)
+        {
+            // Read through the view whether or not anything changes, so a
+            // package that cannot be parsed is a failure, never "nothing to
+            // convert": read as it is, its big-endian data would reach the
+            // game (iModPackage.h, IMODPKG_GAMECUBE).
+            iModPkgStatus status = IMODPKG_UNREADABLE;
+            pkg = iModPkgBuild(path, GCLookup, &ctx, &log, IMODPKG_GAMECUBE, &status);
+            fclose(ctx.fp);
+            if (!ctx.failed && status == IMODPKG_UNREADABLE)
+            {
+                ctx.failed = true;
+                ctx.why = "its table of contents does not hold together";
+                if (!log.empty())
+                {
+                    size_t b = log.back().find_first_not_of(' ');
+                    ctx.why = b == std::string::npos ? ctx.why : log.back().substr(b);
+                }
+            }
+        }
+        if (ctx.failed)
+        {
+            iModPkgRelease(pkg);
+            pkg = NULL;
+            printf("tssm: GameCube package %s cannot be read: %s\n", path, ctx.why.c_str());
+        }
+        else
+        {
+            printf("tssm: GameCube package %s: %d asset(s) converted, %d texture name(s) "
+                   "restored, %d left as they are (%.1f ms)\n",
+                   ctx.mod.label.c_str(), (int)ctx.converted, (int)ctx.named, (int)ctx.asIs,
+                   (double)(iHostMonotonicNs() - t0) / 1e6);
+            if (ctx.replaced > 0)
+            {
+                iModLogf("%s: %d asset(s) replaced", ctx.mod.label.c_str(), (int)ctx.replaced);
+            }
+            // The build's line for each asset it was given; the converted
+            // ones are counted above.
+            for (size_t i = 0; i < log.size(); i++)
+            {
+                if (log[i].find("<- " kGCConverted) != std::string::npos ||
+                    log[i].find("<- " kGCNamed) != std::string::npos)
+                {
+                    continue;
+                }
+                iModLogf("%s", log[i].c_str());
+            }
+        }
+        fflush(stdout);
+        if (failed != NULL)
+        {
+            *failed = ctx.failed;
+        }
+
+        GCView v = { key, pkg, ctx.failed };
+        sGCViews.insert(sGCViews.begin(), v);
+        U64 bytes = 0;
+        for (size_t i = 0; i < sGCViews.size(); i++)
+        {
+            bytes += sGCViews[i].pkg != NULL ? iModPkgMemory(sGCViews[i].pkg) : 0;
+        }
+        while (sGCViews.size() > 1 && (sGCViews.size() > kMaxGCViews || bytes > kMaxGCViewBytes))
+        {
+            bytes -= sGCViews.back().pkg != NULL ? iModPkgMemory(sGCViews.back().pkg) : 0;
+            iModPkgRelease(sGCViews.back().pkg);
+            sGCViews.pop_back();
+        }
+        iModPkgRetain(pkg);
+        return pkg;
     }
 } // namespace
 
@@ -1096,8 +1386,16 @@ bool iModResolveFile(const char* rel, char* out, size_t outsize)
     return true;
 }
 
-iModPkg* iModOpenPackage(const char* path)
+iModPkg* iModOpenPackage(const char* path, bool gamecube, bool* failed)
 {
+    if (failed != NULL)
+    {
+        *failed = false;
+    }
+    if (gamecube && path != NULL)
+    {
+        return OpenGameCubePackage(path, failed);
+    }
     if (!sGlobalOn || sScopes.empty() || path == NULL)
     {
         return NULL;

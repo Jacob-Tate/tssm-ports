@@ -1,6 +1,7 @@
 #include "iWindow.h"
 
 #include "iHangDump.h"
+#include "iPerf.h"
 #include "iScreen.h"
 #include "rw/backend.h"
 
@@ -401,6 +402,9 @@ void iWindowClose()
 // reads, so this runs before input is polled rather than after.
 void iWindowPump()
 {
+    // TSSM_PERF's pump columns count this one with its events handled.
+    iPerfPumpBegin();
+
     // TSSM_TEST_HANG_DUMP: every present and every pass of a movie comes
     // through here, so this is the game thread's heartbeat (iHangDump.h).
     iHangDumpBeat();
@@ -479,6 +483,8 @@ void iWindowPump()
     while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FINGER_DOWN, SDL_EVENT_LAST) > 0)
     {
     }
+
+    iPerfPumpEnd();
 }
 
 // 60 Hz, which is what the GameCube's video interface gave the game, and what
@@ -492,13 +498,48 @@ static S32 sVSync = 1;
 // is the rate the pacer holds, the cap lowered to the ceiling while one is set.
 static S32 sFrameRateCeiling = 0;
 
-static S32 PacedRate()
+// The GameCube's hold, a count of retraces, 0 for none: iWindowSetFrameLock.
+// One NTSC retrace is 1001/60000 s.
+static S32 sFrameLock = 0;
+static const Uint64 kRetraceNs = 16683333ULL;
+
+static S32 CapAndCeiling()
 {
     if (sFrameRateCeiling > 0 && (sFrameRate <= 0 || sFrameRate > sFrameRateCeiling))
     {
         return sFrameRateCeiling;
     }
     return sFrameRate;
+}
+
+// Whether the hold is what paces the frame: one is set, no movie's ceiling is,
+// and the cap is not already lower. A cap equal to the hold's rounded rate (30)
+// is paced as the hold, at 29.97.
+static bool HoldPaces()
+{
+    if (sFrameLock <= 1 || sFrameRateCeiling > 0)
+    {
+        return false;
+    }
+    const S32 cap = CapAndCeiling();
+    const S32 held = (60 + sFrameLock / 2) / sFrameLock;
+    return cap <= 0 || cap >= held;
+}
+
+static S32 PacedRate()
+{
+    if (HoldPaces())
+    {
+        return (60 + sFrameLock / 2) / sFrameLock;
+    }
+    return CapAndCeiling();
+}
+
+// What the pacer holds, as one number that changes whenever it does: the rate,
+// or minus the retrace count while the hold paces.
+static S32 PacedKey()
+{
+    return HoldPaces() ? -sFrameLock : CapAndCeiling();
 }
 
 // Held at file scope rather than inside iWindowPaceFrame so that a rate change
@@ -520,12 +561,27 @@ void iWindowSetFrameRateCeiling(S32 fps)
 {
     // The deadline is dropped only when the paced rate moves, so a ceiling at
     // or above the cap (60 under the default cap of 60) changes nothing at all.
-    const S32 before = PacedRate();
+    const S32 before = PacedKey();
     sFrameRateCeiling = fps > 0 ? fps : 0;
-    if (PacedRate() != before)
+    if (PacedKey() != before)
     {
         sPacerStarted = false;
     }
+}
+
+void iWindowSetFrameLock(S32 count)
+{
+    const S32 before = PacedKey();
+    sFrameLock = count > 1 ? count : 0;
+    if (PacedKey() != before)
+    {
+        sPacerStarted = false;
+    }
+}
+
+S32 iWindowGetFrameLock()
+{
+    return HoldPaces() ? sFrameLock : 0;
 }
 
 S32 iWindowGetFrameRate()
@@ -685,6 +741,102 @@ void iWindowFrameWorkDone()
     }
 }
 
+// **The pacer's sleep: a timer to just short of the deadline, then a spin to it.**
+//
+// A sleep wakes some time after the moment it asked for, and whatever it is
+// late by goes straight on to the frame. So the timer aims short of the
+// deadline by a margin and the rest is spun out on the clock, which ends within
+// a microsecond or two of the deadline. The margin follows how late the timer
+// has been waking: it rises at once to a late wake, plus a little, and decays
+// slowly back down, so where the timer is precise the spin is a fraction of a
+// millisecond a frame, and where it is coarse the deadlines are still met.
+//
+// On Windows the timer is a high-resolution waitable timer (Windows 10 1803 and
+// later), which keeps to the time asked for rather than to the scheduler's
+// tick; before 1803 an ordinary one, at the 1 ms timer period SDL sets, and the
+// margin grows to cover it. SDL_DelayPrecise, used before, slept in 1 ms steps:
+// six or seven timer wakes a frame at 120 fps, each one a chance to wake late,
+// and only the last step's remainder was spun.
+#ifndef __ANDROID__
+static const Uint64 kSpinMinNs = 200000ULL;
+static const Uint64 kSpinMaxNs = 4000000ULL;
+static const Uint64 kSpinPadNs = 100000ULL;
+static Uint64 sSpinNs = 1000000ULL;
+// The latest the timer has woken past the time it was set for, decaying.
+static Uint64 sWakeLateNs = 0;
+
+#if defined(_WIN32)
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+static HANDLE sPaceTimer;
+static bool sPaceTimerTried;
+
+static void TimerSleep(Uint64 ns)
+{
+    if (!sPaceTimerTried)
+    {
+        sPaceTimerTried = true;
+        sPaceTimer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                            TIMER_ALL_ACCESS);
+        if (sPaceTimer == NULL)
+        {
+            sPaceTimer = CreateWaitableTimerExW(NULL, NULL, 0, TIMER_ALL_ACCESS);
+        }
+    }
+
+    if (sPaceTimer != NULL)
+    {
+        // Relative, in 100 ns units.
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)(ns / 100);
+        if (due.QuadPart < 0 && SetWaitableTimer(sPaceTimer, &due, 0, NULL, NULL, FALSE))
+        {
+            WaitForSingleObject(sPaceTimer, INFINITE);
+            return;
+        }
+    }
+    SDL_DelayNS(ns);
+}
+#else
+static void TimerSleep(Uint64 ns)
+{
+    SDL_DelayNS(ns);
+}
+#endif
+
+static void SleepUntil(Uint64 deadline, Uint64 now)
+{
+    // The decay runs on every sleep, the ones too short for the timer too: a
+    // margin raised by one late wake must come down even while every frame
+    // leaves less than the margin, or each of those frames spins its whole
+    // remainder. A wake later than the largest margin counts as that margin.
+    sWakeLateNs -= sWakeLateNs / 64;
+    if (deadline > now + sSpinNs)
+    {
+        const Uint64 wakeAt = deadline - sSpinNs;
+        TimerSleep(wakeAt - now);
+        now = SDL_GetTicksNS();
+
+        Uint64 late = now > wakeAt ? now - wakeAt : 0;
+        late = late > kSpinMaxNs ? kSpinMaxNs : late;
+        if (late > sWakeLateNs)
+        {
+            sWakeLateNs = late;
+        }
+    }
+    Uint64 spin = sWakeLateNs + kSpinPadNs;
+    spin = spin < kSpinMinNs ? kSpinMinNs : spin;
+    sSpinNs = spin > kSpinMaxNs ? kSpinMaxNs : spin;
+
+    while (now < deadline)
+    {
+        SDL_CPUPauseInstruction();
+        now = SDL_GetTicksNS();
+    }
+}
+#endif
+
 static void PaceSleep()
 {
     const S32 rate = PacedRate();
@@ -696,8 +848,18 @@ static void PaceSleep()
 
     Uint64 now = SDL_GetTicksNS();
 
-    const S32 paceRate = VSyncHoldsRate(rate, now) ? rate + rate / 4 : rate;
-    const Uint64 framePeriodNs = 1000000000ULL / (Uint64)paceRate;
+    const bool backstop = VSyncHoldsRate(rate, now);
+    const S32 paceRate = backstop ? rate + rate / 4 : rate;
+    Uint64 framePeriodNs = 1000000000ULL / (Uint64)paceRate;
+    if (HoldPaces())
+    {
+        // The GameCube's own period, `count` retraces of 1001/60000 s.
+        framePeriodNs = (Uint64)sFrameLock * kRetraceNs;
+        if (backstop)
+        {
+            framePeriodNs = framePeriodNs * 4 / 5;
+        }
+    }
 
     if (!sPacerStarted)
     {
@@ -705,33 +867,43 @@ static void PaceSleep()
         sPacerStarted = true;
     }
 
+    // The deadline is carried forward a period at a time rather than re-read
+    // from the clock, so the rate does not drift.
     sNextFrame += framePeriodNs;
 
-    // A frame that overran its budget must not be paid for by not sleeping for
-    // the next several -- that turns one slow frame into a burst of fast ones.
-    // Drop the missed deadlines and pace from now instead.
+    // A frame whose own work ran past its deadline goes at once. Less than a
+    // period late, the deadlines stay where they were: the next frame has that
+    // much less time, and the rate holds. Further behind, the missed deadlines
+    // are dropped and pacing starts again from now, because a slow stretch must
+    // not be paid for by not sleeping for the next several frames -- that turns
+    // it into a burst of fast ones.
+    //
+    // The GameCube's hold starts again from now after any late frame: the
+    // console counts its retraces from the last picture shown, so a slow frame
+    // there is never followed by a short one.
     if (sNextFrame <= now)
     {
-        sNextFrame = now;
+        const Uint64 behind = now - sNextFrame;
+        iPerfPace(0, (S64)behind);
+        if (behind >= framePeriodNs || HoldPaces())
+        {
+            sNextFrame = now;
+        }
         return;
     }
+    const Uint64 want = sNextFrame - now;
 
 #ifdef __ANDROID__
     // Android: one sleep. Its nanosleep is a high-resolution timer that wakes
-    // within tens of microseconds, so the overshoot described below does not
-    // happen, and the deadline is carried forward rather than re-read, so a
-    // late wake does not drift the rate. SDL_DelayPrecise sleeps in 1 ms steps
-    // and spins the last one: on a phone that woke a big core once per idle
-    // millisecond (700 to 900 times a second in a movie at 120 fps), keeping it
-    // out of its deep idle states for nothing.
-    SDL_DelayNS(sNextFrame - now);
+    // within tens of microseconds, so the overshoot SleepUntil spins against
+    // does not happen. Spinning, or SDL_DelayPrecise's 1 ms steps, woke a big
+    // core once per idle millisecond (700 to 900 times a second in a movie at
+    // 120 fps), keeping it out of its deep idle states for nothing.
+    SDL_DelayNS(want);
 #else
-    // SDL_DelayPrecise rather than SDL_DelayNS: the plain one rounds up to the
-    // scheduler's tick and routinely overshoots by more than a frame at this
-    // rate, which costs a frame every time rather than pacing one. The precise
-    // one sleeps for all but the last fraction and spins out the rest.
-    SDL_DelayPrecise(sNextFrame - now);
+    SleepUntil(sNextFrame, now);
 #endif
+    iPerfPace(want, (S64)(SDL_GetTicksNS() - sNextFrame));
 }
 
 void iWindowPaceFrame()

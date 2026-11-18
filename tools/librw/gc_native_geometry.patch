@@ -1,0 +1,1138 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index a972e08..e035206 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,6 +34,7 @@ add_library(librw
+     rwuserdata.h
+     skin.cpp
+     texture.cpp
++    gcngeo.cpp
+     gcntex.cpp
+     tga.cpp
+     tristrip.cpp
+diff --git a/src/gcngeo.cpp b/src/gcngeo.cpp
+new file mode 100644
+index 0000000..cc50d21
+--- /dev/null
++++ b/src/gcngeo.cpp
+@@ -0,0 +1,1001 @@
++// GameCube native geometry and skin, de-instanced into ordinary geometry on read.
++//
++// After the reader in the BfBB PC port's librw fork (MIT, librw's licence). The
++// layout below was checked on TSSM's GameCube disc too: its 830 native models
++// (130 of them skinned) and 6,130 native world geometries use exactly these
++// vertex arrays and primitives.
++//
++// The NATIVEDATA chunk's STRUCT holds three little-endian words, like the rest
++// of the stream -- platform (6), header size, data size -- then the header and
++// the data, both raw and big-endian:
++//
++//   header
++//   0x00  u32  display list token, set by the driver at load
++//   0x04  u32  not needed here
++//   0x08  u32  number of vertex arrays
++//   0x0C  per vertex array:  u32 offset into the data,
++//                            u8 GX attribute, u8 stride, u8 GX index type, u8 0
++//         per mesh:          u32 offset into the data, u32 display list size
++//
++//   data
++//   a GX display list per mesh, then the vertex arrays, each 32-byte aligned.
++//
++// The arrays are f32 positions (GX_VA_POS) and normals (GX_VA_NRM), RGBA8
++// prelight (GX_VA_CLR0) and f32 texcoords (GX_VA_TEX0). Each one is
++// deduplicated on its own and indexed with 8 bits (GX_INDEX8) or 16
++// (GX_INDEX16), in GX attribute order, so a vertex here is the combination of
++// indices the display list sends.
++//
++// A display list is GX_TRIANGLESTRIP primitives. The GameCube instancer split
++// each mesh's RenderWare strip into its runs of non-degenerate triangles and
++// dropped the rest; a run that started on an odd triangle begins with its first
++// vertex twice so that it keeps its winding. The strip is rebuilt from the runs
++// with the shortest joins of degenerate triangles that keep each run's parity,
++// then padded with its last index to the mesh's index count in the BinMesh, so
++// the BinMesh keeps the length it was written with.
++//
++// Skinned geometry is welded: one position per distinct vertex position,
++// numVertices of them, and the skin's weights are indexed by position. With at
++// most one weight per vertex, each vertex in the display list starts with a
++// direct GX_VA_PNMTXIDX, 3*n for used bone n, before its indices.
++//
++// The NATIVEDATA chunk comes after the BinMesh and before the skin, so the
++// chunk is kept until the geometry's extension has been read; then
++// finishNativeDataGC builds the geometry and its skin and frees it.
++//
++// Nothing here trusts the stream: every count, offset and index is checked
++// against the bytes it describes. A geometry that cannot be read becomes an
++// ordinary one that draws nothing (makeStub), and the reason goes to RWERROR.
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "rwbase.h"
++#include "rwerror.h"
++#include "rwplg.h"
++#include "rwpipeline.h"
++#include "rwobjects.h"
++#include "rwanim.h"
++#include "rwengine.h"
++#include "rwplugins.h"
++
++#define PLUGIN_ID ID_NATIVEDATA
++
++namespace rw {
++
++enum
++{
++	GX_VA_PNMTXIDX = 0,
++	GX_VA_POS = 9,
++	GX_VA_NRM = 10,
++	GX_VA_CLR0 = 11,
++	GX_VA_TEX0 = 13,
++
++	GX_INDEX8 = 2,
++	GX_INDEX16 = 3,
++
++	GX_NOP = 0x00,
++	GX_TRIANGLES = 0x90,
++	GX_TRIANGLESTRIP = 0x98,
++
++	// slots of a vertex key, in sort order
++	KEY_POS = 0,
++	KEY_NRM,
++	KEY_CLR,
++	KEY_TEX,
++	KEY_MTX,
++	NUMKEYS,
++
++	// Caps on what a stream may ask for. The largest native chunk on TSSM's
++	// disc is well under a megabyte, its largest skin a few kilobytes. A
++	// display list sends at least a byte per vertex it names, so a retail
++	// geometry names well under a million; a primitive with no vertex arrays
++	// could name 65535 in three bytes, which the cap on keys stops.
++	GC_MAX_NATIVE = 32<<20,
++	GC_MAX_SKIN = 4<<20,
++	GC_MAX_ARRAYS = 8,
++	GC_MAX_VERTICES = 0x10000,
++	GC_MAX_KEYS = 1<<20
++};
++
++struct GCNativeData : InstanceDataHeader
++{
++	uint8 *buf;		// header, then data; nil when the chunk could not be read
++	uint32 headerSize;
++	uint32 dataSize;
++
++	// GameCube skin, read by readNativeSkinGC; per welded vertex
++	Skin *skin;
++	uint8 *skinIndices;
++	uint8 *skinWeights;
++};
++
++struct GCArray
++{
++	const uint8 *data;
++	uint32 count;
++	uint32 stride;
++	bool32 index16;
++	bool32 present;
++};
++
++struct GCVertexKey
++{
++	uint16 k[NUMKEYS];
++	uint32 seq;
++};
++
++struct GCStrip
++{
++	uint32 first;	// into the vertex sequence
++	uint32 count;
++};
++
++static void
++gcError(Geometry *geo, const char *msg)
++{
++	char buf[320];
++	snprintf(buf, sizeof(buf), "GameCube geometry with %d vertices: %s",
++	         geo->numVertices, msg);
++	RWERROR((ERR_GENERAL, buf));
++}
++
++static uint32
++be16(const uint8 *p)
++{
++	return (uint32)p[0]<<8 | p[1];
++}
++
++static uint32
++be32(const uint8 *p)
++{
++	return (uint32)p[0]<<24 | (uint32)p[1]<<16 | (uint32)p[2]<<8 | p[3];
++}
++
++static uint32
++le32(const uint8 *p)
++{
++	return (uint32)p[3]<<24 | (uint32)p[2]<<16 | (uint32)p[1]<<8 | p[0];
++}
++
++static float32
++bef(const uint8 *p)
++{
++	uint32 u = be32(p);
++	float32 f;
++	memcpy(&f, &u, 4);
++	return f;
++}
++
++static int
++cmpKey(const void *a, const void *b)
++{
++	const GCVertexKey *ka = (const GCVertexKey*)a;
++	const GCVertexKey *kb = (const GCVertexKey*)b;
++	for(int32 i = 0; i < NUMKEYS; i++)
++		if(ka->k[i] != kb->k[i])
++			return ka->k[i] < kb->k[i] ? -1 : 1;
++	return ka->seq < kb->seq ? -1 : ka->seq > kb->seq;
++}
++
++// The extension reader that calls these goes on from wherever they leave the
++// stream, so each one ends exactly at the end of its chunk, `len` bytes after
++// where it started, whatever it found inside.
++static Stream*
++leave(Stream *stream, uint32 start, int32 len)
++{
++	int32 at = (int32)(stream->tell() - start);
++	if(at != len)
++		stream->seek(len - at);
++	return stream;
++}
++
++// Reads `length` bytes of a chunk body into a new buffer, nil when the stream
++// ends first.
++static uint8*
++readBody(Stream *stream, uint32 length)
++{
++	uint8 *buf = (uint8*)rwMalloc(length ? length : 1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	if(buf == nil){
++		stream->seek(length);
++		return nil;
++	}
++	if(stream->read8(buf, length) != length){
++		rwFree(buf);
++		return nil;
++	}
++	return buf;
++}
++
++Stream*
++readNativeDataGC(Stream *stream, int32 len, void *object)
++{
++	Geometry *geo = (Geometry*)object;
++	uint32 start = stream->tell();
++	uint32 length;
++	if(!findChunk(stream, ID_STRUCT, &length, nil)){
++		RWERROR((ERR_CHUNK, "STRUCT"));
++		return leave(stream, start, len);
++	}
++
++	// A second native chunk, or one on a geometry that already has its
++	// vertices, is skipped: the geometry stays what the first said it is.
++	if(geo->instData || !(geo->flags & Geometry::NATIVE)){
++		gcError(geo, geo->instData ? "geometry has two native data chunks" :
++		                             "native data on a geometry that is not native");
++		return leave(stream, start, len);
++	}
++
++	// From here on the geometry is GameCube's, whether or not its data can be
++	// read, so that its skin goes to readNativeSkinGC and finishNativeDataGC
++	// sees it.
++	GCNativeData *nd = rwNewT(GCNativeData, 1, MEMDUR_EVENT | ID_GEOMETRY);
++	memset(nd, 0, sizeof(*nd));
++	nd->platform = PLATFORM_GC;
++	geo->instData = nd;
++
++	if(length < 12 || length > GC_MAX_NATIVE || length > (uint32)len){
++		gcError(geo, "native data too short or too long");
++		return leave(stream, start, len);
++	}
++	uint8 *body = readBody(stream, length);
++	if(body == nil){
++		gcError(geo, "native data runs past the end of the stream");
++		return leave(stream, start, len);
++	}
++	uint32 headerSize = le32(body + 4);
++	uint32 dataSize = le32(body + 8);
++	if(headerSize > length-12 || dataSize > length-12-headerSize){
++		gcError(geo, "native data sizes overrun the chunk");
++		rwFree(body);
++		return leave(stream, start, len);
++	}
++	nd->headerSize = headerSize;
++	nd->dataSize = dataSize;
++	nd->buf = rwNewT(uint8, headerSize+dataSize+1, MEMDUR_EVENT | ID_GEOMETRY);
++	memcpy(nd->buf, body+12, headerSize+dataSize);
++	rwFree(body);
++	return leave(stream, start, len);
++}
++
++// GameCube skin: a STRUCT holding platform (6) and a word packing the bone
++// count, the used bone count and the most weights a vertex has (bits 0, 8, 16),
++// both little-endian, then raw: the used bones, then, with two weights or more,
++// per welded vertex one byte per weight of bone indices and one of weights in
++// 128ths, then the inverse bone matrices as big-endian floats, then the split
++// data as in a generic skin (three little-endian words, then the remap bytes).
++Stream*
++readNativeSkinGC(Stream *stream, int32 len, void *object, int32 offset)
++{
++	Geometry *geo = (Geometry*)object;
++	GCNativeData *nd = (GCNativeData*)geo->instData;
++	uint32 start = stream->tell();
++	uint32 length;
++	if(!findChunk(stream, ID_STRUCT, &length, nil)){
++		RWERROR((ERR_CHUNK, "STRUCT"));
++		return leave(stream, start, len);
++	}
++	if(length < 8 || length > GC_MAX_SKIN || length > (uint32)len){
++		gcError(geo, "skin too short or too long");
++		return leave(stream, start, len);
++	}
++	uint8 *b = readBody(stream, length);
++	if(b == nil){
++		gcError(geo, "skin runs past the end of the stream");
++		return leave(stream, start, len);
++	}
++	if(le32(b) != PLATFORM_GC){
++		RWERROR((ERR_PLATFORM, le32(b)));
++		rwFree(b);
++		return leave(stream, start, len);
++	}
++	uint32 packed = le32(b + 4);
++	int32 numBones = packed & 0xFF;
++	int32 numUsedBones = packed>>8 & 0xFF;
++	int32 numWeights = packed>>16 & 0xFF;
++	if(numWeights > 4 || numUsedBones > numBones){
++		gcError(geo, "skin has more than four weights per vertex, or more used bones than bones");
++		rwFree(b);
++		return leave(stream, start, len);
++	}
++	if(geo->numVertices < 0 || geo->numVertices > GC_MAX_VERTICES){
++		gcError(geo, "skin on a geometry with too many vertices");
++		rwFree(b);
++		return leave(stream, start, len);
++	}
++
++	// Every piece's place, checked before anything is allocated.
++	uint32 n = numWeights >= 2 ? numWeights*geo->numVertices : 0;
++	uint32 o = 8;
++	uint32 oBones = o;		o += numUsedBones;
++	uint32 oWeights = o;	o += 2*n;
++	uint32 oMats = o;		o += 64*numBones;
++	uint32 oSplit = o;		o += 12;
++	if(o > length){
++		gcError(geo, "skin ends early");
++		rwFree(b);
++		return leave(stream, start, len);
++	}
++	int32 boneLimit = (int32)le32(b + oSplit);
++	int32 numMeshes = (int32)le32(b + oSplit + 4);
++	int32 rleSize = (int32)le32(b + oSplit + 8);
++	uint32 splitSize = 0;
++	if(numMeshes){
++		if(numMeshes < 0 || rleSize < 0 || numMeshes > 0xFFFF || rleSize > 0xFFFF){
++			gcError(geo, "skin split data has a bad count");
++			rwFree(b);
++			return leave(stream, start, len);
++		}
++		splitSize = numBones + 2*(numMeshes+rleSize);
++		if(splitSize > length - o){
++			gcError(geo, "skin split data ends early");
++			rwFree(b);
++			return leave(stream, start, len);
++		}
++	}
++
++	Skin *skin = rwNewT(Skin, 1, MEMDUR_EVENT | ID_SKIN);
++	skin->init(numBones, numUsedBones, 0);
++	skin->numWeights = numWeights;
++	*PLUGINOFFSET(Skin*, geo, offset) = skin;
++	memcpy(skin->usedBones, b + oBones, numUsedBones);
++	for(int32 i = 0; i < numUsedBones; i++)
++		if(skin->usedBones[i] >= numBones)
++			skin->usedBones[i] = 0;
++	for(int32 i = 0; i < numBones; i++)
++		for(int32 j = 0; j < 16; j++)
++			skin->inverseMatrices[i*16 + j] = bef(b + oMats + 64*i + 4*j);
++	skin->boneLimit = boneLimit;
++	if(numMeshes){
++		skin->numMeshes = numMeshes;
++		skin->rleSize = rleSize;
++		int8 *data = (int8*)rwMalloc(splitSize, MEMDUR_EVENT | ID_SKIN);
++		memcpy(data, b + o, splitSize);
++		skin->remapIndices = data;
++		skin->rleCount = (Skin::RLEcount*)(data + numBones);
++		skin->rle = (Skin::RLE*)(data + numBones + 2*numMeshes);
++	}
++
++	if(nd && n){
++		nd->skinIndices = rwNewT(uint8, 2*n, MEMDUR_EVENT | ID_SKIN);
++		nd->skinWeights = nd->skinIndices + n;
++		memcpy(nd->skinIndices, b + oWeights, 2*n);
++		for(uint32 i = 0; i < n; i++)
++			if(nd->skinIndices[i] >= numBones)
++				nd->skinIndices[i] = 0;
++	}
++	if(nd)
++		nd->skin = skin;
++	rwFree(b);
++	return leave(stream, start, len);
++}
++
++void
++destroyNativeDataGC(void *object)
++{
++	Geometry *geo = (Geometry*)object;
++	GCNativeData *nd = (GCNativeData*)geo->instData;
++	if(nd == nil)
++		return;
++	rwFree(nd->buf);
++	rwFree(nd->skinIndices);
++	rwFree(nd);
++	geo->instData = nil;
++}
++
++// Walks a display list. With keys nil it only counts vertices and strips.
++static bool32
++walkDisplayList(Geometry *geo, const uint8 *p, uint32 size, const GCArray *arrays,
++	bool32 hasMatrix, GCVertexKey *keys, uint32 *numKeys,
++	GCStrip *strips, uint32 *numStrips)
++{
++	static const int32 slots[4] = { KEY_POS, KEY_NRM, KEY_CLR, KEY_TEX };
++	char msg[64];
++	uint32 vertSize = hasMatrix ? 1 : 0;
++	for(int32 a = 0; a < 4; a++)
++		if(arrays[a].present)
++			vertSize += arrays[a].index16 ? 2 : 1;
++
++	const uint8 *end = p + size;
++	while(p < end){
++		uint32 op = *p;
++		if(op == GX_NOP){
++			p++;
++			continue;
++		}
++		if((op & 0xF8) != GX_TRIANGLESTRIP && (op & 0xF8) != GX_TRIANGLES){
++			snprintf(msg, sizeof(msg), "display list command %02X", op);
++			gcError(geo, msg);
++			return 0;
++		}
++		if(end - p < 3){
++			gcError(geo, "display list ends inside a primitive");
++			return 0;
++		}
++		uint32 count = be16(p+1);
++		p += 3;
++		if((uint32)(end - p) < count*vertSize){
++			gcError(geo, "display list ends inside a primitive");
++			return 0;
++		}
++		if(count > GC_MAX_KEYS - *numKeys || *numStrips >= GC_MAX_KEYS){
++			gcError(geo, "display lists name more than a million vertices");
++			return 0;
++		}
++		if((op & 0xF8) == GX_TRIANGLES && count % 3){
++			gcError(geo, "triangle list is not a multiple of three");
++			return 0;
++		}
++		if(keys){
++			for(uint32 i = 0; i < count; i++){
++				GCVertexKey *key = &keys[*numKeys];
++				memset(key->k, 0, sizeof(key->k));
++				key->seq = *numKeys;
++				if(hasMatrix){
++					key->k[KEY_MTX] = *p++;
++					if(key->k[KEY_MTX] % 3){
++						gcError(geo, "matrix index is not a multiple of three");
++						return 0;
++					}
++				}
++				for(int32 a = 0; a < 4; a++){
++					if(!arrays[a].present)
++						continue;
++					uint32 idx;
++					if(arrays[a].index16){
++						idx = be16(p);
++						p += 2;
++					}else
++						idx = *p++;
++					if(idx >= arrays[a].count){
++						gcError(geo, "vertex index past the end of its array");
++						return 0;
++					}
++					key->k[slots[a]] = idx;
++				}
++				(*numKeys)++;
++			}
++			if((op & 0xF8) == GX_TRIANGLES)
++				for(uint32 i = 0; i < count; i += 3){
++					strips[*numStrips].first = *numKeys - count + i;
++					strips[*numStrips].count = 3;
++					(*numStrips)++;
++				}
++			else{
++				strips[*numStrips].first = *numKeys - count;
++				strips[*numStrips].count = count;
++				(*numStrips)++;
++			}
++		}else{
++			p += count*vertSize;
++			*numKeys += count;
++			*numStrips += (op & 0xF8) == GX_TRIANGLES ? count/3 : 1;
++		}
++	}
++	return 1;
++}
++
++// Rebuilding a mesh's strip from the runs in its display list.
++struct StripBuilder
++{
++	uint16 *out;
++	uint32 n;
++	const uint16 *vertPos;	// position index of each vertex, or nil to compare vertices
++
++	bool32 same(uint16 a, uint16 b) {
++		return vertPos ? vertPos[a] == vertPos[b] : a == b;
++	}
++	bool32 degenerate(uint16 a, uint16 b, uint16 c) {
++		return same(a, b) || same(b, c) || same(a, c);
++	}
++	void add(const uint16 *run, uint32 count, bool32 odd);
++};
++
++// Appends a run. Odd means its first triangle sits at an odd position of the
++// strip. The join is the shortest one whose triangles are all degenerate and
++// that starts the run on the right parity.
++void
++StripBuilder::add(const uint16 *run, uint32 count, bool32 odd)
++{
++	if(this->n == 0){
++		if(odd)
++			this->out[this->n++] = run[0];
++		memcpy(&this->out[this->n], run, count*2);
++		this->n += count;
++		return;
++	}
++
++	// The joins, shortest first. Overlap drops the run's first vertex, which
++	// has to be the strip's last; the others put a filler between the two.
++	enum { OVERLAP, NONE, LAST, FIRST, LASTFIRST, LASTLASTFIRST, NUMJOINS };
++	uint16 last = this->out[this->n-1];
++	uint16 fill[3];
++	int32 numFill = 0;
++	for(int32 j = OVERLAP; j < NUMJOINS; j++){
++		uint32 skip = j == OVERLAP;
++		switch(j){
++		case OVERLAP: numFill = 0; break;
++		case NONE: numFill = 0; break;
++		case LAST: fill[0] = last; numFill = 1; break;
++		case FIRST: fill[0] = run[0]; numFill = 1; break;
++		case LASTFIRST: fill[0] = last; fill[1] = run[0]; numFill = 2; break;
++		case LASTLASTFIRST: fill[0] = last; fill[1] = last; fill[2] = run[0]; numFill = 3; break;
++		}
++		if(skip && last != run[0])
++			continue;
++		// where the run's first triangle lands
++		uint32 start = this->n + numFill - skip;
++		if((start & 1) != (odd ? 1u : 0u))
++			continue;
++		if(j == LASTFIRST || j == LASTLASTFIRST)
++			break;
++
++		// Every triangle from the strip's second last vertex up to the
++		// run's first triangle has to be degenerate.
++		uint32 total = this->n + numFill + count - skip;
++		bool32 ok = 1;
++		for(uint32 t = this->n >= 2 ? this->n-2 : 0; t < start && t+2 < total && ok; t++){
++			uint16 v[3];
++			for(uint32 i = 0; i < 3; i++){
++				uint32 g = t + i;
++				v[i] = g < this->n ? this->out[g] :
++				       g < this->n + numFill ? fill[g - this->n] :
++				       run[skip + g - this->n - numFill];
++			}
++			ok = this->degenerate(v[0], v[1], v[2]);
++		}
++		if(!ok)
++			continue;
++		memcpy(&this->out[this->n], fill, numFill*2);
++		this->n += numFill;
++		memcpy(&this->out[this->n], run+skip, (count-skip)*2);
++		this->n += count-skip;
++		return;
++	}
++	// LASTFIRST or LASTLASTFIRST, one of which has the parity: their
++	// triangles are degenerate whatever the vertices are.
++	memcpy(&this->out[this->n], fill, numFill*2);
++	this->n += numFill;
++	memcpy(&this->out[this->n], run, count*2);
++	this->n += count;
++}
++
++// Everything deinstance allocates for itself, freed on every way out.
++struct GCWork
++{
++	uint32 *meshStrips;
++	GCVertexKey *keys;
++	GCStrip *strips;
++	GCVertexKey *sorted;
++	uint16 *vertexOf;
++	uint16 *vertPos;
++	uint16 *run;
++	uint16 **meshIndices;
++	uint32 numMeshIndices;
++
++	GCWork(void) { memset(this, 0, sizeof(*this)); }
++	~GCWork(void) {
++		rwFree(meshStrips);
++		rwFree(keys);
++		rwFree(strips);
++		rwFree(sorted);
++		rwFree(vertexOf);
++		rwFree(vertPos);
++		rwFree(run);
++		if(meshIndices)
++			for(uint32 m = 0; m < numMeshIndices; m++)
++				rwFree(meshIndices[m]);
++		rwFree(meshIndices);
++	}
++};
++
++static bool32
++deinstance(Geometry *geo, GCNativeData *nd)
++{
++	if(nd->buf == nil)
++		return 0;	// said why when it was read
++	const uint8 *hdr = nd->buf;
++	const uint8 *data = nd->buf + nd->headerSize;
++	MeshHeader *mh = geo->meshHeader;
++	if(mh == nil){
++		gcError(geo, "no mesh header");
++		return 0;
++	}
++	if(geo->numMorphTargets != 1){
++		gcError(geo, "more than one morph target");
++		return 0;
++	}
++	if(mh->flags != MeshHeader::TRISTRIP){
++		gcError(geo, "meshes are not triangle strips");
++		return 0;
++	}
++	if(geo->numTexCoordSets > 1){
++		gcError(geo, "more than one texcoord set");
++		return 0;
++	}
++	if(nd->headerSize < 12){
++		gcError(geo, "header too short");
++		return 0;
++	}
++	uint32 numArrays = be32(hdr + 8);
++	if(numArrays > GC_MAX_ARRAYS || mh->numMeshes > 0xFFFF ||
++	   nd->headerSize != 12 + 8*numArrays + 8*mh->numMeshes){
++		gcError(geo, "header size does not fit its arrays and meshes");
++		return 0;
++	}
++
++	// arrays[] is in GX attribute order: position, normal, colour, texcoord
++	static const uint32 attribs[4] = { GX_VA_POS, GX_VA_NRM, GX_VA_CLR0, GX_VA_TEX0 };
++	static const uint32 strides[4] = { 12, 12, 4, 8 };
++	GCArray arrays[4];
++	uint32 offsets[4];
++	memset(arrays, 0, sizeof(arrays));
++	memset(offsets, 0, sizeof(offsets));
++	for(uint32 i = 0; i < numArrays; i++){
++		const uint8 *e = hdr + 12 + 8*i;
++		uint32 off = be32(e);
++		uint32 attr = e[4], stride = e[5], type = e[6];
++		int32 a;
++		for(a = 0; a < 4; a++)
++			if(attribs[a] == attr)
++				break;
++		if(off > nd->dataSize){
++			gcError(geo, "vertex array outside the data");
++			return 0;
++		}
++		if(a == 4 || arrays[a].present || stride != strides[a] || e[7] != 0 ||
++		   (type != GX_INDEX8 && type != GX_INDEX16)){
++			char msg[96];
++			snprintf(msg, sizeof(msg),
++			         "unsupported vertex array: attribute %u, stride %u, type %u, %u",
++			         attr, stride, type, e[7]);
++			gcError(geo, msg);
++			return 0;
++		}
++		arrays[a].present = 1;
++		arrays[a].data = data + off;
++		arrays[a].stride = stride;
++		arrays[a].index16 = type == GX_INDEX16;
++		offsets[a] = off;
++	}
++	if(!arrays[0].present){
++		gcError(geo, "no positions");
++		return 0;
++	}
++
++	const uint8 *meshEntries = hdr + 12 + 8*numArrays;
++	for(uint32 m = 0; m < mh->numMeshes; m++){
++		uint32 off = be32(meshEntries + 8*m);
++		uint32 size = be32(meshEntries + 8*m + 4);
++		if(off > nd->dataSize || size > nd->dataSize - off){
++			gcError(geo, "display list outside the data");
++			return 0;
++		}
++	}
++
++	// An array runs to the next array or display list, or to the end.
++	for(int32 a = 0; a < 4; a++){
++		if(!arrays[a].present)
++			continue;
++		uint32 end = nd->dataSize;
++		for(int32 b = 0; b < 4; b++)
++			if(arrays[b].present && offsets[b] > offsets[a] && offsets[b] < end)
++				end = offsets[b];
++		for(uint32 m = 0; m < mh->numMeshes; m++){
++			uint32 off = be32(meshEntries + 8*m);
++			if(off > offsets[a] && off < end)
++				end = off;
++		}
++		arrays[a].count = (end - offsets[a]) / arrays[a].stride;
++		if(arrays[a].count > GC_MAX_VERTICES)
++			arrays[a].count = GC_MAX_VERTICES;	// no index can reach further
++	}
++
++	// A skin read before the native data is a generic one, sized for the
++	// geometry's welded vertex count; the vertices below are laid out anew,
++	// and only a GameCube skin is laid out with them.
++	if(nd->skin == nil && Skin::get(geo) != nil){
++		gcError(geo, "skin comes before the native data");
++		return 0;
++	}
++
++	bool32 hasMatrix = nd->skin && nd->skin->numWeights < 2;
++	if(nd->skin && nd->skin->numWeights >= 2 &&
++	   (nd->skinIndices == nil || arrays[0].count < (uint32)geo->numVertices)){
++		gcError(geo, "skin has more vertices than positions");
++		return 0;
++	}
++
++	// Collect every vertex the display lists send.
++	GCWork w;
++	uint32 numKeys = 0, numStrips = 0;
++	w.meshStrips = rwNewT(uint32, mh->numMeshes+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	for(uint32 m = 0; m < mh->numMeshes; m++){
++		w.meshStrips[m] = numStrips;
++		if(!walkDisplayList(geo, data + be32(meshEntries + 8*m), be32(meshEntries + 8*m + 4),
++		                    arrays, hasMatrix, nil, &numKeys, nil, &numStrips))
++			return 0;
++	}
++	w.meshStrips[mh->numMeshes] = numStrips;
++
++	w.keys = rwNewT(GCVertexKey, numKeys+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	w.strips = rwNewT(GCStrip, numStrips+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	numKeys = numStrips = 0;
++	for(uint32 m = 0; m < mh->numMeshes; m++)
++		if(!walkDisplayList(geo, data + be32(meshEntries + 8*m), be32(meshEntries + 8*m + 4),
++		                    arrays, hasMatrix, w.keys, &numKeys, w.strips, &numStrips))
++			return 0;
++
++	// One vertex per distinct key, in key order.
++	w.sorted = rwNewT(GCVertexKey, numKeys+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	w.vertexOf = rwNewT(uint16, numKeys+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	memcpy(w.sorted, w.keys, numKeys*sizeof(GCVertexKey));
++	qsort(w.sorted, numKeys, sizeof(GCVertexKey), cmpKey);
++	uint32 numVerts = 0;
++	for(uint32 i = 0; i < numKeys; i++){
++		if(numVerts == 0 || memcmp(w.sorted[i].k, w.sorted[numVerts-1].k, sizeof(w.sorted[i].k)) != 0){
++			if(numVerts == GC_MAX_VERTICES){
++				gcError(geo, "more than 65536 vertices");
++				return 0;
++			}
++			w.sorted[numVerts++] = w.sorted[i];
++		}
++		w.vertexOf[w.sorted[i].seq] = numVerts-1;
++	}
++	// A mesh with no triangles still needs a vertex to pad its strip with:
++	// the first of every array.
++	if(numVerts == 0){
++		for(int32 a = 0; a < 4; a++)
++			if(arrays[a].present && arrays[a].count == 0){
++				gcError(geo, "no vertices");
++				return 0;
++			}
++		memset(w.sorted[0].k, 0, sizeof(w.sorted[0].k));
++		numVerts = 1;
++	}
++	w.vertPos = rwNewT(uint16, numVerts, MEMDUR_FUNCTION | ID_GEOMETRY);
++	for(uint32 v = 0; v < numVerts; v++)
++		w.vertPos[v] = w.sorted[v].k[KEY_POS];
++
++	// Rebuild each mesh's strip. Keep the BinMesh's index counts: a strip that
++	// comes out longer than that is tried again joining on positions, which
++	// also passes over the triangles with no area that the instancer dropped.
++	// A BinMesh count far past anything the display lists can make is not one
++	// the instancer wrote.
++	Mesh *meshes = mh->getMeshes();
++	uint32 cap = 0;
++	for(uint32 m = 0; m < mh->numMeshes; m++){
++		uint32 c = 1;
++		for(uint32 s = w.meshStrips[m]; s < w.meshStrips[m+1]; s++)
++			c += w.strips[s].count + 4;
++		if(meshes[m].numIndices > 2*c + 64){
++			gcError(geo, "BinMesh index count does not fit the display list");
++			return 0;
++		}
++		c += meshes[m].numIndices;
++		if(c > cap) cap = c;
++	}
++	w.run = rwNewT(uint16, numKeys+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	w.meshIndices = rwNewT(uint16*, mh->numMeshes+1, MEMDUR_FUNCTION | ID_GEOMETRY);
++	memset(w.meshIndices, 0, (mh->numMeshes+1)*sizeof(uint16*));
++	w.numMeshIndices = mh->numMeshes;
++	uint32 totalIndices = 0;
++	uint32 *newCounts = (uint32*)rwMalloc((mh->numMeshes+1)*4, MEMDUR_FUNCTION | ID_GEOMETRY);
++	for(uint32 m = 0; m < mh->numMeshes; m++){
++		StripBuilder sb;
++		w.meshIndices[m] = rwNewT(uint16, cap, MEMDUR_FUNCTION | ID_GEOMETRY);
++		for(int32 pass = 0; pass < 2; pass++){
++			sb.out = w.meshIndices[m];
++			sb.n = 0;
++			sb.vertPos = pass ? w.vertPos : nil;
++			for(uint32 s = w.meshStrips[m]; s < w.meshStrips[m+1]; s++){
++				uint32 count = w.strips[s].count;
++				if(count < 3)
++					continue;
++				for(uint32 i = 0; i < count; i++)
++					w.run[i] = w.vertexOf[w.strips[s].first + i];
++				bool32 odd = w.run[0] == w.run[1];
++				if(odd)
++					sb.add(w.run+1, count-1, 1);
++				else
++					sb.add(w.run, count, 0);
++			}
++			if(sb.n <= meshes[m].numIndices)
++				break;
++		}
++		uint16 pad = sb.n ? sb.out[sb.n-1] : 0;
++		while(sb.n < meshes[m].numIndices)
++			sb.out[sb.n++] = pad;
++		newCounts[m] = sb.n;
++		totalIndices += sb.n;
++	}
++	for(uint32 m = 0; m < mh->numMeshes; m++)
++		meshes[m].numIndices = newCounts[m];
++	rwFree(newCounts);
++	geo->allocateMeshes(mh->numMeshes, totalIndices, 0);
++	mh = geo->meshHeader;
++	meshes = mh->getMeshes();
++	for(uint32 m = 0; m < mh->numMeshes; m++)
++		memcpy(meshes[m].indices, w.meshIndices[m], meshes[m].numIndices*2);
++
++	// Now the geometry itself.
++	if(!arrays[1].present) geo->flags &= ~Geometry::NORMALS;
++	if(!arrays[2].present) geo->flags &= ~Geometry::PRELIT;
++	if(!arrays[3].present){
++		geo->flags &= ~(Geometry::TEXTURED | Geometry::TEXTURED2);
++		geo->numTexCoordSets = 0;
++	}else if(geo->numTexCoordSets == 0){
++		geo->flags |= Geometry::TEXTURED;
++		geo->numTexCoordSets = 1;
++	}
++	geo->flags &= ~Geometry::NATIVE;
++	int32 welded = geo->numVertices;
++	geo->numVertices = numVerts;
++	geo->numTriangles = 0;
++	for(uint32 m = 0; m < mh->numMeshes; m++)
++		if(meshes[m].numIndices > 2)
++			geo->numTriangles += meshes[m].numIndices - 2;
++	geo->allocateData();
++	MorphTarget *mt = &geo->morphTargets[0];
++	for(uint32 v = 0; v < numVerts; v++){
++		const uint16 *k = w.sorted[v].k;
++		const uint8 *p = arrays[0].data + k[KEY_POS]*12;
++		mt->vertices[v].x = bef(p);
++		mt->vertices[v].y = bef(p+4);
++		mt->vertices[v].z = bef(p+8);
++		if(geo->flags & Geometry::NORMALS){
++			p = arrays[1].data + k[KEY_NRM]*12;
++			mt->normals[v].x = bef(p);
++			mt->normals[v].y = bef(p+4);
++			mt->normals[v].z = bef(p+8);
++		}
++		if(geo->flags & Geometry::PRELIT){
++			p = arrays[2].data + k[KEY_CLR]*4;
++			geo->colors[v].red = p[0];
++			geo->colors[v].green = p[1];
++			geo->colors[v].blue = p[2];
++			geo->colors[v].alpha = p[3];
++		}
++		if(geo->numTexCoordSets){
++			p = arrays[3].data + k[KEY_TEX]*8;
++			geo->texCoords[0][v].u = bef(p);
++			geo->texCoords[0][v].v = bef(p+4);
++		}
++	}
++	geo->generateTriangles();
++
++	// The skin, unwelded.
++	Skin *skin = nd->skin;
++	if(skin){
++		Skin old = *skin;
++		skin->init(old.numBones, old.numUsedBones, numVerts);
++		memcpy(skin->usedBones, old.usedBones, old.numUsedBones);
++		memcpy(skin->inverseMatrices, old.inverseMatrices, old.numBones*64);
++		skin->numWeights = old.numWeights;
++		skin->boneLimit = old.boneLimit;
++		skin->numMeshes = old.numMeshes;
++		skin->rleSize = old.rleSize;
++		skin->remapIndices = old.remapIndices;
++		skin->rleCount = old.rleCount;
++		skin->rle = old.rle;
++		rwFree(old.data);
++
++		memset(skin->indices, 0, numVerts*4);
++		memset(skin->weights, 0, numVerts*16);
++		for(uint32 v = 0; v < numVerts; v++){
++			uint8 *idx = &skin->indices[v*4];
++			float *wt = &skin->weights[v*4];
++			if(hasMatrix){
++				uint32 used = w.sorted[v].k[KEY_MTX]/3;
++				if(used < (uint32)skin->numUsedBones)
++					idx[0] = skin->usedBones[used];
++				wt[0] = 1.0f;
++			}else{
++				uint32 pos = w.sorted[v].k[KEY_POS];
++				if(pos >= (uint32)welded)
++					continue;
++				for(int32 j = 0; j < skin->numWeights; j++){
++					idx[j] = nd->skinIndices[pos*skin->numWeights + j];
++					wt[j] = nd->skinWeights[pos*skin->numWeights + j]/128.0f;
++				}
++			}
++		}
++		if(hasMatrix)
++			skin->numWeights = 1;
++	}
++	return 1;
++}
++
++// A geometry that could not be read becomes an ordinary one that draws
++// nothing: a single vertex at the origin, and each mesh one triangle of it,
++// which has no area. Not zero vertices: a backend's instancer would ask the
++// device for empty buffers, which a device may refuse.
++static void
++makeStub(Geometry *geo)
++{
++	MeshHeader *mh = geo->meshHeader;
++	if(mh == nil && geo->matList.numMaterials > 0){
++		geo->allocateMeshes(1, 0, 0);
++		geo->meshHeader->flags = MeshHeader::TRISTRIP;
++		geo->meshHeader->getMeshes()[0].material = geo->matList.materials[0];
++	}
++	mh = geo->meshHeader;
++	uint32 numMeshes = mh ? mh->numMeshes : 0;
++	if(mh){
++		Mesh *meshes = mh->getMeshes();
++		for(uint32 m = 0; m < numMeshes; m++)
++			meshes[m].numIndices = 3;
++		geo->allocateMeshes(numMeshes, 3*numMeshes, 0);
++		meshes = geo->meshHeader->getMeshes();
++		for(uint32 m = 0; m < numMeshes; m++)
++			memset(meshes[m].indices, 0, 3*2);
++	}
++	geo->flags &= ~(Geometry::NATIVE | Geometry::TEXTURED2);
++	if(geo->numTexCoordSets > 1)
++		geo->numTexCoordSets = 1;
++	if(geo->numMorphTargets < 1)
++		geo->addMorphTargets(1 - geo->numMorphTargets);
++	geo->numVertices = 1;
++	geo->numTriangles = numMeshes;
++	geo->allocateData();
++	for(int32 i = 0; i < geo->numMorphTargets; i++){
++		MorphTarget *mt = &geo->morphTargets[i];
++		memset(mt->vertices, 0, sizeof(V3d));
++		if(mt->normals){
++			memset(mt->normals, 0, sizeof(V3d));
++			mt->normals[0].y = 1.0f;
++		}
++	}
++	if(geo->colors)
++		memset(geo->colors, 0, sizeof(RGBA));
++	if(geo->numTexCoordSets)
++		memset(geo->texCoords[0], 0, sizeof(TexCoords));
++	if(geo->meshHeader)
++		geo->generateTriangles();
++	else
++		geo->numTriangles = 0;
++	Skin *skin = Skin::get(geo);
++	if(skin){
++		Skin old = *skin;
++		skin->init(old.numBones, old.numUsedBones, 1);
++		if(old.numUsedBones)
++			memcpy(skin->usedBones, old.usedBones, old.numUsedBones);
++		if(old.numBones)
++			memcpy(skin->inverseMatrices, old.inverseMatrices, old.numBones*64);
++		skin->numWeights = 1;
++		skin->boneLimit = old.boneLimit;
++		skin->numMeshes = old.numMeshes;
++		skin->rleSize = old.rleSize;
++		skin->remapIndices = old.remapIndices;
++		skin->rleCount = old.rleCount;
++		skin->rle = old.rle;
++		rwFree(old.data);
++		memset(skin->indices, 0, 4);
++		memset(skin->weights, 0, 16);
++		skin->weights[0] = 1.0f;
++	}
++}
++
++void
++stubNativeDataGC(void *object)
++{
++	Geometry *geo = (Geometry*)object;
++	gcError(geo, "native geometry without its native data");
++	makeStub(geo);
++}
++
++void
++finishNativeDataGC(void *object)
++{
++	Geometry *geo = (Geometry*)object;
++	GCNativeData *nd = (GCNativeData*)geo->instData;
++	if(nd == nil || nd->platform != PLATFORM_GC)
++		return;
++	bool32 ok = deinstance(geo, nd);
++	destroyNativeDataGC(geo);
++	if(!ok)
++		makeStub(geo);
++}
++
++}
+diff --git a/src/geoplg.cpp b/src/geoplg.cpp
+index c1e1356..b488b5c 100644
+--- a/src/geoplg.cpp
++++ b/src/geoplg.cpp
+@@ -251,6 +251,8 @@ destroyNativeData(void *object, int32 offset, int32 size)
+ 		return d3d9::destroyNativeData(object, offset, size);
+ 	if(geometry->instData->platform == PLATFORM_GL3)
+ 		return gl3::destroyNativeData(object, offset, size);
++	if(geometry->instData->platform == PLATFORM_GC)
++		destroyNativeDataGC(object);
+ 	return object;
+ }
+ 
+@@ -276,6 +278,8 @@ readNativeData(Stream *stream, int32 len, void *object, int32 o, int32 s)
+ 			return d3d8::readNativeData(stream, len, object, o, s);
+ 		else if(platform == PLATFORM_D3D9)
+ 			return d3d9::readNativeData(stream, len, object, o, s);
++		else if(platform == PLATFORM_GC)
++			return readNativeDataGC(stream, len, object);
+ 		else{
+ 			fprintf(stderr, "unknown platform %d\n", platform);
+ 			stream->seek(len);
+@@ -325,6 +329,22 @@ getSizeNativeData(void *object, int32 offset, int32 size)
+ 	return 0;
+ }
+ 
++// GameCube native data is kept as read until the skin after it is in.
++//
++// A native geometry that has no native data by now -- its chunk was missing or
++// for a platform nobody reads -- would reach a backend that neither instances
++// nor draws native geometry without it; it becomes the same empty stand-in as
++// a GameCube geometry that cannot be read.
++static void
++alwaysNativeData(void *object, int32, int32)
++{
++	Geometry *geometry = (Geometry*)object;
++	if(geometry->instData && geometry->instData->platform == PLATFORM_GC)
++		finishNativeDataGC(object);
++	else if(geometry->instData == nil && (geometry->flags & Geometry::NATIVE))
++		stubNativeDataGC(object);
++}
++
+ void
+ registerNativeDataPlugin(void)
+ {
+@@ -334,6 +354,7 @@ registerNativeDataPlugin(void)
+ 	                               readNativeData,
+ 	                               writeNativeData,
+ 	                               getSizeNativeData);
++	Geometry::setStreamAlwaysCallback(ID_NATIVEDATA, alwaysNativeData);
+ }
+ 
+ }
+diff --git a/src/rwbase.h b/src/rwbase.h
+index 96e5c9c..8423d65 100644
+--- a/src/rwbase.h
++++ b/src/rwbase.h
+@@ -614,7 +614,7 @@ enum Platform
+ 	// MAC
+ 	PLATFORM_PS2  = 4,
+ 	PLATFORM_XBOX = 5,
+-	// GAMECUBE
++	PLATFORM_GC   = 6,	// read only, see gcngeo.cpp
+ 	// SOFTRAS
+ 	PLATFORM_D3D8 = 8,
+ 	PLATFORM_D3D9 = 9,
+diff --git a/src/rwobjects.h b/src/rwobjects.h
+index 388d9a8..8fd4b34 100644
+--- a/src/rwobjects.h
++++ b/src/rwobjects.h
+@@ -611,6 +611,16 @@ struct Geometry
+ void registerMeshPlugin(void);
+ void registerNativeDataPlugin(void);
+ 
++// GameCube native geometry and skin, held until the geometry's extension has
++// been read, then turned into ordinary geometry by finishNativeDataGC.
++// See gcngeo.cpp.
++Stream *readNativeDataGC(Stream *stream, int32 len, void *object);
++Stream *readNativeSkinGC(Stream *stream, int32 len, void *object, int32 offset);
++void finishNativeDataGC(void *object);
++void destroyNativeDataGC(void *object);
++// A native geometry with no native data, made an ordinary one that draws nothing.
++void stubNativeDataGC(void *object);
++
+ struct Clump;
+ struct World;
+ 
+diff --git a/src/skin.cpp b/src/skin.cpp
+index dd96ac4..946d194 100644
+--- a/src/skin.cpp
++++ b/src/skin.cpp
+@@ -126,6 +126,8 @@ readSkin(Stream *stream, int32 len, void *object, int32 offset, int32)
+ 			return wdgl::readNativeSkin(stream, len, object, offset);
+ 		else if(geometry->instData->platform == PLATFORM_XBOX)
+ 			return xbox::readNativeSkin(stream, len, object, offset);
++		else if(geometry->instData->platform == PLATFORM_GC)
++			return readNativeSkinGC(stream, len, object, offset);
+ 		else{
+ 			assert(0 && "unsupported native skin platform");
+ 			return nil;
+@@ -302,10 +304,17 @@ readSkinLegacy(Stream *stream, int32 len, void *object, int32, int32)
+ 	return stream;
+ }
+ 
++// An atomic can name the skin pipeline for a geometry that has no skin (the
++// BfBB PC port found mods that ship them, and a GameCube geometry this cannot
++// read keeps no skin data). The skin pipeline would then instance weights
++// from nil.
+ static void
+ skinRights(void *object, int32, int32, uint32)
+ {
+-	Skin::setPipeline((Atomic*)object, 1);
++	Atomic *atomic = (Atomic*)object;
++	if(atomic->geometry == nil || Skin::get(atomic->geometry) == nil)
++		return;
++	Skin::setPipeline(atomic, 1);
+ }
+ 
+ static void

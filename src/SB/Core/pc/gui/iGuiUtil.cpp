@@ -481,11 +481,21 @@ bool CheckAssetFolderNow(const char* dir, char* why, size_t whySize)
     iHostFileInfo info;
     if (!iHostStat(dir, &info) || !info.is_dir)
     {
+        // The disc image kinds Xbox tools and Dolphin write.
+        static const char* const kImages[] = { ".iso", ".xiso", ".rvz", ".gcm", ".gcz",
+                                               ".wia", ".ciso", ".wbfs" };
         const size_t n = strlen(dir);
-        if (n > 4 && (SameNoCase(dir + n - 4, ".iso") || SameNoCase(dir + n - 4, ".xiso")))
+        bool image = false;
+        for (size_t i = 0; i < sizeof(kImages) / sizeof(kImages[0]); i++)
         {
-            snprintf(why, whySize, "That is a disc image. Extract the disc and choose the "
-                                   "folder the files came out into.");
+            const size_t k = strlen(kImages[i]);
+            image = image || (n > k && SameNoCase(dir + n - k, kImages[i]));
+        }
+        if (image)
+        {
+            snprintf(why, whySize, "That is a disc image. Extract the disc (a GameCube disc "
+                                   "with Dolphin: right-click the game, Extract Entire Disc) "
+                                   "and choose the folder the files came out into.");
         }
         else
         {
@@ -496,8 +506,23 @@ bool CheckAssetFolderNow(const char* dir, char* why, size_t whySize)
 
     char boot[256];
     char font[256];
-    const bool haveBoot = HasFile(dir, "boot.HIP", boot, sizeof(boot));
-    const bool haveFont = HasFile(dir, "font.HIP", font, sizeof(font));
+    bool haveBoot = HasFile(dir, "boot.HIP", boot, sizeof(boot));
+    bool haveFont = HasFile(dir, "font.HIP", font, sizeof(font));
+
+    // A GameCube disc extracted with Dolphin is files\ and sys\: the game reads
+    // the files\ folder of it (iFile.cpp), so the folder above is fine too.
+    char inFiles[1024] = "";
+    char filesName[256];
+    if ((!haveBoot || !haveFont) && HasFile(dir, "files", filesName, sizeof(filesName)))
+    {
+        char sub[1024];
+        snprintf(sub, sizeof(sub), "%s/%s", dir, filesName);
+        if (HasFile(sub, "boot.HIP", boot, sizeof(boot)) && HasFile(sub, "font.HIP", font, sizeof(font)))
+        {
+            snprintf(inFiles, sizeof(inFiles), "%s", sub);
+            haveBoot = haveFont = true;
+        }
+    }
 
     if (!haveBoot || !haveFont)
     {
@@ -524,7 +549,7 @@ bool CheckAssetFolderNow(const char* dir, char* why, size_t whySize)
 
         snprintf(why, whySize,
                  "No %s here. Choose the folder that directly contains boot.HIP, font.HIP "
-                 "and FMV, extracted from your own Xbox disc.",
+                 "and FMV, extracted from your own Xbox or GameCube disc.",
                  !haveBoot && !haveFont ? "boot.HIP or font.HIP" :
                  !haveBoot              ? "boot.HIP" :
                                           "font.HIP");
@@ -532,19 +557,20 @@ bool CheckAssetFolderNow(const char* dir, char* why, size_t whySize)
     }
 
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s", dir, boot);
+    snprintf(path, sizeof(path), "%s/%s", inFiles[0] != '\0' ? inFiles : dir, boot);
     char plat[16];
-    if (HipPlatform(path, plat, sizeof(plat)) && strcmp(plat, "BX") != 0 && strcmp(plat, "XB") != 0)
+    const bool known = HipPlatform(path, plat, sizeof(plat));
+    const bool gamecube = known && strcmp(plat, "GC") == 0;
+    if (known && !gamecube && strcmp(plat, "BX") != 0 && strcmp(plat, "XB") != 0)
     {
         snprintf(why, whySize, "These are the %s release's files. The port reads the Xbox "
-                               "release's.",
-                 strcmp(plat, "GC") == 0    ? "GameCube" :
-                 strcmp(plat, "PS2") == 0   ? "PlayStation 2" :
-                                              plat);
+                               "and GameCube releases'.",
+                 strcmp(plat, "PS2") == 0 ? "PlayStation 2" : plat);
         return false;
     }
 
-    snprintf(why, whySize, "Found %s and %s from the Xbox release.", boot, font);
+    snprintf(why, whySize, "Found %s and %s%s from the %s release.", boot, font,
+             inFiles[0] != '\0' ? " in files" : "", gamecube ? "GameCube" : "Xbox");
     return true;
 }
 } // namespace

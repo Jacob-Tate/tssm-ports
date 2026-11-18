@@ -1,9 +1,14 @@
 #include "iModel.h"
 #include "iCamera.h"
 #include "zMain.h"
+#include "iHost.h"
+#include "xstransvc.h"
 
 #include <rpskin.h>
 #include <rtskinsp.h>
+
+#include <stdio.h>
+#include <stdlib.h>
 
 #define IMODEL_MAX_DIRECTIONAL_LIGHTS 4
 #define IMODEL_MAX_MATERIALS 23
@@ -168,6 +173,14 @@ static RpAtomic* iModelStreamRead(RwStream* stream)
     iCameraDestroy(instance_camera);
     RpWorldDestroy(instance_world);
 
+    // PORT: a clump with no atomics (damaged data; no model of either release
+    // has one) would hand back the previous model's first atomic.
+    if (gLastAtomicCount == 0)
+    {
+        RpClumpDestroy(clump);
+        return NULL;
+    }
+
     if (gLastAtomicCount > 1)
     {
         maxRadius = -1.0f;
@@ -244,6 +257,42 @@ RpAtomic* iModelFileNew(void* buffer, U32 size)
     rwmem.start = (U8*)buffer;
     rwmem.length = size;
     return iModelStreamRead(RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &rwmem));
+}
+
+// PORT: a model asset that does not read. Retail reads on through the NULL
+// (zAssetTypes.cpp, Model_Read); here the run ends with the same box as a
+// package that does not load. Only damaged data gets here: a mod's model, or
+// a damaged copy of the game files. A GameCube package's models are checked
+// as it is converted (iGCPackageModelFits), so a GameCube mod falls back to
+// the original before this; an Xbox mod's model, or damage deeper inside a
+// clump, ends here.
+void iModelReportUnreadable(U32 assetid)
+{
+    const char* name = xSTAssetName(assetid);
+    if (name == NULL || name[0] == '\0')
+    {
+        name = "?";
+    }
+    printf("tssm: FATAL -- a game file could not be read: model %08X '%s' does not read\n",
+           (unsigned)assetid, name);
+    printf("tssm:   it is there, but its data is damaged (a mod's, or a damaged copy of the "
+           "game files).\n");
+    fflush(stdout);
+
+    // The 3DS box ends with its own "Press START to close."
+#ifdef __3DS__
+    const char* closing = "";
+#else
+    const char* closing = "\n\nThe game will close now.";
+#endif
+    char message[1024];
+    snprintf(message, sizeof(message),
+             "A game file could not be read:\n\nthe model %s (%08X)\n\n"
+             "It is there, but the game could not load it. If a mod changes it, turn that "
+             "mod off; otherwise copy your game files again.%s",
+             name, (unsigned)assetid, closing);
+    iHostErrorBox(TSSM_GAME_TITLE, message);
+    exit(1);
 }
 
 void iModelUnload(RpAtomic* userdata)

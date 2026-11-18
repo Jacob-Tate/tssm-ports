@@ -69,12 +69,14 @@ These settings take effect at the next start, and are tagged **restart**:
 - the game and save folders
 - the mod folder
 
+The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the next level loads.
+
 ### The tabs
 
 - **Settings:**
   - **Display:** renderer, window mode, aspect ratio, render size, anti-aliasing, vsync, frame-rate
-    cap, field of view, glow and screen warp. Three of them say what they cost, in a line under the
-    control:
+    cap, field of view, glow and screen warp. Three of the settings say what they cost, in a line
+    under the control:
     - **Frame rate cap** above 60 (a number, or "Display rate" on a 90, 120 or 144 Hz screen) says
       how many times the work of 60 that is. The game draws and simulates every frame, so the work
       per second goes up with the rate, and so do a phone's heat and battery use. Measured on a
@@ -98,6 +100,23 @@ These settings take effect at the next start, and are tagged **restart**:
     - **Anti-aliasing** says when the GPU gave fewer samples than asked (most phones give 4x for
       8x), and that it costs GPU time in every frame otherwise.
     - **Render size** says that a bigger picture costs more GPU time in every frame.
+  - **Xbox extras:** the features of the Xbox release that the GameCube release cut, each a choice
+    between the two (`[extras]`; `docs/EXTRAS.md`). **All Xbox** and **All GameCube** set every
+    one. **Glow** (the Xbox's wide glow, stronger in some levels, or the GameCube's)
+    applies at once and is greyed out while Display's Glow is off. **Spotlights** (the moving
+    spotlights of No Cheese!, Bubble Blowing Baby Hunt and Turn the Tables on Plankton on, every
+    spotlight lighting what it shines on and with a lamp flare; or those lights off and every
+    spotlight a cone only), **Fish crowds** (the crowds of No Cheese! and Sandwich Driving 101
+    move, or stand still) and **Water** (the Xbox water of SC02's tanks and B301's sea, with
+    reflections, refraction and ripples, or the GameCube's; its note says the two extra pictures
+    it draws per water area) apply when the next level loads and are tagged **next level** until
+    then; **30 fps levels** (the six levels the GameCube holds at 30) applies at once, and says
+    that the Patty Wagon drives as at 60 either way. A row says why when the level in play cannot
+    give the Xbox version (GameCube files, Direct3D 9's fixed path, and for the water also the
+    water's own reasons, such as Vulkan: `docs/RENDERING.md`, "Water"), and what `config.ini` has
+    when its value is neither xbox nor gamecube (the default is used). The same rows show on
+    Android and the Switch; the 3DS shows none of them yet (its defaults are the GameCube versions
+    until each is timed on the console).
   - **Audio:** master, music, effects and movie volumes, all live. Music is the game's music,
     Sound effects its effects and speech, Movies the movies and the cutscenes, whose tracks are one
     mix of speech, music and effects. Master scales all of them. The game's own music and effects
@@ -364,7 +383,10 @@ handed to the frame under a mutex.
 The folder check is `iGui::CheckAssetFolder`:
 
 - `boot.HIP` and `font.HIP` must be present, in any letter case.
-- The `PLAT` id in `boot.HIP` must be the Xbox's.
+- The `PLAT` id in `boot.HIP` must be the Xbox's (`BX`) or the GameCube's (`GC`); the PS2's is
+  refused with the reason.
+- A GameCube disc extracted with Dolphin (`files\` and `sys\`) is accepted at either level: the
+  game reads the `files\` folder of it (`iFileAssetRoot`).
 - The folder above the game's files, and disc images, are recognised and explained.
 
 If `TSSM_ASSETS` is set but points at the wrong folder while `[assets] path` is right, **Play** drops

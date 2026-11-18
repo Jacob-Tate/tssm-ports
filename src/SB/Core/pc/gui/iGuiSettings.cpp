@@ -20,6 +20,7 @@
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
+#include "iExtras.h"
 #include "iHDRGlow.h"
 #include "iHost.h"
 #include "iScreen.h"
@@ -402,8 +403,13 @@ void iGui::SettingsGameFiles()
              "is.",
              env);
     }
-    Note("The folder extracted from your own Xbox disc that directly holds boot.HIP, font.HIP "
-         "and FMV. No game files come with the port.");
+    Note("The files of your own Xbox or GameCube disc: both releases work. Xbox: extract the "
+         "files from your Xbox disc image (XISO) with an XISO extractor and choose the folder "
+         "that directly holds boot.HIP, font.HIP and FMV. GameCube: in Dolphin, right-click the "
+         "game and choose "
+         "Extract Entire Disc, then choose its files folder, or the folder holding files and "
+         "sys. A disc image (.iso, .rvz) is not read directly. No game files come with the "
+         "port.");
 }
 
 void iGui::SettingsDisplay()
@@ -809,6 +815,181 @@ void iGui::SettingsAudio()
          "its options menu, still apply on top of these.");
 }
 
+// --- Xbox extras ------------------------------------------------------------------
+
+namespace
+{
+    const Choice kLooks[] = { { "xbox", "Xbox" }, { "gamecube", "GameCube" } };
+
+    // Whether a feature has a row here: this build has its Xbox version, and
+    // the platform has been measured with it (the 3DS not yet: docs/EXTRAS.md).
+    bool ExtrasRowShown(iExtrasFeature feature)
+    {
+#ifdef __3DS__
+        (void)feature;
+        return false;
+#else
+        return iExtrasBuilt(feature);
+#endif
+    }
+
+    // "next level" after the control while the setting differs from the one
+    // the current level loaded with; the RestartTag of a per-level feature.
+    void NextLevelTag(iExtrasFeature feature)
+    {
+        if (iGui::InLauncher() || iExtrasAtLevelLoad(feature) == iExtrasSetting(feature))
+        {
+            return;
+        }
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "next level");
+        if (ImGui::BeginItemTooltip())
+        {
+            ImGui::TextUnformatted("Saved. Takes effect when the next level loads.");
+            ImGui::EndTooltip();
+        }
+    }
+
+    // A row's reason lines: config.ini's value is not one of the two, or the
+    // current level cannot give what the setting asks for.
+    void ExtrasStatusNote(iExtrasFeature feature)
+    {
+        const char* bad = iExtrasBadValue(feature);
+        if (bad != NULL)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f),
+                               "config.ini has \"%s\" here, which is not xbox or gamecube: %s is "
+                               "used.",
+                               bad, iExtrasSetting(feature) == iEXTRAS_XBOX ? "Xbox" : "GameCube");
+        }
+
+        char why[256];
+        if (!iGui::InLauncher() && iExtrasStatus(feature, why, sizeof(why)))
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "%s", why);
+        }
+    }
+} // namespace
+
+void iGui::SettingsExtras()
+{
+    bool any = false;
+    for (S32 i = 0; i < iEXTRAS_FEATURE_COUNT; i++)
+    {
+        any = any || ExtrasRowShown((iExtrasFeature)i);
+    }
+    if (!any)
+    {
+        return;
+    }
+
+    ImGui::SeparatorText("Xbox extras");
+    Note("The Xbox release has a few things the GameCube release cut. Each one switches between "
+         "the two.");
+
+    const bool live = !InLauncher();
+    const char* all = NULL;
+    if (ImGui::Button("All Xbox"))
+    {
+        all = "xbox";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("All GameCube"))
+    {
+        all = "gamecube";
+    }
+    if (all != NULL)
+    {
+        for (S32 i = 0; i < iEXTRAS_FEATURE_COUNT; i++)
+        {
+            iConfigSet(iExtrasKey((iExtrasFeature)i), all);
+        }
+        SaveNow();
+        if (live)
+        {
+            iExtrasApply();
+        }
+    }
+
+    if (!BeginRows("extras"))
+    {
+        return;
+    }
+
+    if (ExtrasRowShown(iEXTRAS_GLOW))
+    {
+        // Read every frame, so it switches at once (iExtrasApply). video.hdr_glow
+        // is the switch for both glows.
+        const bool glowOn = iConfigGetBool("video.hdr_glow", TRUE) != 0;
+        Row("Glow");
+        ImGui::BeginDisabled(!glowOn);
+        if (ChoiceCombo("##xglow", "extras.glow", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        ImGui::EndDisabled();
+        Note("Xbox: a wide, soft glow, stronger in some levels. GameCube: the GameCube's "
+             "tighter, fainter glow.");
+        if (!glowOn)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "Glow is off (Display).");
+        }
+        ExtrasStatusNote(iEXTRAS_GLOW);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_SPOTLIGHTS))
+    {
+        Row("Spotlights");
+        ChoiceCombo("##spotlights", "extras.spotlights", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_SPOTLIGHTS);
+        Note("Xbox: the moving spotlights in No Cheese!, Bubble Blowing Baby Hunt and Turn the "
+             "Tables on Plankton are on, and every spotlight lights what it shines on and has a "
+             "lamp flare. GameCube: those lights are off, and a spotlight is its cone only.");
+        ExtrasStatusNote(iEXTRAS_SPOTLIGHTS);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_CROWDS))
+    {
+        Row("Fish crowds");
+        ChoiceCombo("##crowds", "extras.crowds", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_CROWDS);
+        Note("Xbox: the crowds in No Cheese! and Sandwich Driving 101 move. GameCube: they stand "
+             "still.");
+        ExtrasStatusNote(iEXTRAS_CROWDS);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_WATER))
+    {
+        // Not live: a level hides its GameCube or Xbox water models as it is
+        // built (iXboxWater.h).
+        Row("Water");
+        ChoiceCombo("##water", "extras.water", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_WATER);
+        Note("Xbox: the tanks in Google-Eyes and Smelly Knick Knacks and the sea in Dennis Strikes "
+             "Back have the Xbox release's water, with reflections, refraction and moving ripples "
+             "(two more pictures drawn each frame for each water area, as large as the render "
+             "size makes them). GameCube: the GameCube release's water. The Xbox water needs the "
+             "Xbox files, and shaders: Direct3D 9's fixed path and Vulkan use the GameCube water.");
+        ExtrasStatusNote(iEXTRAS_WATER);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_FRAME_LOCK))
+    {
+        Row("30 fps levels");
+        if (ChoiceCombo("##framelock", "extras.frame_lock", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        Note("Xbox: these levels run at your frame-rate cap. GameCube: the driving levels, Bubble "
+             "Blowing Baby Hunt and Google-Eyes and Smelly Knick Knacks run at 30 frames a "
+             "second. In both, the Patty Wagon drives as it does at 60 frames a second, as on the "
+             "Xbox.");
+        ExtrasStatusNote(iEXTRAS_FRAME_LOCK);
+    }
+
+    ImGui::EndTable();
+}
+
 void iGui::SettingsGame()
 {
     ImGui::SeparatorText("Game");
@@ -951,6 +1132,8 @@ void iGui::SettingsInterface()
 void iGui::DrawSettings()
 {
     SettingsDisplay();
+    ImGui::Spacing();
+    SettingsExtras();
     ImGui::Spacing();
     SettingsAudio();
     ImGui::Spacing();

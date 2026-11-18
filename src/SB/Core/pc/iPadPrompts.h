@@ -32,7 +32,9 @@ struct iPadHostState;
 //      GameCube's letters -- chosen through the BINDING, so a rebound button
 //      draws what now presses it. input.button_icons picks the set; auto
 //      follows the device last used. The Xbox set on an Xbox pad with the
-//      default rows changes nothing.
+//      default rows changes nothing. The GameCube release's font.HIP has
+//      GameCube pictures in the same slots: with it, the gamecube set uses
+//      them and the xbox set is drawn instead.
 //
 //   3. The verb. The Xbox disc says "Pull RT to talk"; with a key, or a
 //      GameCube pad's R, it says "Press". push_trigger_text is rewritten in
@@ -59,6 +61,14 @@ const char* iPadPromptsActiveSet();
 // Forget what was applied, so the next update re-applies everything (after a
 // rebinding).
 void iPadPromptsInvalidate();
+
+// The raster the disc gives a texture: a pad_button texture's own when this
+// file has swapped in another, otherwise the texture's raster. For a texture
+// used as something other than a prompt (TT01's disco spotlights use
+// pad_button1 as their flare, zSpotlight.cpp), which keeps the disc's picture.
+struct RwTexture;
+struct RwRaster;
+RwRaster* iPadPromptsDiscRaster(RwTexture* texture);
 
 // ---------------------------------------------------------------------------
 // The pieces, for the tests.
@@ -90,5 +100,11 @@ U32 iPadPromptsTextureBits(const char* name);
 // name) is bound to, or NULL when it keeps the disc's picture. For the tests
 // and the input test.
 const char* iPadPromptsLabelFor(const char* set, const char* row);
+
+// Whose pictures the loaded font.HIP has: the GameCube release's (true) or the
+// Xbox's. Found from the font's own package when its pictures load; set here by
+// the input test. On the GameCube font the gamecube set is the one that keeps
+// the disc's pictures, and the xbox set draws its own.
+void iPadPromptsSetGameCubeFont(bool gamecube);
 
 #endif

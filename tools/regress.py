@@ -51,7 +51,39 @@ What it does, in order:
        front of it and held still (TSSM_TEST_PLACE, TSSM_TEST_HOLD). Its frames
        are compared with references as in 4, and the belt has to move between
        two frames 12 apart (check_scroll; no reference needed).
+     - bb02_crowd_xbox, bb02_crowd_gamecube: No Cheese!'s fish crowd, with the
+       player put down facing it and held still, once with [extras] crowds =
+       xbox and once with gamecube. Checked by themselves (check_crowd): the
+       crowd has to move between two frames 40 apart with xbox and stand still
+       with gamecube. No reference frames.
+     - bb02_xbox: the run to gameplay again with every [extras] key at xbox:
+       the title with the Xbox menu glow, and BB02 with the Xbox glow (0.55),
+       its spotlights and its crowd. Its frames are compared with references
+       of their own.
+     - tt01_spot_xbox, tt01_spot_gamecube: TT01's disco, its script started
+       (TSSM_TEST_SEND) with the player held there, once with [extras]
+       spotlights = xbox and once with gamecube. The scene's spotlights are
+       logged (TSSM_TEST_SPOTLOG) and checked (check_spotlights): the 12 disco
+       lights, which only the Xbox files have, come on with xbox and never
+       with gamecube. No reference frames (the disco moves over the whole
+       picture).
+     - bb01_crowd_xbox, bb01_crowd_gamecube: Sandwich Driving 101's crowd
+       with the car held by it, its objects logged (TSSM_TEST_CROWDLOG) and
+       checked (check_crowd_log): their cycle runs with xbox, and with
+       gamecube all 22 stand at speed 0.
+     - sc02_water_xbox, sc02_water_gamecube, b301_water_xbox,
+       b301_water_gamecube: the two levels with water, once with [extras]
+       water = xbox and once with gamecube. The water's own log lines are
+       checked (check_water): with xbox the Xbox water is set up for every
+       body and its surface drawn, with gamecube the GameCube water is used
+       because the setting says so, and the level's extras line agrees. No
+       reference frames.
      --quick leaves them out.
+
+     Every run's config.ini sets the five [extras] keys (the Xbox release's
+     features, src/SB/Core/pc/iExtras.h) to gamecube, except the one a run is
+     about, so the references show the GameCube versions and a change to an
+     xbox version cannot move them.
   6. runs every unit test of each width: save_selftest, tssm_input_test,
      tssm_modtest, tssm_sndtest (boot.HIP and MN/mnuc.HIP) and tssm_widentest.
   7. prints a pass/fail table, writes report.json and report.html (the frames
@@ -193,7 +225,120 @@ RUN_PT03_BELT = {
     "timeout": 60,
     "about": "boot PT03, held in front of a belt, to frame 340",
 }
-RUNS = [RUN_BB02, RUN_DE01_FLY, RUN_PT03_BELT]
+# The Xbox extras ([extras] in config.ini, src/SB/Core/pc/iExtras.h). Every run
+# above pins all five to gamecube (EXTRAS), so the references show the GameCube
+# release's versions and a change to an xbox version cannot move them. These
+# runs are the xbox ones, each checked by itself (no reference frames: the
+# crowd's cycle is not at the same point from run to run).
+#
+# bb02_crowd_xbox, bb02_crowd_gamecube: No Cheese!'s fish crowd behind the
+# barrier, with the player put down facing it and held still (as pt03_belt).
+# check_crowd compares CROWD_CROP of frames 2500 and 2540: with crowds = xbox
+# it has to move, with gamecube it has to stand still.
+EXTRAS = ("glow", "spotlights", "crowds", "water", "frame_lock")
+# A taps every 100 frames up to 1500 skip story1.bik and BB02's opening cutscene
+# (left to play, the cutscene was still on at 1840 in one run of three).
+RUN_BB02_CROWD_XBOX = {
+    "name": "bb02_crowd_xbox", "item": "BB02 crowd (xbox)", "boot": "BB02",
+    "script": ",".join("%d:a/4" % f for f in range(300, 1501, 100)), "exit": 2560,
+    "frames": [(2500, "game"), (2540, "game")],
+    "env": {"TSSM_TEST_PLACE": "2400:-41.0:7.0:7.0:320", "TSSM_TEST_HOLD": "2401-2560"},
+    "timeout": 100, "extras": {"crowds": "xbox"}, "compare": False,
+    "about": "boot BB02, held facing the crowd, to frame 2560, crowds xbox",
+}
+RUN_BB02_CROWD_GC = dict(RUN_BB02_CROWD_XBOX, name="bb02_crowd_gamecube", item="BB02 crowd (gamecube)",
+                         extras={"crowds": "gamecube"},
+                         about="boot BB02, held facing the crowd, to frame 2560, crowds gamecube")
+# bb02_xbox: the run to gameplay with every extra at xbox, against references
+# of its own: the title (the menu glow), the main menu, and BB02 (the Xbox
+# glow at 0.55, the spotlights, the crowd).
+RUN_BB02_XBOX = {
+    "name": "bb02_xbox", "item": "run to gameplay (xbox)", "boot": None, "script": SCRIPT,
+    "exit": EXIT_FRAME,
+    "frames": [(100, "menu"), (400, "menu"), (700, "menu"), (2200, "game"), (2500, "game"),
+               (2700, "game"), (3000, "game")],
+    "env": {}, "timeout": None, "extras": dict((k, "xbox") for k in EXTRAS),
+    "about": "to frame %d with every [extras] key at xbox" % EXIT_FRAME,
+}
+# tt01_spot_xbox, tt01_spot_gamecube: Bubble Blowing Baby Hunt's disco lights,
+# which only the Xbox files have and which the disco machine's script
+# (DISCO_SCRIPT_01) switches on 5 s after it starts. The script is started at
+# TT01_SPOT_SEND, the player put down in the disco and held there, and the
+# scene's spotlights logged every 10 frames (TSSM_TEST_SPOTLOG). The only
+# buttons are two B presses that close Mindy's tokens message, which opens
+# after the player is put down (an A by the level's start opens the warp menu
+# instead). check_spotlights: with
+# spotlights = xbox the 12 disco lights have to come on; with gamecube none of
+# them may, through the whole script. TT01 is one of the GameCube's 30 fps
+# levels, so both runs set frame_lock = xbox and run at 60. No reference
+# frames: the disco's floor dots and lasers move over the whole picture, and two
+# runs differ by a mean of 10 at the same frame; the frames are kept for the
+# report.
+TT01_SPOT_SEND = 700
+RUN_TT01_SPOT_XBOX = {
+    "name": "tt01_spot_xbox", "item": "TT01 disco lights (xbox)", "boot": "TT01",
+    "script": "1050:b,1150:b", "exit": 1710,
+    "frames": [(1300, "game"), (1500, "game")],
+    "env": {"TSSM_TEST_SEND": "%d:DISCO_SCRIPT_01" % TT01_SPOT_SEND, "TSSM_TEST_SPOTLOG": "10",
+            "TSSM_TEST_PLACE": "750:160:12:-150:127", "TSSM_TEST_HOLD": "751-1710"},
+    "timeout": 80, "extras": {"spotlights": "xbox", "frame_lock": "xbox"}, "compare": False,
+    "about": "boot TT01, the disco started at %d, to frame 1710, spotlights xbox" % TT01_SPOT_SEND,
+}
+RUN_TT01_SPOT_GC = dict(RUN_TT01_SPOT_XBOX, name="tt01_spot_gamecube",
+                        item="TT01 disco lights (gamecube)",
+                        extras={"spotlights": "gamecube", "frame_lock": "xbox"},
+                        about="boot TT01, the disco started at %d, to frame 1710, spotlights "
+                              "gamecube" % TT01_SPOT_SEND)
+# bb01_crowd_xbox, bb01_crowd_gamecube: Sandwich Driving 101's fish crowd,
+# with the Patty Wagon put down by one of its groups and held (BB01 is a
+# GameCube 30 fps level: frame_lock = xbox in both). The held car's camera
+# still sways, so frames cannot show the crowd's own motion; the crowd objects
+# are logged every 60 frames instead (TSSM_TEST_CROWDLOG) and checked
+# (check_crowd_log): with xbox the cycle runs at speed 1 and the crowd in view
+# moves on in it, with gamecube every one of the 22 is at speed 0 and none
+# moves.
+RUN_BB01_CROWD_XBOX = {
+    "name": "bb01_crowd_xbox", "item": "BB01 crowd (xbox)", "boot": "BB01",
+    "script": "99999:start", "exit": 2100, "frames": [(2000, "game")],
+    "env": {"TSSM_TEST_CROWDLOG": "60", "TSSM_TEST_PLACE": "1500:-128:10:185:180",
+            "TSSM_TEST_HOLD": "1501-2100"},
+    "timeout": 100, "extras": {"crowds": "xbox", "frame_lock": "xbox"}, "compare": False,
+    "about": "boot BB01, the car held by the crowd, to frame 2100, crowds xbox",
+}
+RUN_BB01_CROWD_GC = dict(RUN_BB01_CROWD_XBOX, name="bb01_crowd_gamecube", item="BB01 crowd (gamecube)",
+                         extras={"crowds": "gamecube", "frame_lock": "xbox"},
+                         about="boot BB01, the car held by the crowd, to frame 2100, crowds gamecube")
+# sc02_water_xbox, sc02_water_gamecube, b301_water_xbox, b301_water_gamecube:
+# the Xbox water (iXboxWater.cpp), on by default, in the two levels that have
+# water bodies, with no button pressed. check_water reads the water's lines:
+# with water = xbox, "Xbox water in <scene>: <n> bodies" with the level's
+# number of bodies (WATER_BODIES) and "<scene>: the surface is drawn"; with
+# gamecube, "GameCube water in <scene> -- extras.water is gamecube" and no
+# Xbox water; and the level's "extras:" line names the same water. SC02 is a
+# GameCube 30 fps level, so both SC02 runs set frame_lock = xbox. Measured
+# (2026-11-18, D3D9, both widths): both xbox lines come before SC02's frame 300
+# and before B301's 600 (its opening cutscene), and every run passes in 13 to
+# 18 s. No reference frames: one frame of each is kept for the report.
+WATER_BODIES = {"SC02": 2, "B301": 1}
+RUN_SC02_WATER_XBOX = {
+    "name": "sc02_water_xbox", "item": "SC02 water (xbox)", "boot": "SC02",
+    "script": "99999:start", "exit": 400, "frames": [(300, "game")],
+    "env": {}, "timeout": 60, "extras": {"water": "xbox", "frame_lock": "xbox"},
+    "compare": False, "about": "boot SC02 to frame 400, water xbox",
+}
+RUN_SC02_WATER_GC = dict(RUN_SC02_WATER_XBOX, name="sc02_water_gamecube", item="SC02 water (gamecube)",
+                         extras={"water": "gamecube", "frame_lock": "xbox"},
+                         about="boot SC02 to frame 400, water gamecube")
+RUN_B301_WATER_XBOX = dict(RUN_SC02_WATER_XBOX, name="b301_water_xbox", item="B301 water (xbox)",
+                           boot="B301", exit=700, frames=[(600, "game")], timeout=70,
+                           extras={"water": "xbox"}, about="boot B301 to frame 700, water xbox")
+RUN_B301_WATER_GC = dict(RUN_B301_WATER_XBOX, name="b301_water_gamecube", item="B301 water (gamecube)",
+                         extras={"water": "gamecube"},
+                         about="boot B301 to frame 700, water gamecube")
+WATER_RUNS = (RUN_SC02_WATER_XBOX, RUN_SC02_WATER_GC, RUN_B301_WATER_XBOX, RUN_B301_WATER_GC)
+RUNS = [RUN_BB02, RUN_DE01_FLY, RUN_PT03_BELT, RUN_BB02_CROWD_XBOX, RUN_BB02_CROWD_GC,
+        RUN_BB02_XBOX, RUN_TT01_SPOT_XBOX, RUN_TT01_SPOT_GC, RUN_BB01_CROWD_XBOX,
+        RUN_BB01_CROWD_GC] + list(WATER_RUNS)
 
 # check_camera: while the fly-through plays (the log says "fly-through on"), the
 # camera must be finite and within CAMERA_LIMIT of the origin on every axis; it
@@ -219,6 +364,29 @@ CAMERA_MIN_FLY = 300
 BELT_CROP = (180, 360, 420, 480)
 BELT_FRAMES = (300, 312)
 BELT_MIN_CHANGE = 2.0
+
+# check_crowd: the crowd's part of the 640x480 frame, the least mean change
+# (as crop_change) between CROWD_FRAMES that counts as moving (xbox) and the
+# most that counts as standing still (gamecube). Measured (2026-11-16, D3D9,
+# x64): 2.18 and 2.24 moving, 0.13 still (SpongeBob's idle and the seaweed).
+CROWD_CROP = (190, 165, 420, 255)
+CROWD_FRAMES = (2500, 2540)
+CROWD_MOVING = 1.0
+CROWD_STILL = 0.5
+
+# check_spotlights: TT01's disco lights (DISCO_BALL_SPOTLIGHT_01-08 and
+# DISCO_SPOTLIGHT_01-04, their xStrHash IDs), and the frames after
+# TT01_SPOT_SEND by which the script has switched them on (5 s, at 60 fps)
+# and the log has to have reached.
+DISCO_LIGHTS = frozenset(["715F7AA%s" % c for c in "BCDEF"] + ["715F7AB%d" % d for d in (0, 1, 2)] +
+                         ["7F57F41%d" % d for d in (5, 6, 7, 8)])
+DISCO_ON_BY = 300 + 60
+DISCO_LOGGED_TO = 900
+
+# check_crowd_log: BB01's crowd objects (CROWD_SIMP_01-22), and the frame from
+# which the log is read (the car is held from 1500).
+BB01_CROWD = 22
+BB01_CROWD_FROM = 1600
 
 # Mean block difference (0-255) and share of blocks differing by more than
 # BLOCK_LEVEL, per class. Measured on one machine (2026-10-23, three runs per
@@ -251,6 +419,8 @@ UNIT_TESTS = [
     ("tssm_sndtest boot.HIP", "tssm_sndtest", ["{assets}/boot.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_sndtest mnuc.HIP", "tssm_sndtest", ["{assets}/MN/mnuc.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_widentest", "tssm_widentest", ["{assets}"], {}),
+    ("tssm_extrastest", "tssm_extrastest", ["{scratch}"], {}),
+    ("tssm_watertest", "tssm_watertest", [], {}),
 ]
 
 EXE = ".exe" if os.name == "nt" else ""
@@ -471,6 +641,10 @@ def run_game(width, exe, assets, run_dir, backend, timeout, wait, spec=RUN_BB02)
     os.makedirs(os.path.join(run_dir, "save"), exist_ok=True)
     with open(os.path.join(run_dir, "config.ini"), "w", newline="\r\n") as f:
         f.write("[video]\n%sbackend = %s\n[game]\nintro_movies = off\n" % (VIDEO, backend))
+        # Every Xbox extra at gamecube unless the run is about one (EXTRAS).
+        extras = dict((k, "gamecube") for k in EXTRAS)
+        extras.update(spec.get("extras", {}))
+        f.write("[extras]\n" + "".join("%s = %s\n" % (k, extras[k]) for k in EXTRAS))
     env = dict(os.environ)
     # Nothing from the caller's environment that changes what a run does.
     for k in [k for k in env if k.upper().startswith("TSSM_TEST_")] + [
@@ -702,6 +876,112 @@ def check_scroll(frames_dir):
     return True, detail
 
 
+def check_crowd(frames_dir, moving):
+    """(ok, detail): the crowd moved between CROWD_FRAMES (crowds = xbox), or
+    stood still (gamecube)."""
+    a, b = (os.path.join(frames_dir, "frame_%05d.png" % f) for f in CROWD_FRAMES)
+    for p in (a, b):
+        if not os.path.exists(p):
+            return False, "%s not captured" % os.path.basename(p)
+    try:
+        change = crop_change(a, b, CROWD_CROP)
+    except ValueError as e:
+        return False, str(e)
+    detail = "crowd crop %s, frame %d vs %d: mean change %.2f (%s)" % (
+        "x".join(map(str, CROWD_CROP)), CROWD_FRAMES[0], CROWD_FRAMES[1], change,
+        "moving from %.1f" % CROWD_MOVING if moving else "still below %.1f" % CROWD_STILL)
+    if moving and change < CROWD_MOVING:
+        return False, detail + "; the crowd stands still"
+    if not moving and change > CROWD_STILL:
+        return False, detail + "; the crowd moves"
+    return True, detail
+
+
+SPOTLOG = re.compile(r"tssm: test: frame (\d+): spotlights (\d+) on of (\d+), (\d+) drawn, "
+                     r"(?:(\d+) flares, )?camera inside (\d+)(?:, nearest beam ([-0-9.]+))?;(.*)")
+
+
+def check_spotlights(log, xbox):
+    """(ok, detail): TT01's disco lights came on (spotlights = xbox) or never did
+    (gamecube), as TSSM_TEST_SPOTLOG logged the scene's spotlights."""
+    seen = []
+    for line in log.splitlines():
+        m = SPOTLOG.search(line)
+        if m:
+            ids = set(t.rstrip("+") for t in m.group(8).split() if t != "none")
+            seen.append((int(m.group(1)), ids & DISCO_LIGHTS, int(m.group(6))))
+    after = [x for x in seen if x[0] > TT01_SPOT_SEND]
+    if not after or after[-1][0] < TT01_SPOT_SEND + DISCO_LOGGED_TO:
+        return False, "the spotlights were logged to frame %d, not to %d" % (
+            after[-1][0] if after else 0, TT01_SPOT_SEND + DISCO_LOGGED_TO)
+    most = max(len(x[1]) for x in seen)
+    first = [f for f, ids, _ in after if len(ids) == len(DISCO_LIGHTS)]
+    inside = sum(1 for x in after if x[2] > 0)
+    detail = "%d frames logged to %d; disco lights on: at most %d of %d%s; camera in a beam in %d" % (
+        len(seen), seen[-1][0], most, len(DISCO_LIGHTS),
+        ", all from frame %d" % first[0] if first else "", inside)
+    if xbox and not (first and first[0] <= TT01_SPOT_SEND + DISCO_ON_BY):
+        return False, detail + "; the disco lights did not all come on by frame %d" % (
+            TT01_SPOT_SEND + DISCO_ON_BY)
+    if not xbox and most > 0:
+        return False, detail + "; a disco light came on"
+    return True, detail
+
+
+CROWDLOG = re.compile(r"tssm: test: frame (\d+): crowd (\d+) objects, speed ([-0-9.]+), (\d+) moved")
+
+
+def check_crowd_log(log, moving):
+    """(ok, detail): BB01's crowd objects, as TSSM_TEST_CROWDLOG logged them, ran their cycle
+    (crowds = xbox) or stood at speed 0 (gamecube)."""
+    seen = [(int(m.group(1)), int(m.group(2)), float(m.group(3)), int(m.group(4)))
+            for m in CROWDLOG.finditer(log) if int(m.group(1)) >= BB01_CROWD_FROM]
+    if not seen:
+        return False, "no crowd lines logged from frame %d" % BB01_CROWD_FROM
+    counts = sorted(set(x[1] for x in seen))
+    speeds = sorted(set(x[2] for x in seen))
+    moved = [x[3] for x in seen]
+    detail = "%d lines from frame %d: %s objects, speed %s, %d-%d moved a line" % (
+        len(seen), seen[0][0], "/".join(map(str, counts)), "/".join("%.2f" % v for v in speeds),
+        min(moved), max(moved))
+    if counts != [BB01_CROWD]:
+        return False, detail + "; not the %d crowd objects" % BB01_CROWD
+    if moving and (speeds != [1.0] or min(moved) < 1):
+        return False, detail + "; the crowd stands still"
+    if not moving and (speeds != [0.0] or max(moved) > 0):
+        return False, detail + "; the crowd moves"
+    return True, detail
+
+
+def check_water(log, scene, xbox):
+    """(ok, detail): the level's water as its log lines say: the Xbox water set up for
+    every body and its surface drawn (water = xbox), or the GameCube water because the
+    setting says so (gamecube); and the level's extras line names the same."""
+    lines = [l.strip() for l in log.splitlines()]
+    bodies = WATER_BODIES[scene]
+    xb = [l for l in lines if l.startswith("tssm: water: Xbox water in %s:" % scene)]
+    gc = [l for l in lines if l.startswith("tssm: water: GameCube water in %s --" % scene)]
+    drawn = any(l.startswith("tssm: water: %s: the surface is drawn" % scene) for l in lines)
+    ex = [l for l in lines if l.startswith("tssm: extras: %s " % scene)]
+    want = "water %s" % ("xbox" if xbox else "gamecube")
+    detail = "%d Xbox water line(s), %d GameCube water line(s), surface %s, extras line %s" % (
+        len(xb), len(gc), "drawn" if drawn else "not drawn",
+        "names %s" % want if any(want + "," in l for l in ex) else "missing or other")
+    if not ex or not all(want + "," in l for l in ex):
+        return False, detail + "; the extras line does not say %s" % want
+    if xbox:
+        body = "%d bod%s" % (bodies, "y" if bodies == 1 else "ies")
+        if not xb or not all((": %s;" % body) in l for l in xb):
+            return False, detail + "; not 'Xbox water in %s: %s'" % (scene, body)
+        if gc or not drawn:
+            return False, detail + "; the Xbox water fell back or was not drawn" + (
+                ": " + gc[0] if gc else "")
+    else:
+        if xb or not gc or not all("extras.water is gamecube" in l for l in gc):
+            return False, detail + "; not the GameCube water by the setting"
+    return True, detail
+
+
 # ---------------------------------------------------------------------------
 # References
 
@@ -905,11 +1185,33 @@ def main():
                 elif spec is RUN_PT03_BELT:
                     ok, detail = check_scroll(os.path.join(r["dir"], "frames"))
                     rows.append(("PT03 belt scrolls", w, ok, detail))
+                elif spec is RUN_BB02_CROWD_XBOX or spec is RUN_BB02_CROWD_GC:
+                    moving = spec is RUN_BB02_CROWD_XBOX
+                    ok, detail = check_crowd(os.path.join(r["dir"], "frames"), moving)
+                    rows.append(("BB02 crowd %s" % ("moves" if moving else "stands still"), w, ok,
+                                 detail))
+                elif spec is RUN_TT01_SPOT_XBOX or spec is RUN_TT01_SPOT_GC:
+                    xbox = spec is RUN_TT01_SPOT_XBOX
+                    ok, detail = check_spotlights(r.get("log", ""), xbox)
+                    rows.append(("TT01 disco lights %s" % ("on" if xbox else "stay off"), w, ok,
+                                 detail))
+                elif spec is RUN_BB01_CROWD_XBOX or spec is RUN_BB01_CROWD_GC:
+                    moving = spec is RUN_BB01_CROWD_XBOX
+                    ok, detail = check_crowd_log(r.get("log", ""), moving)
+                    rows.append(("BB01 crowd %s" % ("moves" if moving else "stands still"), w, ok,
+                                 detail))
+                elif spec in WATER_RUNS:
+                    xbox = spec["extras"]["water"] == "xbox"
+                    ok, detail = check_water(r.get("log", ""), spec["boot"], xbox)
+                    rows.append(("%s water %s" % (spec["boot"], "xbox" if xbox else "gamecube"), w,
+                                 ok, detail))
 
         # Frames: against the references (and their variants), and x64 against
         # this run's x86.
         for (name, w), r in runs.items():
             spec = [s for s in RUNS if s["name"] == name][0]
+            if not spec.get("compare", True):
+                continue  # checked by itself above, no references
             sub = ref_sub(spec)
             item = "frames vs reference" if spec is RUN_BB02 else spec["item"] + " frames"
             ref_dir = os.path.join(a.reference, w, sub)

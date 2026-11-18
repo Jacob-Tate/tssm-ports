@@ -120,8 +120,22 @@ S32 iWindowGetFrameRate();
 // is 30 frames a second or less, and above 60 the loop redrew the same picture.
 void iWindowSetFrameRateCeiling(S32 fps);
 
+// The GameCube release's 30 fps hold ([extras] frame_lock = gamecube;
+// iExtras.h): the game's own retrace count, held as one frame every `count`
+// NTSC retraces, 59.94/count frames a second, the console's own rate. 0 or 1 is
+// no hold. A third limit beside the cap and the ceiling, and the pacer holds the
+// lowest of the three, except that a movie's ceiling lifts the hold: movies
+// play at 60 either way. Cheap to call every frame: the deadline is dropped
+// only when what the pacer holds changes.
+void iWindowSetFrameLock(S32 count);
+
+// The count the pacer is holding to now, or 0 when the hold is not what paces
+// the frame (none set, a movie's ceiling, or a cap below it).
+S32 iWindowGetFrameLock();
+
 // The rate the pacer holds now: the cap, lowered to a ceiling while one is
-// set. 0 is no cap. For the frame metrics (iPerf.h).
+// set and to the GameCube's hold (rounded, 30 for 29.97) while that is. 0 is
+// no cap. For the frame metrics (iPerf.h).
 S32 iWindowGetPacedRate();
 
 // The monitor's refresh rate in Hz, or 0 if it cannot be determined. This is

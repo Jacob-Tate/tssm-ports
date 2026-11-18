@@ -1,0 +1,336 @@
+diff --git a/src/gcntex.cpp b/src/gcntex.cpp
+index c136567..0c7940f 100644
+--- a/src/gcntex.cpp
++++ b/src/gcntex.cpp
+@@ -10,15 +10,32 @@
+ //   0x58  u32  RW raster format
+ //   0x5C  u16  width, u16 height
+ //   0x60  u8   depth, u8 levels, u8 GX texture format, u8 GX palette format
+-//   0x64  8 bytes, not needed here
+-//   0x6C  palette (for C4/C8), then the levels, largest first, in GX tiles
++//   0x64  u32  not needed here
++//   0x68  C4/C8 only: the palette, 16 or 256 big-endian u16s
++//         u32  size of the levels in bytes
++//         then the levels, largest first, each in whole GX tiles
+ //
+-// Only level 0 is decoded. It becomes an RGBA image and goes through
+-// Raster::createFromImage like any other image, so the result is a raster of
+-// whatever platform is current and nothing downstream knows where it came from.
++// (Measured on TSSM's GameCube disc: 2,990 textures, CMPR, C8 with RGB5A3 or
++// RGB565 palettes and RGBA8. A mipmapped one stores its whole chain; a C8 one
++// stores one level.)
+ //
+-// Mods that mix GameCube assets into an Xbox package ship these (BFBBMix has
+-// four); no retail Xbox package does.
++// Every stored level is decoded, the way the GameCube's texture unit reads
++// it, into an RGBA image, and the images become the levels of one raster of
++// whatever platform is current, so nothing downstream knows where it came
++// from. A texture with one level stays at one level: the GameCube never
++// sampled anything smaller, and an automatic chain would blur what it drew
++// sharp. If a mipmapped texture stores fewer levels than its full chain, the
++// missing ones are its last level halved, so the raster is complete on every
++// backend.
++//
++// CMPR is DXT1 with big-endian endpoints and its own texel order, decoded as
++// the GameCube's hardware does it: the two in-between colours are 5/8 and 3/8
++// blends rather than DXT1's thirds, and in the three-colour mode the hole is
++// the in-between colour with alpha 0, not transparent black, so filtering
++// does not pull a dark fringe into cut-out edges.
++//
++// Nothing here trusts the stream: the size, format, level count and every
++// level's bytes are checked against the struct before anything is decoded.
+ 
+ #include <stdio.h>
+ #include <string.h>
+@@ -51,7 +68,11 @@ enum
+ 	GX_TL_RGB565 = 1,
+ 	GX_TL_RGB5A3 = 2,
+ 
+-	GC_HEADER_SIZE = 0x6C
++	GC_PALETTE = 0x68,
++
++	// Twice what GX can sample, for textures a mod tool made.
++	GC_MAX_SIZE = 2048,
++	GC_MAX_LEVELS = 12
+ };
+ 
+ static uint32
+@@ -136,6 +157,13 @@ tileShape(int32 fmt, int32 *tw, int32 *th, int32 *bytes)
+ 	return 0;
+ }
+ 
++// The GameCube's in-between CMPR colour: 5/8 of a and 3/8 of b.
++static uint8
++cmprBlend(uint32 a, uint32 b)
++{
++	return (a*5 + b*3) >> 3;
++}
++
+ // One tile's texels into `rgba`, a tw*th block of RGBA8888.
+ static void
+ decodeTile(int32 fmt, const uint8 *src, const uint8 *pal, int32 palfmt, uint8 *rgba)
+@@ -200,11 +228,11 @@ decodeTile(int32 fmt, const uint8 *src, const uint8 *pal, int32 palfmt, uint8 *r
+ 			rgb565(c1, c[1]);
+ 			for(int32 k = 0; k < 3; k++){
+ 				if(c0 > c1){
+-					c[2][k] = (2*c[0][k] + c[1][k])/3;
+-					c[3][k] = (c[0][k] + 2*c[1][k])/3;
++					c[2][k] = cmprBlend(c[0][k], c[1][k]);
++					c[3][k] = cmprBlend(c[1][k], c[0][k]);
+ 				}else{
+ 					c[2][k] = (c[0][k] + c[1][k])/2;
+-					c[3][k] = 0;
++					c[3][k] = c[2][k];
+ 				}
+ 			}
+ 			c[2][3] = 255;
+@@ -220,34 +248,22 @@ decodeTile(int32 fmt, const uint8 *src, const uint8 *pal, int32 palfmt, uint8 *r
+ 	}
+ }
+ 
+-Image*
+-readGCTextureImage(const uint8 *buf, uint32 length)
++// Bytes of one level of a w*h texture in whole tiles.
++static uint32
++levelBytes(int32 w, int32 h, int32 tw, int32 th, int32 tbytes)
+ {
+-	if(length < GC_HEADER_SIZE)
+-		return nil;
+-
+-	int32 width = be16(buf + 0x5C);
+-	int32 height = be16(buf + 0x5E);
+-	int32 fmt = buf[0x62];
+-	int32 palfmt = buf[0x63];
+-
+-	int32 tw, th, tbytes;
+-	if(!tileShape(fmt, &tw, &th, &tbytes) || width <= 0 || height <= 0)
+-		return nil;
+-
+-	const uint8 *pal = buf + GC_HEADER_SIZE;
+-	const uint8 *pix = pal;
+-	if(fmt == GX_TF_C4 || fmt == GX_TF_C8)
+-		pix += (fmt == GX_TF_C4 ? 16 : 256)*2;
+-
+-	int32 tilesX = (width + tw-1)/tw;
+-	int32 tilesY = (height + th-1)/th;
+-	if(pix + tilesX*tilesY*tbytes > buf + length)
+-		return nil;
++	return (uint32)((w + tw-1)/tw) * (uint32)((h + th-1)/th) * (uint32)tbytes;
++}
+ 
++static Image*
++decodeLevel(const uint8 *pix, int32 width, int32 height, int32 fmt,
++	const uint8 *pal, int32 palfmt, int32 tw, int32 th, int32 tbytes)
++{
+ 	Image *img = Image::create(width, height, 32);
+ 	img->allocate();
+ 	uint8 tile[8*8*4];
++	int32 tilesX = (width + tw-1)/tw;
++	int32 tilesY = (height + th-1)/th;
+ 	for(int32 ty = 0; ty < tilesY; ty++)
+ 		for(int32 tx = 0; tx < tilesX; tx++){
+ 			decodeTile(fmt, pix, pal, palfmt, tile);
+@@ -267,6 +283,115 @@ readGCTextureImage(const uint8 *buf, uint32 length)
+ 	return img;
+ }
+ 
++// A level half the size of `src`, each texel the mean of the 2x2 it covers.
++static Image*
++halveImage(Image *src)
++{
++	int32 w = src->width > 1 ? src->width/2 : 1;
++	int32 h = src->height > 1 ? src->height/2 : 1;
++	Image *img = Image::create(w, h, 32);
++	img->allocate();
++	for(int32 y = 0; y < h; y++)
++		for(int32 x = 0; x < w; x++)
++			for(int32 c = 0; c < 4; c++){
++				int32 x0 = x*2 < src->width ? x*2 : src->width-1;
++				int32 y0 = y*2 < src->height ? y*2 : src->height-1;
++				int32 x1 = x0+1 < src->width ? x0+1 : x0;
++				int32 y1 = y0+1 < src->height ? y0+1 : y0;
++				uint32 s = src->pixels[y0*src->stride + x0*4 + c] +
++				           src->pixels[y0*src->stride + x1*4 + c] +
++				           src->pixels[y1*src->stride + x0*4 + c] +
++				           src->pixels[y1*src->stride + x1*4 + c];
++				img->pixels[y*img->stride + x*4 + c] = (s + 2)/4;
++			}
++	return img;
++}
++
++int32
++readGCTextureLevels(const uint8 *buf, uint32 length, Image **levels, int32 maxLevels,
++	const char **why)
++{
++	const char *dummy;
++	if(why == nil)
++		why = &dummy;
++	*why = nil;
++	if(length < GC_PALETTE + 4){
++		*why = "struct too short";
++		return 0;
++	}
++
++	int32 width = be16(buf + 0x5C);
++	int32 height = be16(buf + 0x5E);
++	int32 numLevels = buf[0x61];
++	int32 fmt = buf[0x62];
++	int32 palfmt = buf[0x63];
++
++	int32 tw, th, tbytes;
++	if(!tileShape(fmt, &tw, &th, &tbytes)){
++		*why = "a GX texture format this cannot read";
++		return 0;
++	}
++	if(width <= 0 || height <= 0 || width > GC_MAX_SIZE || height > GC_MAX_SIZE){
++		*why = "size out of range";
++		return 0;
++	}
++	if(numLevels < 1)
++		numLevels = 1;
++	if(numLevels > Raster::calculateNumLevels(width, height) || numLevels > GC_MAX_LEVELS ||
++	   numLevels > maxLevels){
++		*why = "more levels than the size allows";
++		return 0;
++	}
++	bool32 paletted = fmt == GX_TF_C4 || fmt == GX_TF_C8;
++	if(paletted && palfmt != GX_TL_IA8 && palfmt != GX_TL_RGB565 && palfmt != GX_TL_RGB5A3){
++		*why = "a GX palette format this cannot read";
++		return 0;
++	}
++
++	const uint8 *pal = buf + GC_PALETTE;
++	uint32 off = GC_PALETTE;
++	if(paletted)
++		off += (fmt == GX_TF_C4 ? 16 : 256)*2;
++	if(off + 4 > length){
++		*why = "struct too short for its palette";
++		return 0;
++	}
++	uint32 stored = be32(buf + off);
++	off += 4;
++
++	uint32 need = 0;
++	for(int32 i = 0; i < numLevels; i++){
++		int32 w = width >> i, h = height >> i;
++		need += levelBytes(w ? w : 1, h ? h : 1, tw, th, tbytes);
++	}
++	if(need > length - off || need > stored){
++		*why = "struct too short for its levels";
++		return 0;
++	}
++
++	const uint8 *pix = buf + off;
++	for(int32 i = 0; i < numLevels; i++){
++		int32 w = width >> i, h = height >> i;
++		if(w == 0) w = 1;
++		if(h == 0) h = 1;
++		levels[i] = decodeLevel(pix, w, h, fmt, pal, palfmt, tw, th, tbytes);
++		pix += levelBytes(w, h, tw, th, tbytes);
++	}
++	return numLevels;
++}
++
++Image*
++readGCTextureImage(const uint8 *buf, uint32 length)
++{
++	Image *levels[GC_MAX_LEVELS];
++	int32 n = readGCTextureLevels(buf, length, levels, GC_MAX_LEVELS, nil);
++	if(n == 0)
++		return nil;
++	for(int32 i = 1; i < n; i++)
++		levels[i]->destroy();
++	return levels[0];
++}
++
+ Texture*
+ readNativeTextureGC(Stream *stream)
+ {
+@@ -276,21 +401,65 @@ readNativeTextureGC(Stream *stream)
+ 		return nil;
+ 	}
+ 
+-	uint8 *buf = rwNewT(uint8, length, MEMDUR_FUNCTION | ID_TEXTURE);
++	// The largest a GC_MAX_SIZE texture in its biggest format can be, with
++	// every level and a palette.
++	if(length > 4*GC_MAX_SIZE*GC_MAX_SIZE*2 + 0x1000){
++		RWERROR((ERR_PLATFORM, 6));
++		stream->seek(length);
++		return nil;
++	}
++	uint8 *buf = rwNewT(uint8, length ? length : 1, MEMDUR_FUNCTION | ID_TEXTURE);
+ 	if(stream->read8(buf, length) != length){
+ 		rwFree(buf);
+ 		return nil;
+ 	}
+ 
+-	Image *img = readGCTextureImage(buf, length);
+-	if(img == nil){
+-		RWERROR((ERR_PLATFORM, 6));
++	Image *levels[GC_MAX_LEVELS + 1];
++	const char *why = nil;
++	int32 n = readGCTextureLevels(buf, length, levels, GC_MAX_LEVELS, &why);
++	if(n == 0){
++		char msg[128];
++		char name[33];
++		memcpy(name, length >= 0x38 ? buf + 0x18 : (const uint8*)"", length >= 0x38 ? 32 : 1);
++		name[32] = '\0';
++		snprintf(msg, sizeof(msg), "GameCube texture '%s': %s", name, why);
++		RWERROR((ERR_GENERAL, msg));
+ 		rwFree(buf);
+ 		return nil;
+ 	}
+ 
+-	Raster *raster = Raster::createFromImage(img);
+-	img->destroy();
++	// A mipmapped raster has every level of its chain on every backend.
++	int32 numLevels = n;
++	if(n > 1){
++		numLevels = Raster::calculateNumLevels(levels[0]->width, levels[0]->height);
++		for(int32 i = n; i < numLevels; i++)
++			levels[i] = halveImage(levels[i-1]);
++	}
++
++	Raster *raster = nil;
++	int32 width, height, depth, format;
++	if(Raster::imageFindRasterFormat(levels[0], Raster::TEXTURE, &width, &height, &depth, &format)){
++		if(numLevels > 1)
++			format |= Raster::MIPMAP;
++		raster = Raster::create(width, height, depth, format);
++	}
++	if(raster){
++		// The small levels first and the top one last: a backend records
++		// what alpha a raster has from each level it is given, and the
++		// top level is the artwork's own answer.
++		for(int32 i = numLevels-1; i > 0; i--){
++			if(raster->lock(i, Raster::LOCKWRITE|Raster::LOCKNOFETCH) == nil)
++				continue;
++			raster->setFromImage(levels[i]);
++			raster->unlock(i);
++		}
++		if(raster->setFromImage(levels[0]) == nil){
++			raster->destroy();
++			raster = nil;
++		}
++	}
++	for(int32 i = 0; i < numLevels; i++)
++		levels[i]->destroy();
+ 	if(raster == nil){
+ 		rwFree(buf);
+ 		return nil;
+diff --git a/src/rwobjects.h b/src/rwobjects.h
+index 388d9a8..8fd4b34 100644
+--- a/src/rwobjects.h
++++ b/src/rwobjects.h
+@@ -176,6 +176,11 @@ struct Image
+ // big-endian, platform 6 -- decoded to a 32-bit RGBA image of its top level.
+ // nil for a format or size it cannot read. See gcntex.cpp.
+ Image *readGCTextureImage(const uint8 *data, uint32 length);
++// The same struct's stored levels, largest first, into levels[0..n-1] (the
++// caller destroys them). 0 for a struct it cannot read, with `why` (if not
++// nil) saying what was wrong.
++int32 readGCTextureLevels(const uint8 *data, uint32 length, Image **levels, int32 maxLevels,
++	const char **why);
+ 
+ Image *readTGA(const char *filename);
+ void writeTGA(Image *image, const char *filename);

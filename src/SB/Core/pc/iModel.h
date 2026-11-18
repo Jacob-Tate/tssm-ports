@@ -34,6 +34,8 @@ U32 iModelNormalEval(xVec3* out, const RpAtomic& m, const RwMatrixTag* mat, size
 xSphere* iModelWorldBoundSphere(RpAtomic* model, RwMatrixTag* mat, xSphere* sphere);
 void iModelMaterialMul(RpAtomic* model, F32 rm, F32 gm, F32 bm);
 RpAtomic* iModelFileNew(void* buffer, U32 size);
+// PC: ends the run with a message for a model asset that does not read (iModel.cpp).
+void iModelReportUnreadable(U32 assetid);
 void iModelRender(RpAtomic* model, RwMatrix* mat);
 void iModelUnload(RpAtomic* userdata);
 void iModelUnlock(RpAtomic* pModel);

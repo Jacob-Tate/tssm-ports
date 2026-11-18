@@ -2,7 +2,8 @@
 
 The decompiled game code, compiled with a host toolchain against the PC
 platform layer in this directory, rendering through librw and reading the
-**Xbox** release's files. It is based on treedome, the BfBB PC port (CC0).
+**Xbox** or the **GameCube** release's files. It is based on treedome, the BfBB
+PC port (CC0).
 `PORTING.md` beside this file says where every file came from and what is
 stubbed, and `stubs/STUBS.md` lists every stub. Status: x64 and x86 both
 boot through the logo movies, the menus, the first save and story1.bik into the
@@ -15,9 +16,10 @@ their frames with stored references (below).
 There are two ways to play: download the ready-made *TSSM Dehydrated* zip from
 the repository's Releases page (this port under that neutral name, with the
 port's own simple icon), or build it yourself from this source as below. Either
-way you bring your own copy of the game's Xbox files. A build of your own is
-called *The SpongeBob SquarePants Movie Video Game* and can carry an icon made
-from a picture of your choice (`docs/ICON.md`).
+way you bring your own copy of the game's files, Xbox or GameCube ("The game's
+files", below). A build of your own is called *The SpongeBob SquarePants Movie
+Video Game* and can carry an icon made from a picture of your choice
+(`docs/ICON.md`).
 
 ## Building on Windows
 
@@ -53,7 +55,7 @@ By hand:
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
 | `TSSM_PC_TITLE` | `The SpongeBob SquarePants Movie Video Game` | the program's name: the launcher's and the game's window titles, the launcher's heading, the settings window's title and About tab, message boxes, the first line of `config.ini`, and the name in `tssm.exe`'s version information (Explorer's Properties, Task Manager). No double quotes, backslashes or `%` |
-| `TSSM_PC_VERSION` | `0.9.2` | the version in `tssm.exe`'s version information: up to four numbers |
+| `TSSM_PC_VERSION` | `0.9.3` | the version in `tssm.exe`'s version information: up to four numbers |
 | `TSSM_VERSION_LINE` | empty | the About tab's version line; empty: the branch and `git describe` |
 | `TSSM_ICON_DIR` | empty | a folder made by `tools/make_icons.ps1`: `tssm.exe`'s icon (`docs/ICON.md`); empty: no icon of its own |
 
@@ -205,8 +207,8 @@ icon and, like every build, none of the game's files (players bring their
 own, as above). They are ordinary Release builds of this branch with clang++ on
 the MSVC ABI (as `build-release.bat`), set up like this:
 
-- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.2` and
-  `TSSM_VERSION_LINE=0.9.2`: the name and version in every place the options
+- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.3` and
+  `TSSM_VERSION_LINE=0.9.3`: the name and version in every place the options
   table above lists;
 - `TSSM_ICON_DIR`: `tools/make_icons.ps1` run on the drawn sponge block,
   `dist/switch/default_icon.jpg` on the `switch` branch (the Switch's and the
@@ -240,7 +242,7 @@ extracted into the work folder:
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ^
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DTSSM_BUILD_TESTS=OFF ^
           -DCMAKE_PREFIX_PATH=%R%/ffmpeg-x64 -DTSSM_ICON_DIR=%R%/icon ^
-          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.2 -DTSSM_VERSION_LINE=0.9.2 ^
+          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.3 -DTSSM_VERSION_LINE=0.9.3 ^
           -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%R%/bin-x64
     cmake --build %R%\build-x64 --target tssm
 
@@ -262,11 +264,34 @@ was configured.
 ## The game's files
 
 Not part of the port, never committed, and never to be. Extract your own Xbox
-disc and point `config.ini`'s `[assets] path` (written beside the executable on
-the first run) or the `TSSM_ASSETS` environment variable at the folder that
-directly contains `boot.HIP`, `font.HIP` and `FMV\`. The port checks for both
-files, and for the Xbox platform id (`BX`) in `boot.HIP`, before it opens a
-window.
+or GameCube disc and point `config.ini`'s `[assets] path` (written beside the
+executable on the first run) or the `TSSM_ASSETS` environment variable at the
+folder that holds them:
+
+- **Xbox:** the folder that directly contains `boot.HIP`, `font.HIP` and
+  `FMV\`, extracted from your Xbox disc image (XISO) with an XISO extractor.
+- **GameCube:** Dolphin's *Extract Entire Disc* (right-click the game in
+  Dolphin's list) writes `files\` and `sys\`; choose `files\`, or the folder
+  holding both, which the port reads from its `files\`. Only the USA disc
+  (GGVE78) has been tested. A disc image (`.iso`, `.rvz`) is not read
+  directly.
+
+The port checks for both files, and for the platform id in `boot.HIP` (`BX`
+Xbox, `GC` GameCube; a PS2 set is refused), before it opens a window, and logs
+which release it found (`tssm: game files: the GameCube release (US), disc
+GGVE78`). A GameCube package is converted to the Xbox layout as it is opened
+(`iMod.h`, `iGCSwap.h`), its textures and models are read in the GameCube's own
+formats (`docs/RENDERING.md`), and its sounds are the GameCube's DSP-ADPCM
+(`iSndGC.h`). Saves are the same on both: the game code that writes them is
+the GameCube's either way (a new game saved with each wrote the same bytes).
+
+What differs with GameCube files is what differs on the console: the
+GameCube's wording ("Press" and "R Button" where the Xbox says "Pull" and "the
+Right Trigger", the memory-card messages), its button pictures (the GameCube pad's, `iPadPrompts.h`), its
+movies (512 wide, shown as the console shows them) and its cutscene audio.
+The GameCube files also have none of the Xbox water's data, so every level has
+the GameCube water with them (`docs/RENDERING.md`, "Water"), and the Xbox extras
+get from them what they hold (below).
 
 ## Saves
 
@@ -289,7 +314,8 @@ Every save that is replaced is kept as a backup (`--restore-save`).
 The settings table is `iConfigTable.cpp` (`[assets] path, mod, mods,
 mods_folder`, `[game] boot,
 intro_movies, save_folder`, `[video] mode, width, height, ui, framerate,
-vsync, msaa, fov, backend, pipeline, hdr_glow, screen_warp`, `[input] controller, preset, layout,
+vsync, msaa, fov, backend, pipeline, hdr_glow, screen_warp`, `[extras] glow, spotlights, crowds,
+water, frame_lock` (the Xbox release's features, `docs/EXTRAS.md`), `[input] controller, preset, layout,
 button_icons, keyboard, stick_curve, deadzone, trigger_threshold,
 camera_sensitivity, camera_invert_x, camera_invert_y, mouse_camera,
 mouse_sensitivity, rumble, touch_controls, test`, `[audio] master_volume,
@@ -333,6 +359,44 @@ in `PORTING.md` (known divergences).
   keep real time, so the player falls through them; the GameCube runs these
   levels at 60, where this never happens. At 60 fps and faster nothing
   changes.
+- **The Patty Wagon drives above 60 fps as at 60.** The car's code adds its
+  push, gravity and grip once a step with no time factor, and neither console
+  runs it above 60; at 120 fps the original was 1.6 times as quick off the
+  line and fell twice as fast. Above 60 a step shorter than 1/60 s now gets
+  its share of those; at 60 and below nothing changes (`docs/EXTRAS.md`).
+
+## The Xbox release's extras
+
+The Xbox release has a few things the GameCube release cut, and the port can
+show either release's version of each: the settings window's (F1) **Xbox
+extras** rows switch each one, and **All Xbox** / **All GameCube** set them all
+at once (`[extras]` in config.ini; `docs/EXTRAS.md`). Every one is `xbox` by default (on the
+3DS, `gamecube`). Each level decides from its own files. With GameCube files,
+No Cheese!'s and Turn the Tables on Plankton's spotlights and No Cheese!'s crowd
+are made to work as on the Xbox from what those files hold; the water, Sandwich
+Driving 101's crowd and Bubble Blowing Baby Hunt's disco lights are not in them,
+so those keep the GameCube version and the row says why. The glow and the 30 fps
+levels are code only and follow the setting with either
+(`docs/EXTRAS.md`, "With GameCube files").
+
+- `glow`: the Xbox's wide, soft glow, stronger in some levels, or the
+  GameCube's tighter, fainter one.
+- `spotlights`: the moving spotlights of No Cheese!, Bubble Blowing Baby Hunt
+  (its disco lights) and Turn the Tables on Plankton on, and every spotlight
+  drawn as the Xbox draws it, lighting what it shines on and with a lamp
+  flare; or those lights off and spotlights as cones only.
+- `crowds`: the fish crowds of No Cheese! and Sandwich Driving 101 move, or
+  stand still.
+- `water`: the Xbox release's own water in the two levels whose Xbox files
+  have it, SC02's tanks and B301's sea: refraction, reflections and moving
+  ripples, from two extra pictures drawn each frame for each water area (four
+  in SC02), sized with the render size (1536x1152 at 1920x1080); or the
+  GameCube release's water. On Direct3D 9's fixed path or on Vulkan the
+  GameCube water is used, and the log says why (`docs/RENDERING.md`, "Water").
+  An older `config.ini`'s `[video] water` is read as this.
+- `frame_lock`: the six levels the GameCube holds at 30 frames a second run at
+  the frame-rate cap, or are held at 30 (the Patty Wagon drives as at 60
+  either way).
 
 ## Mods
 
@@ -352,8 +416,9 @@ writes those presented frames as `frame_NNNNN.png` into `TSSM_CAPTURE_DIR`, and
 (e.g. `400:start,1000:a`; real controllers are ignored while it is set);
 `TSSM_TEST_WARP=<frame:type,...>` emits screen warps at the player,
 `TSSM_TEST_PLACE=<frame:x:y:z[:yaw],...>` puts the player down at a spot and
-`TSSM_TEST_CAMLOG=<n>` logs the camera every n frames (`iTestEvents.h`), and `TSSM_HDR_VIEW=mask|glow` shows the glow pass's input
-or output (`docs/RENDERING.md`, which covers the console's screen effects on
+`TSSM_TEST_CAMLOG=<n>` logs the camera every n frames, `TSSM_TEST_SPOTLOG=<n>` the
+scene's spotlights and `TSSM_TEST_CROWDLOG=<n>` its crowd (`iTestEvents.h`), and `TSSM_HDR_VIEW=mask|glow|base` shows the glow pass's input
+or output, or (the Xbox glow) the frame without it (`docs/RENDERING.md`, which covers the console's screen effects on
 PC). Keep captures of game frames out of the repository.
 `TSSM_TEST_SEND=<frame:name[:event],...>` sends a scene object its event
 (`1200:AUTOSAVE_DONE_SCRIPT` ends SC02, DE02 or GG02 with its story movie;

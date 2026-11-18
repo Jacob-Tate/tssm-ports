@@ -8,6 +8,7 @@
 #include "iHost.h"
 #include "iMod.h"
 #include "iModPackage.h"
+#include "iGCPackage.h"
 
 #include "xFile.h"
 
@@ -17,6 +18,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <mutex>
+#include <string>
+#include <vector>
 
 struct file_queue_entry
 {
@@ -100,10 +105,54 @@ static void iReadFolderSetting(const char* env, const char* key, char* out, size
     }
 }
 
+static bool iResolveCaseInsensitive(char* path, size_t pathsize);
+
+// Whether `dir` directly holds boot.HIP and font.HIP, in any case.
+static bool iHoldsGameFiles(const char* dir)
+{
+    static const char* const kRequired[] = { "boot.HIP", "font.HIP" };
+    for (size_t i = 0; i < sizeof(kRequired) / sizeof(kRequired[0]); i++)
+    {
+        char path[600];
+        size_t n = strlen(dir);
+        snprintf(path, sizeof(path), "%s%s%s", dir, n > 0 && dir[n - 1] != '/' ? "/" : "",
+                 kRequired[i]);
+        if (!iResolveCaseInsensitive(path, sizeof(path)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Dolphin's "Extract Entire Disc" writes a GameCube disc as files/ (the
+// disc's own file system, where the game's files are) and sys/ (the boot
+// program and the disc header). A folder laid out that way is read from its
+// files/ folder, so either folder can be chosen.
+static void iUseDiscFilesFolder(char* root, size_t rootsize)
+{
+    if (root[0] == '\0' || iHoldsGameFiles(root))
+    {
+        return;
+    }
+
+    char files[512];
+    size_t n = strlen(root);
+    if (snprintf(files, sizeof(files), "%s%sfiles", root, root[n - 1] != '/' ? "/" : "") >=
+            (int)sizeof(files) ||
+        !iResolveCaseInsensitive(files, sizeof(files)) || !iHoldsGameFiles(files) ||
+        strlen(files) + 1 > rootsize)
+    {
+        return;
+    }
+    snprintf(root, rootsize, "%s", files);
+}
+
 const char* iFileAssetRoot()
 {
     static char sRoot[512];
     iReadFolderSetting("TSSM_ASSETS", "assets.path", sRoot, sizeof(sRoot));
+    iUseDiscFilesFolder(sRoot, sizeof(sRoot));
     return sRoot;
 }
 
@@ -436,24 +485,20 @@ const char* iFileMissingAssetPath()
 
 // Which console's packer wrote the assets, out of boot.HIP's own header.
 //
-// The port reads the Xbox release. A GameCube or PS2 set does not announce
-// itself -- it loads, and then fails somewhere far from the cause, because the
-// packer's container is the same on every platform and only what is inside it
-// differs. A GameCube boot.HIP gets as far as the animation tables before
+// The port reads the Xbox release and the GameCube one, whose packages are
+// converted to the Xbox layout as they are opened (iMod.h). Neither a GameCube
+// nor a PS2 package announces itself -- the packer's container is the same on
+// every platform and only what is inside it differs -- and read as Xbox data a
+// GameCube boot.HIP gets as far as the animation tables before
 // zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a big-endian count of 74
-// as 1,241,513,984 and walks off the end of memory. That crash says nothing
-// about what is actually wrong.
+// as 1,241,513,984 and walks off the end of memory. A PS2 set, which the port
+// cannot read, would do the same, far from the cause.
 //
-// HIPA holds PACK, PACK holds PLAT, and PLAT is a run of NUL-terminated
-// strings: a two-letter id, then the long name, then the video standard, the
-// region and the project. Chunk sizes are big-endian on every platform -- the
-// container is the packer's, not the console's -- so this reads the same way
-// whatever wrote it. Every chunk here is at a known small offset, so a few
-// hundred bytes off the front of the file is enough.
-//
-// iHipPlatform reads any package's PLAT; iFileAssetPlatform asks it of the asset
-// root's boot.HIP. Writes "" to both outputs when there is no answer.
-static bool iHipPlatform(const char* path, char* id, size_t idsize, char* name, size_t namesize)
+// The PLAT chunk says which: iGCPackage.h reads it. iHipPlatform asks it of
+// any package; iFileAssetPlatform of the asset root's boot.HIP. Writes "" to
+// both outputs when there is no answer.
+static iGCPlatform iHipPlatform(const char* path, char* id, size_t idsize, char* name,
+                                size_t namesize)
 {
     id[0] = '\0';
     name[0] = '\0';
@@ -461,70 +506,59 @@ static bool iHipPlatform(const char* path, char* id, size_t idsize, char* name, 
     FILE* fp = fopen(path, "rb");
     if (fp == NULL)
     {
-        return false;
+        return IGCPLAT_NONE;
     }
 
     U8 head[512];
     size_t got = fread(head, 1, sizeof(head), fp);
     fclose(fp);
 
-    if (got < 16 || memcmp(head, "HIPA", 4) != 0)
+    return iGCPackagePlatform(head, (U32)got, id, (U32)idsize, name, (U32)namesize);
+}
+
+iGCPlatform iFilePackagePlatform(const char* path)
+{
+    // A package is asked for each reader that opens it (the packer, the sound
+    // and cutscene readers), so the answer is kept by path until the file's
+    // size or time changes.
+    struct Entry
     {
-        return false;
+        std::string path;
+        U64 size;
+        S64 mtime;
+        iGCPlatform platform;
+    };
+    static std::vector<Entry> sCache;
+    static std::mutex sCacheLock;
+
+    iHostFileInfo info;
+    if (path == NULL || !iHostStat(path, &info) || !info.is_file)
+    {
+        return IGCPLAT_NONE;
     }
 
-    // HIPA's own payload is the rest of the file, so step into it and walk the
-    // top-level chunks; PACK's children are walked the same way.
-    size_t o = 8;
-    size_t end = got;
-
-    for (int depth = 0; depth < 2; depth++)
+    std::lock_guard<std::mutex> hold(sCacheLock);
+    for (size_t i = 0; i < sCache.size(); i++)
     {
-        bool descended = false;
-
-        while (o + 8 <= end)
+        if (sCache[i].path == path)
         {
-            const U8* c = head + o;
-            U32 size = ((U32)c[4] << 24) | ((U32)c[5] << 16) | ((U32)c[6] << 8) | c[7];
-            size_t body = o + 8;
-
-            if (memcmp(c, "PACK", 4) == 0)
+            if (sCache[i].size == info.size && sCache[i].mtime == info.mtime)
             {
-                o = body;
-                end = (body + size < got) ? body + size : got;
-                descended = true;
-                break;
+                return sCache[i].platform;
             }
-
-            if (memcmp(c, "PLAT", 4) == 0)
-            {
-                size_t stop = (body + size < got) ? body + size : got;
-                snprintf(id, idsize, "%.*s", (int)(stop - body), (const char*)head + body);
-
-                // The long name is the string after it.
-                size_t n = body + strlen(id);
-                while (n < stop && head[n] == '\0')
-                {
-                    n++;
-                }
-                snprintf(name, namesize, "%.*s", (int)(stop - n), (const char*)head + n);
-                return id[0] != '\0';
-            }
-
-            if (size == 0)
-            {
-                break;
-            }
-            o = body + size;
-        }
-
-        if (!descended)
-        {
+            sCache.erase(sCache.begin() + i);
             break;
         }
     }
 
-    return false;
+    char id[8];
+    char name[32];
+    Entry e = { path, info.size, info.mtime, iHipPlatform(path, id, sizeof(id), name, sizeof(name)) };
+    if (sCache.size() < 512)
+    {
+        sCache.push_back(e);
+    }
+    return e.platform;
 }
 
 const char* iFileAssetPlatform(const char** longName)
@@ -544,7 +578,8 @@ const char* iFileAssetPlatform(const char** longName)
         return NULL;
     }
 
-    if (!iHipPlatform(path, sId, sizeof(sId), sName, sizeof(sName)))
+    iGCPlatform platform = iHipPlatform(path, sId, sizeof(sId), sName, sizeof(sName));
+    if (platform == IGCPLAT_NONE || platform == IGCPLAT_NOTPACKAGE)
     {
         return NULL;
     }
@@ -593,6 +628,56 @@ static bool iHasPackageExtension(const char* path)
            (iHostStrCaseCmp(path + n - 4, ".HIP") == 0 || iHostStrCaseCmp(path + n - 4, ".HOP") == 0);
 }
 
+// Whether a mod's package that is not a GameCube one (those are checked as
+// they are converted) has a table of contents the packer can read
+// (iModPkgCheck): a mod cut short, or damaged in its header, is refused before
+// the packer runs off it. Kept by path until the file's size or time changes,
+// as the sound layer opens a package again for each stream it plays.
+static bool iModPackageHoldsTogether(const char* path, std::string* why)
+{
+    struct Entry
+    {
+        std::string path;
+        U64 size;
+        S64 mtime;
+        bool ok;
+        std::string why;
+    };
+    static std::vector<Entry> sCache;
+    static std::mutex sCacheLock;
+
+    iHostFileInfo info;
+    if (!iHostStat(path, &info) || !info.is_file)
+    {
+        *why = "it cannot be opened";
+        return false;
+    }
+
+    std::lock_guard<std::mutex> hold(sCacheLock);
+    for (size_t i = 0; i < sCache.size(); i++)
+    {
+        if (sCache[i].path == path)
+        {
+            if (sCache[i].size == info.size && sCache[i].mtime == info.mtime)
+            {
+                *why = sCache[i].why;
+                return sCache[i].ok;
+            }
+            sCache.erase(sCache.begin() + i);
+            break;
+        }
+    }
+
+    Entry e = { path, info.size, info.mtime, false, std::string() };
+    e.ok = iModPkgCheck(path, false, &e.why);
+    *why = e.why;
+    if (sCache.size() < 512)
+    {
+        sCache.push_back(e);
+    }
+    return e.ok;
+}
+
 // The mod folder's copy of a file under the asset root. When the mod has one,
 // its path is written over `path` and the result is true.
 //
@@ -601,9 +686,16 @@ static bool iHasPackageExtension(const char* path)
 // to the base path applies to both. A path outside the asset root is left
 // alone.
 //
-// A package from another console's release is refused and the original is
-// read: the port only understands the Xbox layout, and a GameCube HIP loads
-// and then crashes far from the cause. See iFileAssetPlatform.
+// A GameCube package is read through its converted view (iModOpenPackage),
+// and is used only if it converts: one that cannot (a table of contents that
+// does not hold together, an asset with no rule, or one that does not fit its
+// own counts) is refused with the reason, and the original is read. An Xbox
+// package is used only if its table of contents holds together
+// (iModPkgCheck). A file with a package's name that is not a package (empty,
+// or not a HIPA file) is refused, and so is a package from any other
+// console's release: the port understands the Xbox and GameCube layouts only,
+// and a PS2 HIP loads and then crashes far from the cause. See
+// iFileAssetPlatform.
 //
 // TSSM: the mods/ folder's loose files (iMod.h, `files/` in each mod) are
 // asked after the single mod folder, with the same platform check.
@@ -651,20 +743,66 @@ static bool iModOverride(char* path, size_t pathsize)
 
     if (iHasPackageExtension(candidate))
     {
-        char id[8];
-        char longName[32];
         // TSSM's Xbox packs say "BX" where BfBB's say "XB" (heavyironmodding.org).
-        if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
-            strcmp(id, "BX") != 0 && strcmp(id, "XB") != 0)
+        // A package with no PLAT is read as Xbox, as before.
+        iGCPlatform platform = iFilePackagePlatform(candidate);
+        if (platform == IGCPLAT_NOTPACKAGE)
         {
             if (iModFirstReport(rel))
             {
-                printf("tssm: mod: %s is from the %s release, not the Xbox one; using the "
-                       "original\n",
-                       rel, longName[0] != '\0' ? longName : id);
+                printf("tssm: mod: %s is not a HIP/HOP package (empty, or damaged at the "
+                       "start); using the original\n",
+                       rel);
                 fflush(stdout);
             }
             return false;
+        }
+        if (platform == IGCPLAT_OTHER)
+        {
+            if (iModFirstReport(rel))
+            {
+                char id[8];
+                char unused[32];
+                iHipPlatform(candidate, id, sizeof(id), unused, sizeof(unused));
+                printf("tssm: mod: %s is from the %s release, not the Xbox or GameCube one; "
+                       "using the original\n",
+                       rel, id);
+                fflush(stdout);
+            }
+            return false;
+        }
+        if (platform == IGCPLAT_GAMECUBE)
+        {
+            // Converted now, so that a package that cannot be is refused
+            // before anything reads it; the view is kept for the open that
+            // follows.
+            bool failed = false;
+            iModPkgRelease(iModOpenPackage(candidate, true, &failed));
+            if (failed)
+            {
+                if (iModFirstReport(rel))
+                {
+                    printf("tssm: mod: %s is a GameCube package that cannot be converted "
+                           "(above); using the original\n",
+                           rel);
+                    fflush(stdout);
+                }
+                return false;
+            }
+        }
+        else
+        {
+            std::string why;
+            if (!iModPackageHoldsTogether(candidate, &why))
+            {
+                if (iModFirstReport(rel))
+                {
+                    printf("tssm: mod: %s cannot be read: %s; using the original\n", rel,
+                           why.c_str());
+                    fflush(stdout);
+                }
+                return false;
+            }
         }
     }
 
@@ -683,6 +821,21 @@ static bool iModOverride(char* path, size_t pathsize)
 
     memcpy(path, candidate, len + 1);
     return true;
+}
+
+iGCPlatform iFilePackagePlatformOf(const char* name)
+{
+    if (name == NULL)
+    {
+        return IGCPLAT_NONE;
+    }
+    char path[sizeof(((tag_iFile*)0)->path)];
+    iFileFullPath(name, path);
+    if (!iModOverride(path, sizeof(path)))
+    {
+        iResolveCaseInsensitive(path, sizeof(path));
+    }
+    return iFilePackagePlatform(path);
 }
 
 bool iFileModReplaces(const char* rel)
@@ -752,7 +905,7 @@ void iFileMissingPackage(U32 sid, S32 options, const char* filename)
     {
         printf("tssm: FATAL -- a game file could not be read: %s\n", want);
         printf("tssm:   it is there, but the game could not load it (damaged, cut short, or "
-               "not from the Xbox release).\n");
+               "not from the Xbox or GameCube release).\n");
     }
     else
     {
@@ -854,7 +1007,8 @@ static void reportMissingFile(const char* name, const char* path)
         printf("tssm:   directory that DIRECTLY contains boot.HIP, FONT.HIP and fmv/ --\n");
         printf("tssm:   not a folder above it, and not a disc image. The game does not\n");
         printf("tssm:   check, so the wrong path is a hang on a blank window rather\n");
-        printf("tssm:   than an error.\n");
+        printf("tssm:   than an error. (A GameCube disc extracted with Dolphin: its\n");
+        printf("tssm:   files/ folder, or the folder holding files/ and sys/.)\n");
     }
 
     printf("tssm:   not found: %s\n", path);
@@ -869,6 +1023,31 @@ static void reportMissingFile(const char* name, const char* path)
     }
 
     fflush(stdout);
+}
+
+// A GameCube game file that cannot be converted (iMod.h has why, printed
+// already): the same box as for a scene package that does not load, and the
+// end of the run, rather than a game reading half-converted data.
+static void reportUnreadablePackage(const char* path)
+{
+    printf("tssm: FATAL -- a game file could not be read: %s\n", path);
+    printf("tssm:   it is there, but it is a GameCube package the port cannot convert "
+           "(damaged, or changed by a tool).\n");
+    fflush(stdout);
+
+#ifdef __3DS__
+    const char* closing = "";
+#else
+    const char* closing = "\n\nThe game will close now.";
+#endif
+    char message[1536];
+    snprintf(message, sizeof(message),
+             "A game file could not be read:\n\n%s\n\n"
+             "It is there, but the game could not load it. Copy it again from your "
+             "game files.%s",
+             path, closing);
+    iHostErrorBox(TSSM_GAME_TITLE, message);
+    exit(1);
 }
 
 U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)
@@ -923,7 +1102,17 @@ U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)
         // TSSM_TEST_AUDIO_RESTART's "load" moment (iAudioSDLTest.h).
         iAudioSDLTestLoad(ps->path);
 
-        ps->view = iModOpenPackage(ps->path);
+        // A GameCube package is converted to the Xbox layout in its view
+        // (iMod.h), mods or not.
+        const bool gamecube = iFilePackagePlatform(ps->path) == IGCPLAT_GAMECUBE;
+        bool failed = false;
+        ps->view = iModOpenPackage(ps->path, gamecube, &failed);
+        if (failed)
+        {
+            // Only a game file gets here: a mod's package that cannot be
+            // converted was refused in iModOverride.
+            reportUnreadablePackage(ps->path);
+        }
         if (ps->view != NULL)
         {
             len = (long)iModPkgSize(ps->view);

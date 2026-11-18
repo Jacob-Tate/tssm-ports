@@ -84,7 +84,7 @@ void iGui::DrawAbout()
 
     ImGui::Spacing();
     ImGui::TextWrapped("This port contains no game data. It reads the files of your own copy of "
-                       "the Xbox release. The SpongeBob SquarePants Movie and its characters "
+                       "the Xbox or GameCube release. The SpongeBob SquarePants Movie and its characters "
                        "belong to their owners; this project is not affiliated with them.");
 
     ImGui::SeparatorText("Licenses");

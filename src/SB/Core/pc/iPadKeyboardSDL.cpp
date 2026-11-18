@@ -327,8 +327,8 @@ bool iPadKeyboardPoll(iPadHostState* s)
     if (sTest == NULL)
     {
         // SDL_GetKeyboardState reads a table the event pump maintains, so it is
-        // only as fresh as the last pump.
-        SDL_PumpEvents();
+        // only as fresh as the last pump: iPadHostPoll's (iPadHostSDL.cpp, the
+        // only caller), which has just run.
 
         // Focus is elsewhere: nothing held, so the character stops rather than
         // running on with a key the game never sees released. Still connected.
@@ -415,11 +415,9 @@ S32 iPadKeyboardCapture(S32 prime, char* out, S32 size)
     S32 count;
     const iPadBindToken* tokens = iPadKeyTokens(&count);
 
-    if (sTest == NULL)
-    {
-        SDL_PumpEvents();
-    }
-
+    // No pump of its own: the overlay asks once a presented frame, which has
+    // pumped (iWindowSDL.cpp), and the launcher once a pass of its own event
+    // loop.
     S32 found = -1;
     for (S32 code = 0; code < SDL_SCANCODE_COUNT; code++)
     {

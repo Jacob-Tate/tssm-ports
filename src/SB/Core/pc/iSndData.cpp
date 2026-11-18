@@ -1,4 +1,5 @@
 #include "iSndData.h"
+#include "iSndGC.h"
 #include "iSndXbox.h"
 
 #include "iFile.h"
@@ -236,8 +237,9 @@ const void* iSndDataAcquire(U32 assetID, const iSndDataSource* src, U32* bytes)
 
         if (raw != NULL)
         {
-            pcm = iSndXboxDecode(raw, src->size, src->format_tag, src->channels, src->block_align,
-                                 src->bits, &got);
+            pcm = src->gc != NULL ? iSndGCDecode(src->gc, raw, src->size, &got) :
+                                    iSndXboxDecode(raw, src->size, src->format_tag, src->channels,
+                                                   src->block_align, src->bits, &got);
             free(raw);
         }
 

@@ -381,6 +381,14 @@ if(TSSM_NEEDS_SDL)
     set(SDL_POWER OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
     target_compile_options(SDL3-static PRIVATE ${TSSM_NO_WARNINGS})
+    # SDL's configure finds itoa, which the Microsoft C runtime only has under
+    # its old name, in oldnames.lib. Clang's driver adds that library by
+    # default, but CMake's -nostdlib link for this ABI does not, so an
+    # executable whose other objects do not happen to pull it in fails to link
+    # once SDL is rebuilt (tssm_sndtest).
+    if(WIN32 AND NOT MINGW)
+      target_link_libraries(SDL3-static INTERFACE oldnames)
+    endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_target_properties(SDL3-static PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
     endif()
@@ -577,6 +585,9 @@ target_link_libraries(tssm_rw PUBLIC librw ${WINDOW_LIBS})
 target_compile_options(tssm_rw PRIVATE ${TSSM_NO_WARNINGS})
 # TSSM_TEST_HANG_DUMP's heartbeat (iHangDump.h; the dump is in tssm_main.cpp).
 target_sources(tssm_rw PRIVATE ${PC_DIR}/iHangDump.cpp)
+# The Xbox water's tiles and strips (iXboxWaterGrid.h), for rw/xboxwater.cpp and the
+# game half alike.
+target_sources(tssm_rw PRIVATE ${PC_DIR}/iXboxWaterGrid.cpp)
 
 # --- the program's name and version ------------------------------------------------
 # TSSM_PC_TITLE is what the program calls itself: the launcher's and the
@@ -590,7 +601,7 @@ target_sources(tssm_rw PRIVATE ${PC_DIR}/iHangDump.cpp)
 # TSSM Dehydrated release").
 set(TSSM_PC_TITLE "The SpongeBob SquarePants Movie Video Game" CACHE STRING
   "The program's name: window titles, the launcher, the overlay, message boxes, tssm.exe's version information")
-set(TSSM_PC_VERSION "0.9.2" CACHE STRING
+set(TSSM_PC_VERSION "0.9.3" CACHE STRING
   "The version in tssm.exe's version information: up to four numbers, such as 0.9.1")
 set(TSSM_VERSION_LINE "" CACHE STRING
   "The About tab's version line; empty: the branch and git describe")
@@ -815,9 +826,14 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iSaveZip.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
+  # The GameCube release's sound tables and DSP-ADPCM (iSndGC.h).
+  ${PC_DIR}/iSndDsp.cpp
+  ${PC_DIR}/iSndGC.cpp
   ${PC_DIR}/iSndXbox.cpp
   ${PC_DIR}/iSystem.cpp
   ${PC_DIR}/iTime.cpp
+  # The Xbox release's features beside the GameCube's ([extras], iExtras.h).
+  ${PC_DIR}/iExtras.cpp
 
   # The host layer under them (treedome).
   ${PC_DIR}/iBoot.cpp
@@ -850,6 +866,11 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iModIni.cpp
   ${PC_DIR}/iModPackage.cpp
   ${PC_DIR}/iModTexture.cpp
+
+  # GameCube packages: which console wrote a package (iGCPackage.h), and the
+  # per-type byte swaps into the Xbox layout (iGCSwap.h, tools/gcswap).
+  ${PC_DIR}/iGCPackage.cpp
+  ${PC_DIR}/iGCSwap.cpp
 
   ${TSSM_STUB_SOURCES}
 
@@ -906,6 +927,16 @@ set(TSSM_GAME_OPTIONS
 set_source_files_properties(${PC_DIR}/iWad.cpp ${PC_DIR}/common.cpp PROPERTIES
   COMPILE_OPTIONS "${TSSM_GAME_OPTIONS}"
   COMPILE_DEFINITIONS "NON_MATCHING")
+
+# The sound decoders (Xbox ADPCM, GameCube DSP-ADPCM) optimised in a Debug build
+# too. They run on the game thread when a sound or a stream starts -- a stream
+# decodes its first seconds at once -- and unoptimised that was 7 to 22 ms in one
+# frame, a visible hitch at 120 fps (docs/PACING.md). Integer code: the samples
+# are the same either way.
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  set_property(SOURCE ${PC_DIR}/iSndXbox.cpp ${PC_DIR}/iSndDsp.cpp APPEND PROPERTY
+    COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+endif()
 # The widening reads the game's asset structs, so it sees them as the game
 # code does: the game's flags and its prefix header.
 set_source_files_properties(${PC_DIR}/iAssetWiden.cpp ${PC_DIR}/iAssetHooks.cpp PROPERTIES
@@ -950,6 +981,14 @@ target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
 # unit too, for the same reason.
 target_sources(tssm_game PRIVATE ${PC_DIR}/iTestSend.cpp)
+# The Xbox release's water (iXboxWater.h): a game unit too. Its arithmetic
+# (iXboxWaterGrid.h, no game code) is in tssm_rw with the surface draw that uses it
+# (rw/xboxwater.cpp). Without it, the Xbox files' water bodies look as the GameCube
+# files' water does (iWaterBody.h), a game unit as well.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iXboxWater.cpp ${PC_DIR}/iXboxWaterPass.cpp
+  ${PC_DIR}/iWaterBody.cpp)
+# The Xbox extras from a level's GameCube files (iExtrasGC.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iExtrasGC.cpp)
 # SBPrefix.h is the console's precompiled prefix (-prefix SBPrefix.mch): every
 # game unit sees it first.
 target_compile_options(tssm_game PRIVATE ${TSSM_NO_WARNINGS} ${TSSM_GAME_OPTIONS}
@@ -1217,15 +1256,106 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   endif()
 endif()
 
+# --- tssm_watertest ---------------------------------------------------------------
+# The Xbox water's tiles, strips and bump clock (iXboxWaterGrid.h) on made-up
+# meshes: no game, no data. Run it as `tssm_watertest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_watertest ${PC_DIR}/tests/watertest.cpp ${PC_DIR}/iXboxWaterGrid.cpp)
+  target_include_directories(tssm_watertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_watertest COMMAND tssm_watertest)
+endif()
+
+# --- tssm_gcswaptest -------------------------------------------------------------
+# tssm_gcswaptest: the GameCube byte swaps (src/SB/Core/pc/iGCSwap.h) run over
+# every package of an extracted GameCube disc, without the game: each package's
+# platform, each asset swapped in a buffer that ends at an inaccessible page (so
+# an overrun stops the test where it happens), cut-short and damaged copies, and
+# with an Xbox folder each result against the Xbox asset of the same id.
+#   build-*/tssm_gcswaptest <GameCube files> [<Xbox files>] [--fuzz N] [--type XXXX]
+# tools/gcswap/README.md says how to read its report.
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcswaptest ${PC_DIR}/tests/gcswaptest.cpp ${PC_DIR}/iGCSwap.cpp
+    ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcswaptest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_options(tssm_gcswaptest PRIVATE ${TSSM_NO_WARNINGS})
+  # TSSM_TEST_GC_ASSETS (an extracted GameCube disc's files/ folder) registers
+  # it with ctest, against TSSM_TEST_ASSETS (the Xbox folder) when that is set.
+  set(TSSM_TEST_GC_ASSETS "" CACHE PATH "An extracted GameCube disc, for tssm_gcswaptest")
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcswaptest COMMAND tssm_gcswaptest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_gcrwtest ---------------------------------------------------------------
+# tssm_gcrwtest: the GameCube RenderWare data -- native textures, geometry and
+# skins -- read with the port's librw (tools/librw/gc_*.patch) over every package
+# of an extracted GameCube disc, without the game or a render device, and each
+# compared with the Xbox texture or atomic of the same id (tests/gcrwtest.cpp).
+#   build-*/tssm_gcrwtest <GameCube files> [<Xbox files>] [--fuzz N] [--only tex|geo]
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcrwtest ${PC_DIR}/tests/gcrwtest.cpp ${PC_DIR}/iGCPackage.cpp
+    ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcrwtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tssm_gcrwtest PRIVATE librw)
+  target_compile_options(tssm_gcrwtest PRIVATE ${TSSM_NO_WARNINGS})
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcrwtest COMMAND tssm_gcrwtest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_gcsndtest --------------------------------------------------------------
+# tssm_gcsndtest: the GameCube sound data -- the sound tables, their FSB3 banks
+# of DSP-ADPCM and the cutscene tracks -- read and decoded with the code the
+# game uses (iSndGC.cpp, iSndDsp.cpp) over every package of an extracted
+# GameCube disc, and each sound compared with the Xbox sound of the same id
+# (tests/gcsndtest.cpp).
+#   build-*/tssm_gcsndtest <GameCube files> [<Xbox files>] [--fuzz N] [--dump DIR]
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcsndtest ${PC_DIR}/tests/gcsndtest.cpp ${PC_DIR}/iSndGC.cpp
+    ${PC_DIR}/iSndDsp.cpp ${PC_DIR}/iSndXbox.cpp ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcsndtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_options(tssm_gcsndtest PRIVATE ${TSSM_NO_WARNINGS})
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcsndtest COMMAND tssm_gcsndtest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_extrastest ----------------------------------------------------------------
+# tssm_extrastest: the Xbox extras' decisions (src/SB/Core/pc/iExtras.h) and
+# their [extras] settings through the real config layer, without the game; the
+# pacer, the renderer and the pad table are stand-ins in the test itself.
+#   build-*/tssm_extrastest <scratch folder>
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_extrastest ${PC_DIR}/tests/extrastest.cpp ${PC_DIR}/iExtras.cpp
+    ${PC_DIR}/iConfig.cpp ${PC_DIR}/iConfigEdit.cpp ${PC_DIR}/iConfigTable.cpp ${HOST_SOURCES})
+  target_include_directories(tssm_extrastest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(tssm_extrastest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(tssm_extrastest PRIVATE dbghelp)
+  endif()
+  enable_testing()
+  add_test(NAME tssm_extrastest
+           COMMAND tssm_extrastest ${CMAKE_CURRENT_BINARY_DIR}/tssm_extrastest_run)
+endif()
+
 # --- tssm_modtest ----------------------------------------------------------------
 # tssm_modtest: the mod system run on its own -- INI overlays, sound decoding,
-# package views checked against real packages, the mod manager. No game code,
-# renderer or window. Run it as `tssm_modtest <asset folder> <scratch folder>`
-# (src/SB/Core/pc/tests/modtest.cpp, docs/MODDING.md).
+# package views checked against real packages, tables of contents, GameCube
+# packages, the mod manager. No game code, renderer or window. Run it as
+# `tssm_modtest <asset folder> <scratch folder> [<GameCube files>]`
+# (src/SB/Core/pc/tests/modtest.cpp, docs/MODDING.md). TSSM_TEST_ASSETS
+# registers it with ctest, with TSSM_TEST_GC_ASSETS when that is set.
 if(TSSM_BUILD_TESTS AND NOT ANDROID)
   add_executable(tssm_modtest ${PC_DIR}/tests/modtest.cpp
     ${PC_DIR}/iMod.cpp ${PC_DIR}/iModAudio.cpp ${PC_DIR}/iModIni.cpp ${PC_DIR}/iModPackage.cpp
-    ${HOST_SOURCES})
+    ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iGCSwap.cpp ${HOST_SOURCES})
   target_include_directories(tssm_modtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   if(FMV_INCLUDES)
@@ -1239,5 +1369,10 @@ if(TSSM_BUILD_TESTS AND NOT ANDROID)
     target_link_libraries(tssm_modtest PRIVATE user32 dbghelp)
   elseif(NOT APPLE)
     target_link_libraries(tssm_modtest PRIVATE dl)
+  endif()
+  if(TSSM_TEST_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_modtest COMMAND tssm_modtest ${TSSM_TEST_ASSETS}
+      ${CMAKE_CURRENT_BINARY_DIR}/modtest-scratch ${TSSM_TEST_GC_ASSETS})
   endif()
 endif()

@@ -10,31 +10,39 @@ game's own decompiled code runs unchanged in behaviour; a new platform layer
 - Windows, 64-bit (x64) and 32-bit (x86). The code also has Linux and macOS paths, but
   they are not tested.
 - Widescreen, any resolution, high frame rates, MSAA, a settings window (F1, or Back +
-  Start on a controller), controller and keyboard bindings, mods, and save import and
-  export with Dolphin and the GameCube.
+  Start on a controller), controller and keyboard bindings, mods (Xbox or GameCube
+  packages), and save import and export with Dolphin and the GameCube.
+- The Xbox release's extras, each an option beside the GameCube's version and on by
+  default: its glow, its moving spotlights, its fish crowds, its water (reflections,
+  refraction and ripples) and full frame rate in the six levels the GameCube holds at
+  30 fps. The settings window's *Xbox extras* rows switch each one, and *All GameCube*
+  sets them all to the GameCube's version.
 
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
-  for Windows: `TSSM-Dehydrated-0.9.2-Windows.zip` (64-bit) and
-  `TSSM-Dehydrated-0.9.2-Windows-32bit.zip` (32-bit). It is this branch, built under that
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.3
+  for Windows: `TSSM-Dehydrated-0.9.3-Windows.zip` (64-bit) and
+  `TSSM-Dehydrated-0.9.3-Windows-32bit.zip` (32-bit). It is this branch, built under that
   neutral name with the port's own simple icon, and has no game data. It has no updater: a
   new version is a new zip.
 - **Build it yourself** from this source, as below. A build of your own is called *The
   SpongeBob SquarePants Movie Video Game*, and can carry an icon made from a picture of your
   choice (`docs/ICON.md`).
 
-Either way you bring your own copy of the game's files (below).
+Either way you bring your own copy of the game's files, from the Xbox or the GameCube disc
+(below).
 
 To play the zip: unzip it into a folder of its own (not under `Program Files`) and start
 `tssm.exe`. The program is not signed, so Windows may warn that it does not know the
 publisher: choose *More info*, then *Run anyway*. On the first start the launcher asks for
-the game's files: *Browse...* to the folder that holds `boot.HIP`, `font.HIP` and `FMV`,
-then *Play*. `config.ini` is written beside `tssm.exe`, saves go to
-`%APPDATA%\tssm\saves`, and the log of the last run to `%APPDATA%\tssm\last_run.log`. The
-renderer is Direct3D 9 unless you pick Direct3D 11 or OpenGL 3 (launcher or settings
-window, Display, Renderer). `src/SB/Core/pc/README.md` ("Building the TSSM Dehydrated
+the game's files: *Browse...* to the folder that holds `boot.HIP`, `font.HIP` and `FMV`
+(Xbox), or to the `files` folder of a GameCube disc extracted with Dolphin, then *Play*.
+`config.ini` is written beside `tssm.exe`, saves go to `%APPDATA%\tssm\saves`, and the log
+of the last run to `%APPDATA%\tssm\last_run.log`. The renderer is Direct3D 9 unless you pick
+Direct3D 11 or OpenGL 3 (launcher or settings window, Display, Renderer). The Xbox extras
+are on by default; the launcher's and the settings window's *Xbox extras* rows switch each
+one to the GameCube's version. `src/SB/Core/pc/README.md` ("Building the TSSM Dehydrated
 release") has the exact commands the zips were made with.
 
 This repository and its branches
@@ -60,10 +68,23 @@ Every branch builds from source; you bring your own game files.
 You need your own copy of the game
 ----------------------------------
 
-This repository contains **no game data**. The port reads the files of the **Xbox**
-release of *The SpongeBob SquarePants Movie*, so you need your own copy of that disc and
-its files copied off it (about 1 GB): the folder that directly holds `boot.HIP`,
-`font.HIP` and `FMV\`. Never put those files in the repository.
+This repository contains **no game data**. The port reads the files of the **Xbox** or
+the **GameCube** release of *The SpongeBob SquarePants Movie*, so you need your own copy
+of one of those discs and its files copied off it (about 1 GB). Never put those files in
+the repository.
+
+- **GameCube:** in Dolphin, right-click the game and choose *Extract Entire Disc*. It
+  writes a `files` and a `sys` folder; point the game at either `files` or the folder
+  holding both. Only the USA disc (GGVE78) has been tested.
+- **Xbox:** extract the files from your Xbox disc image (XISO) with an XISO extractor;
+  point the game at the folder that directly holds `boot.HIP`, `font.HIP` and `FMV\`.
+
+A disc image (`.iso`, `.rvz`) is not read directly: extract it first. With GameCube files
+the game is the GameCube release: its wording, its button pictures, its sound and its
+movies. The Xbox extras come from what the GameCube files hold: No Cheese!'s and Turn the
+Tables on Plankton's spotlights and No Cheese!'s crowd work as on the Xbox; the water,
+Sandwich Driving 101's crowd and Bubble Blowing Baby Hunt's disco lights are not in them,
+so those keep the GameCube version, and the settings window says so (`docs/EXTRAS.md`).
 
 Building on Windows
 -------------------
@@ -103,8 +124,10 @@ Playing
 -------
 
 1. Start `bin\tssm.exe`. On the first run it writes `config.ini` beside itself.
-2. Point the game at your Xbox files: set `path` under `[assets]` in `config.ini` (or the
-   `TSSM_ASSETS` environment variable) to the folder that holds `boot.HIP`.
+2. Point the game at your game files, Xbox or GameCube: on the first run a window asks
+   for the folder; or set `path` under `[assets]` in `config.ini` (or the `TSSM_ASSETS`
+   environment variable) to the folder that holds `boot.HIP` (for a GameCube disc
+   extracted with Dolphin, its `files` folder or the one above it).
 3. F1, or Back + Start on a controller, opens the settings window.
 
 Saves go to `%APPDATA%\tssm\saves`, and the log of the last run to
@@ -118,13 +141,19 @@ More documentation:
 | `docs/GUI.md` | the settings window and the launcher |
 | `docs/SAVES.md` | save files, and moving them to and from Dolphin or a GameCube |
 | `docs/MODDING.md` | mods: replacing textures, sounds, text and whole assets |
-| `docs/RENDERING.md`, `docs/WIDESCREEN.md` | how the console's screen effects and widescreen are done |
+| `docs/RENDERING.md`, `docs/WIDESCREEN.md` | how the console's screen effects, the water and widescreen are done |
+| `docs/EXTRAS.md` | the Xbox release's extras: glow, spotlights, crowds, water, the 30 fps levels |
+| `docs/PACING.md` | how a frame is paced, and what the frame-rate cap does |
 | `docs/ICON.md` | using your own picture as the program's icon |
 | `src/SB/Core/pc/README.md` | building in detail, settings, switches and test runs |
 | `src/SB/Core/pc/PORTING.md` | where every file of the platform layer came from, and what is still stubbed |
 
-The GameCube build still works here
------------------------------------
+Building the original GameCube program
+--------------------------------------
+
+This section is about rebuilding the GameCube game's own program (`main.dol`) from the
+decompilation, not about playing the game: for that, see "You need your own copy of the
+game" above.
 
 The port's changes to shared game code are all behind `PLATFORM_PC`, which only the port's
 CMake build defines, so this branch still builds the original GameCube program exactly

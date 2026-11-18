@@ -49,6 +49,10 @@
 #include "iEnv.h"
 #include "iFile.h"
 
+#ifdef PLATFORM_PC
+#include "iXboxWater.h"
+#endif
+
 #include <dolphin/os.h>
 
 #include <stdio.h>
@@ -384,6 +388,12 @@ void zGameSetup()
         zEntEventAll(NULL, 0, eEventLevelBegin, NULL);
     }
 
+#ifdef PLATFORM_PC
+    // PC: the Xbox water's bodies hidden and their tiles built (iXboxWater.h), where the Xbox
+    // does it (0x52A48).
+    zWaterBody::setup_all();
+#endif
+
     if (globals.updateMgr != NULL)
     {
         xUpdateCull_Update(globals.updateMgr, 100);
@@ -623,6 +633,9 @@ void zGameLoop()
 #ifdef PLATFORM_PC
             // PC: the shadows, before the scene's camera begins (zScene.cpp).
             zScenePreRenderShadows();
+            // PC: the Xbox water's refraction and reflection targets, there
+            // too (iXboxWater.h).
+            xWaterPreRender(globals.screen->icam);
 #endif
         }
 

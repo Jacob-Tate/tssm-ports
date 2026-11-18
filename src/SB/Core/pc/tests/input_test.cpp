@@ -28,6 +28,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <rwcore.h>
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +85,12 @@ void* xSTFindAsset(U32, U32* size)
     {
         *size = 0;
     }
+    return NULL;
+}
+
+// Nor does any package: the prompts ask which release the font came from.
+char* xST_xAssetID_HIPFullPath(U32)
+{
     return NULL;
 }
 
@@ -335,6 +343,16 @@ static void TestTables()
 
     CheckBits(iPadPromptsTextureBits("pad_button3"), XPAD_BUTTON_TRIANGLE, "pad_button3 is B");
     CheckBits(iPadPromptsTextureBits("pad_button4"), XPAD_BUTTON_O, "pad_button4 is X");
+
+    // The disc's raster of a texture (zSpotlight's flares ask for TT01's pad_button1): one that
+    // nothing has swapped keeps its own. No package is loaded, so nothing is swapped here.
+    {
+        RwTexture tex;
+        memset(&tex, 0, sizeof(tex));
+        tex.raster = (RwRaster*)&tex;
+        Check(iPadPromptsDiscRaster(&tex) == tex.raster, "an unswapped texture keeps its raster");
+        Check(iPadPromptsDiscRaster(NULL) == NULL, "no texture, no raster");
+    }
 
     // The parser.
     S32 count;
@@ -660,6 +678,18 @@ static void TestOtherPads()
         Frame();
 
         CheckStr(iPadPromptsLabelFor("gamecube", "white"), "Z+L", "GC icons: white is Z+L");
+
+        // The GameCube release's font.HIP has GameCube pictures: the gamecube
+        // set keeps them, and the xbox set draws its own.
+        iPadPromptsSetGameCubeFont(true);
+        CheckStr(iPadPromptsLabelFor("gamecube", "b"), "gamecube:B",
+                 "GC font: GC icons keep the disc's B (west)");
+        CheckStr(iPadPromptsLabelFor("gamecube", "x"), "gamecube:X",
+                 "GC font: GC icons keep the disc's X (east)");
+        CheckStr(iPadPromptsLabelFor("gamecube", "white"), "Z+L", "GC font: white is still Z+L");
+        CheckStr(iPadPromptsLabelFor("xbox", "b"), "X", "GC font: xbox icons are drawn");
+        iPadPromptsSetGameCubeFont(false);
+        CheckStr(iPadPromptsLabelFor("xbox", "b"), "xbox:X", "Xbox font: xbox icons keep the disc's");
         Detach(pad);
         Frame();
         Frame();

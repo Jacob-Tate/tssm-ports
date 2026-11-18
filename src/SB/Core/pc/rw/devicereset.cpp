@@ -77,6 +77,9 @@ namespace
     // and reset again once it can be.
     bool sBroken;
 
+    // iDeviceResetEpoch.
+    unsigned sEpoch;
+
     // An Im3D batch whose transform was skipped skips its draws as well, even
     // if the device came back in between.
     bool sIm3DHeld;
@@ -374,6 +377,11 @@ namespace
         const bool reset = !sBroken && !iconic && w > 0 && h > 0 && resettable &&
                            (resize || before == D3DERR_DEVICENOTRESET);
 
+        if (before != D3D_OK || reset || resize)
+        {
+            sEpoch++;
+        }
+
         const UINT keptW = pp.BackBufferWidth;
         const UINT keptH = pp.BackBufferHeight;
         const Census census = Count();
@@ -467,6 +475,7 @@ namespace
 
         if (sBroken || before != D3D_OK)
         {
+            sEpoch++;
             ReleaseVolatile();
             Settle(before, false);
             return;
@@ -478,7 +487,15 @@ namespace
 
         const Census census = Count();
         sLibrw.showRaster(raster, flags);
-        Settle(dev->TestCooperativeLevel(), Shrank(census));
+        const HRESULT after = dev->TestCooperativeLevel();
+
+        // Lost during Present: librw may have reset there and then.
+        if (after != D3D_OK)
+        {
+            sEpoch++;
+        }
+
+        Settle(after, Shrank(census));
     }
 
     // **A camera texture read back keeps a reference librw never gives back.**
@@ -683,6 +700,15 @@ void iDeviceResetSetReleaseHook(void (*release)())
     sRelease = release;
 #else
     (void)release;
+#endif
+}
+
+unsigned iDeviceResetEpoch()
+{
+#ifdef RW_D3D9
+    return sEpoch;
+#else
+    return 0;
 #endif
 }
 

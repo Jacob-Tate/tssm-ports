@@ -34,6 +34,38 @@
 //                           frame 120: camera at (x, y, z), fly-through on"),
 //                           for tools/regress.py's fly-through check.
 //
+//   TSSM_TEST_CARLOG=<a>-<b>
+//                           from frame a to b, logs the Patty Wagon every frame
+//                           ("tssm: test: frame 1500: car dt 0.008333 share
+//                           0.5000 at (x, y, z) vel (x, y, z)"): the frame's
+//                           measured time, its step share (zCar.cpp) and the
+//                           car, for the car's frame-rate checks.
+//
+//   TSSM_TEST_SPOTLOG=<n>   every n frames, logs the scene's spotlights ("tssm:
+//                           test: frame 300: spotlights 12 on of 12, 9 drawn,
+//                           1 flares, camera inside 1, nearest beam -0.80;
+//                           715F7AAB+ ..."): how many are on, how many of those
+//                           are in view, how many of those have a lamp flare
+//                           that shows with spotlights = xbox (the lamp faces
+//                           the camera), in how many beams the camera is
+//                           (zSpotlight's light volume "inside"), how far the
+//                           camera is outside the side of the nearest beam
+//                           (below 0: inside), and the IDs of the lights that
+//                           are on, "+" after one the camera is inside. For the
+//                           spotlight checks of [extras] spotlights
+//                           (docs/EXTRAS.md, tools/regress.py). Also, when it
+//                           changes, how many cone colours the Xbox light
+//                           volumes keep ("light volumes: 3 cone colours
+//                           kept"), which a new level starts again.
+//
+//   TSSM_TEST_CROWDLOG=<n>  every n frames, logs the scene's crowd objects (the
+//                           Xbox's skinned crowd models) and how many of them
+//                           moved on in their idle cycle since the line before
+//                           ("tssm: test: frame 2040: crowd 22 objects, speed
+//                           1.00, 22 moved since frame 1980"): the crowd check
+//                           of [extras] crowds where the camera is not still
+//                           enough to compare frames (BB01).
+//
 //   TSSM_TEST_CRASH=<frame> a write through a null pointer at that frame (a
 //                           number above 1), for the crash handler, crash.log
 //                           and the log. Any other value crashes at startup,

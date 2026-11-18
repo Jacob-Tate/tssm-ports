@@ -2,6 +2,8 @@
 #include "iPadPrompts.h"
 #include "iPadTest.h"
 
+#include <rwcore.h>
+
 #include <string.h>
 
 // The backend that is always available: no controllers, ever.
@@ -107,6 +109,11 @@ void iPadPromptsUpdate(const iPadHostState*)
 
 void iPadPromptsShutdown()
 {
+}
+
+RwRaster* iPadPromptsDiscRaster(RwTexture* texture)
+{
+    return texture != NULL ? texture->raster : NULL;
 }
 
 void iPadTestStart()

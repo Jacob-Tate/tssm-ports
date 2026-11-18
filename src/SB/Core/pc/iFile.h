@@ -3,6 +3,8 @@
 
 #include <types.h>
 
+#include "iGCPackage.h"
+
 #include <stddef.h>
 
 enum IFILE_READSECTOR_STATUS
@@ -97,6 +99,16 @@ const char* iFileMissingAssetPath();
 // the spelling beside it ("Xbox", "GameCube"). NULL when the file cannot be
 // read or carries no PLAT, which is not treated as an answer either way.
 const char* iFileAssetPlatform(const char** longName);
+
+// PC-only. Which console's packer wrote the package file at `path` (a path as
+// iFileOpen resolves it), from its own PLAT chunk (iGCPackage.h). Each package
+// is asked on its own, so Xbox and GameCube packages can be told apart in one
+// set. Kept for the path until the file's size or time changes.
+iGCPlatform iFilePackagePlatform(const char* path);
+
+// PC-only. The same, of the package iFileOpen would open for `name` (an asset
+// name as the game gives it): the mod's copy when a mod replaces it.
+iGCPlatform iFilePackagePlatformOf(const char* name);
 
 // PC-only. A scene package (xSTPreLoadScene's sid, flg_hiphop and file name, or
 // NULL) the game could not load: names the file and where it should be, shows

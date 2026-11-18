@@ -88,6 +88,8 @@ namespace
         ImGui::Spacing();
         iGui::SettingsDisplay();
         ImGui::Spacing();
+        iGui::SettingsExtras();
+        ImGui::Spacing();
         iGui::SettingsAudio();
         ImGui::Spacing();
         iGui::SettingsGame();
