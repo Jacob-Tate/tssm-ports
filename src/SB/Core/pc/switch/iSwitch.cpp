@@ -11,6 +11,10 @@
 
 #include <SDL3/SDL.h>
 
+#ifdef TSSM_UPDATE
+#include "iUpdate.h"
+#endif
+
 #include <arpa/inet.h>
 #include <atomic>
 #include <errno.h>
@@ -676,6 +680,14 @@ void iSwitchQuit(int code)
     iSwitchQuitLine("exit(%d): back to the Homebrew Menu", code);
     StartWatchdog();
 
+#ifdef TSSM_UPDATE
+    // A check or a download on its worker thread uses the sockets and the
+    // file system userAppExit closes. Cancelled, it ends within a second or
+    // so; an install already under way is left to finish.
+    Step("stopping the updater");
+    iUpdateShutdown();
+#endif
+
     Step("stopping the log server");
     StopBackground();
 
@@ -770,6 +782,16 @@ int iSwitchClaimFile(const char* path)
 uintptr_t iSwitchImageBase()
 {
     return (uintptr_t)__start__;
+}
+
+void iSwitchReleaseRomfs()
+{
+    if (sRomfs)
+    {
+        romfsExit();
+        sRomfs = false;
+        printf("tssm: switch: RomFS unmounted\n");
+    }
 }
 
 int iSwitchNxlinkSocket()

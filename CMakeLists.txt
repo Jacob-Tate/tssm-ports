@@ -126,6 +126,29 @@ else()
   set(TSSM_HOST_TOOLS ON)
 endif()
 
+# --- in-app updates ----------------------------------------------------------------
+# The settings window's Updates section: it reads the latest release of
+# TSSM_UPDATE_REPO on GitHub and can replace this build with that release's
+# file for the platform (src/SB/Core/pc/iUpdate.h; docs/SWITCH.md "Updates").
+# Off unless asked, so a build from source, with its own name, icon or files,
+# never offers to turn itself into the public one; the TSSM Dehydrated
+# release recipe turns it on. The repository's name is set here and nowhere
+# else.
+option(TSSM_UPDATE "Updates from the project's GitHub releases, in the settings window" OFF)
+set(TSSM_UPDATE_REPO "aidp2/tssm-ports" CACHE STRING "The GitHub repository (owner/name) whose releases the updater reads")
+if(TSSM_UPDATE)
+  if(NOT TSSM_SWITCH)
+    message(FATAL_ERROR "TSSM_UPDATE: this branch has the updater's transport and install for "
+      "the Switch only.")
+  endif()
+  if(NOT TSSM_UPDATE_REPO MATCHES "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    message(FATAL_ERROR "TSSM_UPDATE_REPO is \"${TSSM_UPDATE_REPO}\"; it must be owner/name.")
+  endif()
+  # Seen by the settings table, the GUI and the Switch's quit as well as the
+  # updater's own files.
+  add_compile_definitions(TSSM_UPDATE)
+endif()
+
 # --- render backends -----------------------------------------------------------
 # A list; one executable carries all of it and config.ini's video.backend picks.
 if(WIN32)
@@ -1003,13 +1026,53 @@ if(TSSM_SWITCH)
   message(STATUS "Switch: icon ${_nro_icon}")
 
   # What the Homebrew Menu shows for the program (docs/SWITCH.md).
-  set(TSSM_SWITCH_NAME "TSSM (port)" CACHE STRING "The name the Switch's NACP shows")
+  set(TSSM_SWITCH_NAME "The SpongeBob SquarePants Movie Video Game" CACHE STRING
+    "The name the Switch's NACP shows")
   set(TSSM_SWITCH_AUTHOR "TSSM port" CACHE STRING "The author the Switch's NACP shows")
-  set(TSSM_SWITCH_VERSION "0.9" CACHE STRING "The version the Switch's NACP shows")
+  set(TSSM_SWITCH_VERSION "0.9.2" CACHE STRING "The version the Switch's NACP shows")
   message(STATUS "Switch: NACP \"${TSSM_SWITCH_NAME}\", \"${TSSM_SWITCH_AUTHOR}\", ${TSSM_SWITCH_VERSION}")
   nx_generate_nacp(tssm.nacp NAME "${TSSM_SWITCH_NAME}" AUTHOR "${TSSM_SWITCH_AUTHOR}"
                    VERSION "${TSSM_SWITCH_VERSION}")
   nx_create_nro(tssm NACP tssm.nacp ICON "${_nro_icon}" ROMFS "${TSSM_SWITCH_ROMFS}")
+endif()
+
+# --- the updater's files (TSSM_UPDATE, above) ---------------------------------------
+# The core (iUpdate.cpp, the same on every platform), the Updates section and
+# the platform's transport and install. The version the updater compares is
+# the one the Homebrew Menu shows.
+if(TSSM_UPDATE)
+  if(NOT FMV_INCLUDES)
+    message(FATAL_ERROR "TSSM_UPDATE needs FFmpeg's libavutil (the download's SHA-256), and "
+      "FFmpeg was not found.")
+  endif()
+  if(NOT TSSM_GUI)
+    message(FATAL_ERROR "TSSM_UPDATE needs the settings window (TSSM_GUI).")
+  endif()
+  if(NOT TSSM_SWITCH_VERSION MATCHES "^[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?(\\.[0-9]+)?$")
+    message(FATAL_ERROR "TSSM_UPDATE: TSSM_SWITCH_VERSION is \"${TSSM_SWITCH_VERSION}\"; the "
+      "updater compares versions made of up to four numbers (0.9, 0.9.1).")
+  endif()
+  # The public file has the release's name and the default icon; a build with
+  # its own would be replaced by it without a word.
+  get_filename_component(_update_icon "${_nro_icon}" REALPATH)
+  get_filename_component(_update_default_icon
+    "${CMAKE_CURRENT_SOURCE_DIR}/dist/switch/default_icon.jpg" REALPATH)
+  if(NOT TSSM_SWITCH_NAME STREQUAL "TSSM Dehydrated" OR
+     NOT _update_icon STREQUAL _update_default_icon)
+    message(WARNING "TSSM_UPDATE is on in a build with its own name or icon "
+      "(\"${TSSM_SWITCH_NAME}\", ${_nro_icon}). Its Updates section can replace this .nro with "
+      "the public TSSM Dehydrated one, which has the default name and icon. For a build of your "
+      "own, leave TSSM_UPDATE off.")
+  endif()
+  target_sources(tssm_platform PRIVATE
+    ${PC_DIR}/iUpdate.cpp
+    ${PC_DIR}/gui/iGuiUpdates.cpp
+    ${PC_DIR}/switch/iSwitchUpdate.cpp)
+  set_source_files_properties(${PC_DIR}/gui/iGuiUpdates.cpp PROPERTIES
+    COMPILE_DEFINITIONS "TSSM_UPDATE_REPO=\"${TSSM_UPDATE_REPO}\";TSSM_UPDATE_VERSION=\"${TSSM_SWITCH_VERSION}\"")
+  message(STATUS "Updates: on, from the releases of ${TSSM_UPDATE_REPO}; this is version ${TSSM_SWITCH_VERSION}")
+else()
+  message(STATUS "Updates: off (TSSM_UPDATE)")
 endif()
 
 # --- tests ----------------------------------------------------------------------
@@ -1131,4 +1194,28 @@ if(TSSM_BUILD_TESTS AND NOT ANDROID AND NOT TSSM_SWITCH)
   elseif(NOT APPLE)
     target_link_libraries(tssm_modtest PRIVATE dl)
   endif()
+endif()
+
+# --- tssm_updatetest ---------------------------------------------------------------
+# tssm_updatetest: the updater's core (iUpdate.cpp) on the PC, with a stand-in
+# for the network: versions, the release's JSON (saved from GitHub's API in
+# src/SB/Core/pc/tests/update/), the choice of each platform's file,
+# SHA256SUMS, SHA-256, URLs, the HTTP client, and whole checks and downloads
+# that succeed, fail or are cancelled. Built whether or not TSSM_UPDATE is on;
+# it needs FFmpeg's libavutil, as the updater does.
+#   build-*/tssm_updatetest <fixture folder> [scratch folder]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND FMV_INCLUDES)
+  add_executable(tssm_updatetest ${PC_DIR}/tests/update_test.cpp ${PC_DIR}/iUpdate.cpp
+    ${HOST_SOURCES})
+  target_include_directories(tssm_updatetest PRIVATE ${TSSM_INCLUDES} ${FMV_INCLUDES})
+  target_compile_options(tssm_updatetest PRIVATE ${TSSM_NO_WARNINGS})
+  target_link_libraries(tssm_updatetest PRIVATE ${FFMPEG_AVUTIL_LIBRARY})
+  if(WIN32)
+    target_link_libraries(tssm_updatetest PRIVATE dbghelp)
+  else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(tssm_updatetest PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  endif()
+  add_test(NAME tssm_updatetest
+           COMMAND tssm_updatetest ${PC_DIR}/tests/update ${CMAKE_CURRENT_BINARY_DIR}/updatetest_run)
 endif()

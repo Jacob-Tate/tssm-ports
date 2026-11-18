@@ -10,11 +10,23 @@ through OpenGL on the console's Mesa driver.
 - It has been played on one console so far; `docs/SWITCH.md` lists what is still
   unchecked.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
-- **Prebuilt:** this repository's Releases page has `TSSM-Dehydrated-0.9-Switch.nro` as
-  *TSSM Dehydrated* 0.9: this branch built under that name, with the port's own icon and
-  no game data (you still need your own game files, below). Copy it as
-  `/switch/tssm/tssm.nro` (below). `docs/SWITCH.md` ("Building the TSSM Dehydrated
-  release") has the exact commands.
+
+Two ways to play
+----------------
+
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
+  for the Switch: `TSSM-Dehydrated-0.9.2-Switch.nro`. It is this branch, built under that
+  neutral name with the port's own icon, and has no game data. Copy it as
+  `/switch/tssm/tssm.nro` (below). Install 0.9.2 by hand once; from then on it can update
+  itself when you ask: settings window (hold -, press +), Settings tab, *Updates*, *Check
+  for updates* (it needs Wi-Fi and system version 10.1.0 or newer). `docs/SWITCH.md`
+  ("Updates", and "Building the TSSM Dehydrated release" for the exact commands) has the
+  details.
+- **Build it yourself** from this source, as below. A build of your own is called *The
+  SpongeBob SquarePants Movie Video Game* in the Homebrew Menu, and can have an icon made
+  from a picture of your choice (`docs/ICON.md`). It has no updater unless you turn one on.
+
+Either way you bring your own copy of the game's files (below).
 
 This repository and its branches
 --------------------------------
@@ -82,7 +94,8 @@ Playing
 1. Copy `tssm.nro` to `/switch/tssm/tssm.nro` on the SD card, and your Xbox game files to
    `/switch/tssm/assets/` (the folder with `boot.HIP`, `FMV/` and the level folders).
 2. Start the Homebrew Menu **with full memory**: hold R while you start any game from the
-   HOME menu, then pick TSSM. (From the Album it gets too little memory, and says so.)
+   HOME menu, then pick the game (*TSSM Dehydrated*, or *The SpongeBob SquarePants Movie
+   Video Game* for a build of your own). (From the Album it gets too little memory, and says so.)
 3. Settings, saves and the log are written into `/switch/tssm/`.
 
 More documentation:

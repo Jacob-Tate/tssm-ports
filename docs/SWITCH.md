@@ -12,7 +12,8 @@ says what is still unchecked.
 You need:
 
 1. a Switch running Atmosphere;
-2. `tssm.nro`;
+2. `tssm.nro`: the prebuilt *TSSM Dehydrated* one from this repository's Releases
+   page, or your own, built as described under *Building*;
 3. your own copy of the game's Xbox files (the same files the PC and Android
    builds use).
 
@@ -37,8 +38,10 @@ Nothing goes into the console's own save system: that belongs to the game used
 to start the Homebrew Menu.
 
 **Start it with full memory.** Hold R while you start any game from the HOME
-menu (title takeover); the Homebrew Menu opens instead, then pick TSSM. Opened
-from the Album, homebrew runs as a small applet with a fraction of the memory;
+menu (title takeover); the Homebrew Menu opens instead, then pick the game (*TSSM
+Dehydrated* for the prebuilt .nro, *The SpongeBob SquarePants Movie Video Game* for
+one you built). Opened from the Album, homebrew runs as a small applet with a
+fraction of the memory;
 the game says so on screen and + goes back to the Homebrew Menu (X there tries
 anyway, and will most likely run out of memory).
 
@@ -67,6 +70,59 @@ If a level runs below about 45 frames a second on the console, the SpongeBall
 still keeps its full speed: a change from the original game, which slows the
 ball at those rates while the falling blocks of the SpongeBall levels do not
 slow (`src/SB/Core/pc/PORTING.md`, known divergences). At 60 nothing changes.
+
+### Updates
+
+The TSSM Dehydrated release can update itself from the project's releases on
+GitHub. Builds made from the source have no updater unless their builder
+turned it on (`TSSM_UPDATE`, below); their settings window has no Updates
+section.
+
+The updater needs a network connection (Wi-Fi) and connects only when you ask.
+In the settings window, Settings tab, **Updates**:
+
+- **This version**: the version you are running.
+- **Check for updates**: asks GitHub for the newest release. The answer is
+  "You have the newest version", or "Version X is available (size)".
+- **Download and install X**: downloads the new `.nro` (a progress bar shows how
+  far it is; **Cancel** stops it), checks it against the release's checksum
+  file (SHA256SUMS), and puts it in place of the `.nro` you started. Then
+  **Restart now** quits and starts the new version straight away (progress
+  since the last save is lost, as with Quit game), or quit later and start it
+  from the Homebrew Menu.
+- **Check for updates when the game starts**: off unless you turn it on; then
+  the game checks once at each start, and a line at the top of the settings
+  window says when a new version is waiting.
+
+What it does and does not do:
+
+- It talks to GitHub only (`api.github.com`, `github.com` and its download
+  servers), over HTTPS with the console's own certificate checks, and sends
+  nothing about you or the console: no IDs, no account, no telemetry. Each
+  request carries only the address, `User-Agent: TSSM-port-updater` (GitHub
+  wants one), the kind of answer wanted and `Connection: close`.
+- It replaces only the `.nro` you started (wherever it is: `/switch/tssm.nro`,
+  `/switch/tssm/tssm.nro`, ...). The download goes beside it as
+  `<name>.nro.download` and becomes the `.nro` only once its checksum matches.
+  Saves, settings, mods and the game's files are never touched.
+- Anything that goes wrong (no internet, the server, the checksum, a full card)
+  leaves the installed version as it was, and the Updates section says what
+  happened. "No update information found" means the releases could not be
+  found at all.
+- The SD card cannot swap two files in one step, so the install moves the old
+  `.nro` to `<name>.nro.bak`, renames the checked download to `<name>.nro`,
+  then deletes the `.bak`. If the power goes off between those steps, TSSM is
+  missing from the Homebrew Menu: on the SD card, rename `tssm.nro.bak` (in
+  the folder you keep the game in, such as `/switch/tssm/`) back to
+  `tssm.nro`, and delete any `tssm.nro.download` beside it.
+- A copy started with nxlink is not a file on the SD card and cannot update
+  itself; start it from the Homebrew Menu.
+- The console's date must be about right: the server's certificate is checked
+  for its dates, and a clock years off reads as a refused certificate (the
+  message says so).
+- It needs system version 10.1.0 or newer: older systems lack the root
+  certificates GitHub's servers chain to, and the check ends with a refused
+  certificate.
 
 ### Controls
 
@@ -178,13 +234,39 @@ NACP and a 256x256 icon. These CMake options set what the Homebrew Menu shows:
 
 | Option | Default | What |
 |---|---|---|
-| `TSSM_SWITCH_NAME` | `TSSM (port)` | the program's name |
+| `TSSM_SWITCH_NAME` | `The SpongeBob SquarePants Movie Video Game` | the program's name (the prebuilt release sets `TSSM Dehydrated`, below) |
 | `TSSM_SWITCH_AUTHOR` | `TSSM port` | the author line |
-| `TSSM_SWITCH_VERSION` | `0.9` | the version |
+| `TSSM_SWITCH_VERSION` | `0.9.2` | the version |
 | `TSSM_SWITCH_ICON` | empty | a 256x256 JPEG; empty uses `TSSM_ICON_DIR`'s `icon.jpg` when one was made (docs/ICON.md), otherwise `dist/switch/default_icon.jpg` (a plain sponge block drawn by `tools/switch/draw_default_icon.ps1`) |
 
 CMake caches them, so a build directory keeps what it was configured with
 (including an older default) until it is configured again with `-D...`.
+
+The updater (For players, "Updates") is off unless the build turns it on:
+
+| Option | Default | What |
+|---|---|---|
+| `TSSM_UPDATE` | `OFF` | the Updates section in the settings window; `ON` in the TSSM Dehydrated release (below) |
+| `TSSM_UPDATE_REPO` | the project's release repository | the GitHub repository (owner/name) whose latest release it reads |
+
+Leave it off for a build of your own (another name, icon or set of files): a
+build with it on offers to replace itself with the public release's `.nro`,
+whatever it was before. The configure step warns when it is on with a name
+other than `TSSM Dehydrated` or an icon other than
+`dist/switch/default_icon.jpg`. With it on, the build needs FFmpeg (libavutil's
+SHA-256, already linked for the movies) and the settings window, and
+`TSSM_SWITCH_VERSION` must be numbers and dots (`0.9`, `0.9.1`): it is the
+version the updater compares, against the version in the release file's name
+(`TSSM-Dehydrated-<version>-Switch.nro`), not the release's tag. A release that
+carries an older Switch file under its old name (0.9.1 shipped
+`TSSM-Dehydrated-0.9-Switch.nro`) is therefore no update for a 0.9 build.
+
+The updater links nothing new: the TLS is the console's own ssl service
+(through libnx, already in the image), and `src/SB/Core/pc/iUpdate.h` lists
+what it checks. `tssm_updatetest` (a PC build's tests,
+`src/SB/Core/pc/tests/update_test.cpp`) runs it against saved copies of the
+real releases' JSON and SHA256SUMS (`src/SB/Core/pc/tests/update/`,
+remade by `tools/update_fixtures.py`).
 
 The FFmpeg in a .nro is linked statically. Its notice in the About tab says
 so, with FFmpeg's copyright line. The LGPL allows a static link when the
@@ -224,12 +306,16 @@ debug information clean as well. In devkitPro's MSYS2 shell:
     sh tools/switch/build_port.sh $R/build $R/prefix \
         "-DTSSM_SWITCH_NAME=TSSM Dehydrated" \
         -DTSSM_SWITCH_AUTHOR=aidp2 \
-        -DTSSM_SWITCH_VERSION=0.9 \
+        -DTSSM_SWITCH_VERSION=0.9.2 \
         -DTSSM_SWITCH_ICON=$R/src/tssm/dist/switch/default_icon.jpg \
-        "-DTSSM_VERSION_LINE=0.9 (TSSM Dehydrated)"
+        "-DTSSM_VERSION_LINE=0.9.2 (TSSM Dehydrated)" \
+        -DTSSM_UPDATE=ON
 
-`TSSM_VERSION_LINE` is the About tab's version line (docs/GUI.md). Checks on
-the result:
+`TSSM_VERSION_LINE` is the About tab's version line (docs/GUI.md). The
+configure step prints `Updates: on, ...` with the repository and the version
+the updater compares; a new release raises `TSSM_SWITCH_VERSION` (and the
+version line) and publishes the file as `TSSM-Dehydrated-<that version>-Switch.nro`
+with its line in the release's SHA256SUMS. Checks on the result:
 
     $DEVKITPRO/devkitA64/bin/aarch64-none-elf-strings -n 3 $R/build/tssm.nacp | sort -u
     grep -a -c -i -F tssm-rel $R/build/tssm.nro
@@ -289,8 +375,34 @@ there instead of 256 MB (`TSSM_RWHEAP_MB` still overrides it).
 | `src/SB/Core/pc/iHostSwitch.cpp` | the iHost seam (paths, files, time, threads, diagnostics) |
 | `src/SB/Core/pc/switch/iSwitch.cpp` | start-up (RomFS, nxlink, the applet-mode screen, `TSSM_ASSETS`), the applet hook, the quit, the exception handler, the error applet |
 | `src/SB/Core/pc/switch/iSwitchLowMem.cpp` | memory below 4 GB |
+| `src/SB/Core/pc/switch/iSwitchUpdate.cpp` | the updater's HTTPS and install (`TSSM_UPDATE`) |
 
 Notes:
+
+- **The updater** (`TSSM_UPDATE`). The core (`iUpdate.cpp`, the same on every
+  platform) reads the release's JSON, picks `TSSM-Dehydrated-<version>-Switch.nro`,
+  fetches SHA256SUMS and the file, follows GitHub's redirects only to its four
+  hosts, and hashes the download back from the card before anything is
+  replaced. `iSwitchUpdate.cpp` gives it a TLS connection: nifm for "is the
+  console connected", BSD sockets for the name and the TCP connection, and the
+  ssl service for TLS with the system's trusted roots and every check on (the
+  chain, the host name, the dates). GitHub's API and github.com chain to
+  USERTrust ECC, the download servers to ISRG Root X1; the system trusts both
+  from 10.1.0. Both chains reach those roots through a cross-signed
+  certificate the servers send today (Sectigo's Root E46 signed by USERTrust
+  ECC; ISRG's Root YR signed by ISRG Root X1): if a server stops
+  sending it, the check fails with a refused certificate until the system
+  trusts the newer root. The service runs non-blocking and is polled every
+  tenth of a second, so Cancel, a stalled server (20 seconds; time in the HOME
+  menu, where the program is suspended, counts as a second at most) and the
+  quit are noticed at once. The name lookup (`getaddrinfo`) is the one step
+  that cannot be cancelled; a quit waits for it. The core's HTTP/1.1 client runs over it. The install takes the
+  running `.nro`'s path from hbloader's argv[0] (`sdmc:/...`), unmounts the
+  RomFS (which holds that file open; nothing reads it after start-up), and
+  renames the checked download over it with `iHostRenameReplace`. **Restart
+  now** is `envSetNextLoad` with that path, then the usual quit: hbloader
+  starts the new `.nro` instead of the Homebrew Menu. The quit stops the
+  updater's thread first (`quit: stopping the updater`).
 
 - **Files.** The SD card's `rename` does not replace an existing file, which
   every save and config write relies on; `iHostRenameReplace` moves the old file
@@ -465,3 +577,8 @@ What is known not to work or not to exist yet, with the place to change it:
   passes them on beside the .nro (Building, above).
 - **No CI.** A job in the `devkitpro/devkita64` image would keep the target
   building.
+- **The updater** has not run on a console. Untested there: the ssl service
+  in non-blocking mode, its trust in GitHub's current certificate chains, the
+  rename of the running `.nro` once the RomFS is unmounted, and the restart
+  through `envSetNextLoad`. Its core is tested on a PC (`tssm_updatetest`).
+  Each step writes a `tssm: update:` line to `last_run.log`.

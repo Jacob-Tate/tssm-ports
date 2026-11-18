@@ -263,6 +263,13 @@ const iConfigSetting kConfigSettings[] = {
       "; dialog where there is one, the built-in one where there is not, as on the\n"
       "; Switch), system or builtin. TSSM_FILE_PICKER overrides it.",
       ICONFIG_ENUM, "auto|system|builtin", kNone, kNone },
+#ifdef TSSM_UPDATE
+    // TSSM: in-app updates (iUpdate.h), only in builds that have them.
+    { "update", "check_at_start", "off",
+      "Check for a newer release when the game starts. It connects to GitHub only.\n"
+      "; Off: only the Check for updates button in the settings window does.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+#endif
 };
 
 const S32 kConfigSettingCount = (S32)(sizeof(kConfigSettings) / sizeof(kConfigSettings[0]));

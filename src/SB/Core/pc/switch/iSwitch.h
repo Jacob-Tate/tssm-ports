@@ -34,6 +34,10 @@ void iSwitchEarly();
 // directory and points TSSM_ASSETS at kSwitchRoot/assets when that exists.
 void iSwitchStartup();
 
+// Unmounts the RomFS, which holds the running .nro open, so the updater can
+// replace that file (iSwitchUpdate.cpp). Nothing reads the RomFS after start-up.
+void iSwitchReleaseRomfs();
+
 // The nxlink host's socket when the game was sent with `nxlink -s`, else -1.
 // The log tee writes stdout and stderr to it (iLog.cpp).
 int iSwitchNxlinkSocket();
