@@ -3,7 +3,8 @@
 The PC port (`src/SB/Core/pc`), built as an Android app. It is treedome's
 Android layer (the BfBB PC port, CC0), adapted to TSSM.
 
-- App name: **SpongeBob Movie Port** (`-Ptssm.label` gives a build another)
+- App name: **The SpongeBob SquarePants Movie Video Game** (`-Ptssm.label` gives a
+  build another; the prebuilt APKs on the Releases page are *TSSM Dehydrated*)
 - Package (application id): `io.github.tssmport.game`
 - No game data in the APK. The player supplies the files from their own copy
   of the Xbox release of The SpongeBob SquarePants Movie (about 1 GB).
@@ -73,7 +74,9 @@ from the `.so` in the APK.
 | `-Ptssm.ffmpeg` | none | A folder holding `<abi>/include` and `<abi>/lib` for each ABI, from `tools/android/build_ffmpeg.sh`. Passed as `TSSM_FFMPEG_ROOT`. The environment variable `TSSM_FFMPEG_ANDROID` works too. Without it the movies are skipped. |
 | `-Ptssm.icon` | none | A folder made by `tools/make_icons.ps1` from a picture, outside the repository. Its `android/res` overrides the launcher icon (debug and release). Without it the APK has the default icon. [ICON.md](ICON.md). |
 | `-Ptssm.releaseDebugKey` | `false` | `true` signs the release APKs with the SDK's debug key (`~/.android/debug.keystore`), the key the debug APKs have, so either kind updates the other in place and the co-op app's save sharing (same key only) still works. Without it the release APKs are unsigned. |
-| `-Ptssm.label` | `SpongeBob Movie Port` | The app's name (its label), as plain text: under the launcher icon, in the recent apps, in Settings and in the import screen's All files access hint. It replaces `app_name` from `src/main/res/values/strings.xml`. |
+| `-Ptssm.label` | `The SpongeBob SquarePants Movie Video Game` | The app's name (its label), as plain text: under the launcher icon, in the recent apps, in Settings and in the import screen's All files access hint. It replaces `app_name` from `src/main/res/values/strings.xml`. |
+| `-Ptssm.update` | `false` | `true` builds in the updater ([Updates](#updates)): the settings window's Updates section (`TSSM_UPDATE` for CMake), its Java in `src/update/java`, and its permissions from `src/update/AndroidManifest.xml` (`INTERNET`, `ACCESS_NETWORK_STATE`, `REQUEST_INSTALL_PACKAGES`). It needs `-Ptssm.ffmpeg` (libavutil's SHA-256), and `-Ptssm.abis` of `arm64-v8a` and `armeabi-v7a` only (the releases have no APK for another ABI; Gradle stops with a message). `true` in the TSSM Dehydrated release (below). Leave it off for a build of your own: with it on, the app offers to replace itself with the public release's APK. |
+| `-Ptssm.versionName`, `-Ptssm.versionCode` | `app/build.gradle`'s | Another version for a test build, such as the updater's test kit (an older version that updates itself). Releases leave them alone. |
 
 ### Release APKs
 
@@ -88,6 +91,29 @@ They are written to `android/app/build/outputs/apk/release/`:
 after `zipalign`). They differ from the debug APKs only in that the app is
 not debuggable (no `run-as`, no debugger, no test launches through `adb`).
 The native code is compiled the same way, as `RelWithDebInfo`.
+
+The TSSM Dehydrated release is built this way with its name, its icon and the
+updater:
+
+```
+gradle assembleRelease -Ptssm.releaseDebugKey=true "-Ptssm.label=TSSM Dehydrated" \
+    -Ptssm.icon=<icon folder> -Ptssm.ffmpeg=<folder> -Ptssm.update=true
+```
+
+With `-Ptssm.update=true` Gradle prints `tssm: in-app updates on
+(tssm.update)` and CMake `Updates: on, from the releases of <owner/name>; this
+is version <versionName>`. `versionName` must then be numbers and dots (`0.9`,
+`0.9.1`): it is the version the updater compares, against the version in the
+release file's name, not the release's tag. A new release raises
+`versionCode` and `versionName` in `app/build.gradle`, signs with the same key
+as before (Android installs an update only over the same key, and only with a
+version code at least the installed one's), and publishes the APKs as
+`TSSM-Dehydrated-<versionName>-Android.apk` (arm64-v8a) and
+`TSSM-Dehydrated-<versionName>-Android-32bit.apk` (armeabi-v7a), each with its
+line in the release's SHA256SUMS. A release that carries an older Android APK
+under its old name (0.9.1 shipped `TSSM-Dehydrated-0.9-Android.apk`) is
+therefore no update for a 0.9 app. The 0.9 APKs have no updater, so the first
+build with one is installed by hand.
 
 ### What CMake does differently on Android
 
@@ -114,6 +140,11 @@ Each is an `if(ANDROID)` block in `CMakeLists.txt`.
   its own tables PC-relative, which lld refuses for an exported symbol. SDL's
   archive is not hidden, because `JNI_OnLoad` must stay exported.
 - `TSSM_BUILD_32BIT` is an error on Android. The ABI decides the word size.
+- With `TSSM_UPDATE` (`-Ptssm.update=true`), `iUpdate.cpp` and
+  `gui/iGuiUpdates.cpp` go into `tssm_platform` and
+  `android/iAndroidUpdate.cpp` into `main`, for arm64-v8a and armeabi-v7a
+  only (the releases have APKs for nothing else). The version the updater
+  compares is `TSSM_ANDROID_VERSION`, the app's `versionName` from Gradle.
 
 Outside CMake, one source change was needed for arm64: NDK r28c's clang 19
 crashes ("Cannot select: store (s16) ... bswap") on four byte stores that
@@ -467,6 +498,71 @@ Two smaller costs are gone since 0.7.1, at any setting:
 The window's own surface has no anti-aliasing of its own: librw's
 `SDL_GL_MULTISAMPLESAMPLES` is left at 0, and the samples are only in the
 game's render target.
+
+## Updates
+
+The TSSM Dehydrated release can update itself from the project's releases on
+GitHub. Builds made from the source have no updater unless their builder
+turned it on (`-Ptssm.update=true`); their settings window has no Updates
+section, and the app has no network or install permission.
+
+Nothing goes online unless you ask. In the settings window, Settings tab,
+**Updates**:
+
+- **This version**: the version you are running.
+- **Check for updates**: asks GitHub for the newest release. The answer is
+  "You have the newest version", or "Version X is available (size)".
+- **Download and install X**: downloads the new APK (a progress bar shows how
+  far it is; **Cancel** stops it), checks it against the release's checksum
+  file (SHA256SUMS), and hands it to Android to install:
+  - The first time, Android must let this app install apps. The game says so
+    and offers **Open settings**: turn on **Allow from this source** (Android
+    8 and later; on Android 7 the one **Unknown sources** switch), then come
+    back with Back. The download goes on once the permission is on. Save
+    first: some Android versions (11 at least) restart the game when the
+    permission is turned on; then open it and check for updates again.
+  - Before Android is asked, the game asks **Install version X?**: the game
+    closes while the update installs, so progress since the last save is
+    lost. When the installed app's name differs from the update's (a test
+    copy, a build with a name of its own), the question says what replaces
+    what. **Cancel** is where the cursor starts.
+  - Android then asks in its own window. **Update** installs it: Android
+    closes the game and replaces the app, and you open it again from the
+    launcher. Saves, settings, mods and the game's files stay, as with any
+    update of an app.
+- **Check for updates when the game starts**: off unless you turn it on; then
+  the game checks once at each start, and a line at the top of the settings
+  window says when a new version is waiting.
+
+What it does and does not do:
+
+- It talks to GitHub only (`api.github.com`, `github.com` and its download
+  servers), over HTTPS with Android's own certificate checks, and sends
+  nothing about you or the device: no IDs, no account, no telemetry. Each
+  request carries only the address, `User-Agent: TSSM-port-updater` (GitHub
+  wants one), the kind of answer wanted, `Connection: close` and
+  `Accept-Encoding: identity`.
+- It takes the APK for the app you have: `-Android.apk` for the 64-bit app
+  (arm64-v8a), `-Android-32bit.apk` for the 32-bit one (armeabi-v7a).
+- The download goes to the app's private cache folder and is installed only
+  once its checksum matches. Before Android is asked, the game also checks
+  that the download is this app, not an older build (Android's version code),
+  and signed with the same key as the installed app; Android checks again.
+- Anything that goes wrong (no internet, the server, the checksum, a
+  different key, Cancel in Android's window) leaves the installed app as it
+  was, and the Updates section says what happened. "No update information
+  found" means the releases could not be found at all.
+- The device's date must be about right: the server's certificate is checked
+  for its dates, and a clock years off reads as a refused certificate (the
+  message says so).
+- A device whose settings forbid installing apps from outside an app store (a
+  work profile, a parental control) can check, but not install.
+- The co-op app is another app (its own package): it is never replaced with
+  the public APK.
+- Google has announced that certified Android devices will install only apps
+  from registered developers (in some countries from September 2026, more
+  later). Where that applies to this app, an in-app install may end with
+  "Android blocked the update"; installing the APK with `adb` is not affected.
 
 ## Files on the device
 
@@ -836,6 +932,85 @@ Checked on a phone with a test-only storage app standing in for the picker
 (it refuses a URI it did not make with `SecurityException`, as Android does).
 The picker itself needs a person's hands.
 
+### Updates (how)
+
+`TSSM_UPDATE` only (`-Ptssm.update=true`). The core,
+`src/SB/Core/pc/iUpdate.cpp` (the same on every platform), reads the
+release's JSON, picks `TSSM-Dehydrated-<version>-Android.apk` or
+`-Android-32bit.apk` by the ABI `libmain.so` was built for, fetches
+SHA256SUMS and then the file, follows GitHub's redirects only to its four
+hosts, and hashes the download back from storage (libavutil's SHA-256) before
+anything is installed. Android's side is Java, in
+`android/app/src/update/java/io/github/tssmport/game/`, called from
+`src/SB/Core/pc/android/iAndroidUpdate.cpp` on the updater's worker thread
+(SDL attaches it to Java, and detaches it when it ends):
+
+- `UpdateNet`: one GET with `HttpsURLConnection`. The socket factory, the host
+  name verifier and the trust store are Android's own (the system's roots, the
+  chain, the name, the dates); nothing in the app changes them. No redirect is
+  followed: each 3xx goes back to the core, which checks the next host.
+  Connecting and each read time out after 20 seconds. A watcher thread asks
+  the core about Cancel every 0.1 s and, once it is asked, disconnects at
+  every look until the request ends (a disconnect before the connection
+  exists does nothing), which on Android closes the socket under a blocked
+  connect or read. A name lookup in progress is not cut short. `Accept-Encoding: identity`
+  stops Android's client from asking for gzip, which it would unpack itself,
+  hiding the length the core checks.
+- `Updater.installBlocked`, asked at each check: another package (the co-op
+  app), the app's and the native code's versions disagreeing
+  (`BuildConfig.VERSION_NAME`), or a device policy against installing apps.
+- `Updater.prepareDownload`: the install permission (with the player's yes,
+  the system's page, then a wait for the game to be back in front), then
+  `cache/update/download.apk`. Android 11 is reported to end an app when the
+  permission is granted to it; the question tells the player to save first,
+  and the download does not resume by itself after such a restart.
+- `Updater.install`: `getPackageArchiveInfo` on the download (the package, the
+  version code, the signing certificates against the installed app's), the
+  player's go-ahead (naming both apps when their labels differ), then a
+  `PackageInstaller` session (`MODE_FULL_INSTALL`,
+  `USER_ACTION_REQUIRED` on Android 12 and later) committed with a
+  `PendingIntent` to `UpdateReceiver` (not exported; `FLAG_MUTABLE` on 12 and
+  later, since Android adds the status to it, and explicit, as 14 requires).
+  `STATUS_PENDING_USER_ACTION` opens Android's window while the game is in
+  front (a start from the background is refused from Android 10, so it waits
+  for the game otherwise). The final status (success, cancelled, a different
+  key as `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, a downgrade, no storage, ...)
+  becomes plain words (`UpdateText`). Replacing the app ends its process, so
+  the old one seldom sees success: the next start is the new version. Where
+  Android never answers (its window dismissed without a status on some
+  versions), 60 seconds of the game in front with no answer ends the wait.
+- At each start (`Updater.init`) what a run left is removed: the download in
+  the cache folder and the app's install sessions that are not in progress.
+- The game quits with `exit()`: an `atexit` handler ends Java's waits and joins
+  the worker thread before the static objects go. Any other quit through
+  `iUpdateShutdown` does the same: it calls the platform's `Stop`, which every
+  wait in Java sees (`nativeStopping`).
+- Android versions: 7.0 and 7.1 have one Unknown sources switch
+  (`Settings.Secure.INSTALL_NON_MARKET_APPS`, on the Security page); 8.0 and
+  later the per-app permission (`canRequestPackageInstalls`,
+  `ACTION_MANAGE_UNKNOWN_APP_SOURCES`); 9 `GET_SIGNING_CERTIFICATES` (the older
+  `GET_SIGNATURES` before, and where an archive gives none); 14
+  `getParcelableExtra` with a class (on 13 its typed form can miss the extra,
+  so 13 keeps the untyped one).
+
+The desktop test, `android/app/src/updateTest/java/.../UpdateNetTest.java`,
+runs `UpdateNet` and `UpdateText` on a JDK (17 or newer) against HTTPS servers
+on the machine, with a test authority and certificates it makes with keytool:
+whole and chunked bodies, a redirect not followed, an error status, the
+request's exact headers, cancels, time-outs, a short body, a certificate for
+another name, an expired one, an unknown authority and a server without TLS.
+With `--online <owner/name>` it also reads that repository's latest release
+from GitHub. Gradle does not build it (it uses the JDK's own HTTPS server):
+
+```
+javac -d out android/app/src/update/java/io/github/tssmport/game/UpdateNet.java \
+      android/app/src/update/java/io/github/tssmport/game/UpdateText.java \
+      android/app/src/updateTest/java/io/github/tssmport/game/UpdateNetTest.java
+java -cp out io.github.tssmport.game.UpdateNetTest <scratch folder> [--online <owner/name>]
+```
+
+The core's own test is `tssm_updatetest`, in a PC build.
+
 ## Known issues
 
 - Played on one phone so far, a 64-bit Galaxy S25 Ultra (`arm64-v8a`). The
@@ -852,3 +1027,10 @@ The picker itself needs a person's hands.
 - Using a folder in place needs All files access, which Google Play does not
   grant to games. The APKs are signed with a debug key and not meant for a
   store.
+- **The updater** has not run on a device. Untested there: Android's
+  `HttpsURLConnection` against GitHub (its certificate chains, the headers it
+  sends, a disconnect under a blocked read), the install permission's round
+  trip through the settings, the `PackageInstaller` session and Android's
+  window on each version, the app being ended and replaced, and the status
+  after Cancel on Android 7 to 9. `UpdateNet` is tested on a desktop JVM and
+  the core on a PC. Each step writes a `tssm: update:` line to the log.

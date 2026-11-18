@@ -31,6 +31,9 @@
 #include "iPadControls.h"
 #include "iPadHost.h"
 #include "iScreen.h"
+#ifdef TSSM_UPDATE
+#include "iUpdate.h"
+#endif
 #include "iWindow.h"
 
 #include <stdio.h>
@@ -444,6 +447,9 @@ namespace
                 ImGui::TextWrapped("%s", iGui::SaveError());
                 ImGui::PopStyleColor();
             }
+#ifdef TSSM_UPDATE
+            iGui::UpdatesNotice();
+#endif
             if (iGui::AnyRestartPending())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 210, 80, 255));
@@ -1038,6 +1044,12 @@ void iGuiInit()
 
     ReadDebugSwitches();
 
+#ifdef TSSM_UPDATE
+    // The Updates section's core, and the check at start-up when the player
+    // turned it on.
+    iGui::UpdatesStartup();
+#endif
+
     const char* open = getenv("TSSM_GUI_OPEN");
     if (((open != NULL && atoi(open) != 0) || sCapturing) && sOpenAt <= 0)
     {
@@ -1061,6 +1073,10 @@ void iGuiShutdown()
     {
         return;
     }
+
+#ifdef TSSM_UPDATE
+    iUpdateShutdown();
+#endif
 
     // SDL holds its watch lock while a watch runs, so none is running on
     // another thread once this returns.

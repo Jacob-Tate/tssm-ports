@@ -959,4 +959,8 @@ void iGui::DrawSettings()
     SettingsGameFiles();
     ImGui::Spacing();
     SettingsInterface();
+#ifdef TSSM_UPDATE
+    ImGui::Spacing();
+    SettingsUpdates();
+#endif
 }

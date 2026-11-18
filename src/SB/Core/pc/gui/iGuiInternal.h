@@ -66,6 +66,12 @@ namespace iGui
     void SettingsGame();
     void SettingsInterface();
 
+    // The Updates section, the line at the top of the window when an update
+    // waits, and the start-up check (gui/iGuiUpdates.cpp; TSSM_UPDATE only).
+    void SettingsUpdates();
+    void UpdatesNotice();
+    void UpdatesStartup();
+
     // The other tabs.
     void DrawControls();
     void DrawSaves();
@@ -85,6 +91,9 @@ namespace iGui
 
     // "(?)" with `text` as its tooltip.
     void HelpMarker(const char* text);
+
+    // A modal's Cancel: Esc, and on the Switch the controller's back button.
+    bool BackPressed();
 
     // A dimmed line of explanation under a control.
     void Note(const char* fmt, ...);

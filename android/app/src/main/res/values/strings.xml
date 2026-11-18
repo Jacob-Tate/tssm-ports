@@ -2,7 +2,7 @@
 <resources>
     <!-- The app's name (its label). gradle -Ptssm.label=<name> replaces it
          (app/build.gradle). -->
-    <string name="app_name">SpongeBob Movie Port</string>
+    <string name="app_name">The SpongeBob SquarePants Movie Video Game</string>
 
     <string name="import_short">Import game files</string>
     <string name="import_long">Import game files</string>

@@ -21,13 +21,26 @@ plugins {
 //                  default one in src/main/res.
 //   tssm.label     The app's name (its label): under the launcher icon, in
 //                  the recent apps and in Settings. Plain text. Default
-//                  "SpongeBob Movie Port" (app_name in src/main/res/values/
-//                  strings.xml).
+//                  "The SpongeBob SquarePants Movie Video Game" (app_name in
+//                  src/main/res/values/strings.xml).
 //   tssm.releaseDebugKey
 //                  true: the release APKs are signed with the SDK's debug
 //                  key, the one debug builds use (~/.android/debug.keystore).
 //                  Default false: they are left unsigned
 //                  (app-<abi>-release-unsigned.apk), for a key of your own.
+//   tssm.update    true: in-app updates (docs/ANDROID.md "Updates"). The
+//                  settings window's Updates section reads the project's
+//                  latest release on GitHub and installs this ABI's APK from
+//                  it; the app gets the permissions for that
+//                  (src/update/AndroidManifest.xml). Default false, so a
+//                  build of your own never offers to turn itself into the
+//                  public app. The TSSM Dehydrated release recipe sets it.
+//                  Only with tssm.abis of arm64-v8a and armeabi-v7a: the
+//                  releases have no APK for another ABI.
+//   tssm.versionName, tssm.versionCode
+//                  Another version for a test build, such as the updater's
+//                  test kit (an older version that updates itself).
+//                  Releases leave them alone.
 
 // third_party/SDL's own Java half, compiled straight out of the submodule so
 // the two halves of SDL cannot drift apart.
@@ -57,6 +70,20 @@ if (!tssmIcon.isEmpty()) {
 
 def tssmLabel = (project.findProperty('tssm.label') ?: '').trim()
 def tssmReleaseDebugKey = (project.findProperty('tssm.releaseDebugKey') ?: 'false').toString().toBoolean()
+def tssmUpdate = (project.findProperty('tssm.update') ?: 'false').toString().toBoolean()
+def tssmVersionName = project.findProperty('tssm.versionName')
+def tssmVersionCode = project.findProperty('tssm.versionCode')
+if (tssmUpdate) {
+    // The update manifest's permissions go into every ABI's APK, so an ABI
+    // the releases have no APK for (its updater is off in CMake) is refused
+    // here rather than built with permissions it never uses.
+    def noRelease = tssmAbis.findAll { !(it in ['arm64-v8a', 'armeabi-v7a']) }
+    if (!noRelease.isEmpty()) {
+        throw new GradleException("tssm.update: the releases have APKs for arm64-v8a and " +
+                "armeabi-v7a only, not ${noRelease.join(', ')}. Build that ABI without tssm.update.")
+    }
+    logger.lifecycle('tssm: in-app updates on (tssm.update)')
+}
 
 def cmakeArgs = [
     // The game is C++ and librw is C++; the shared runtime would be a second
@@ -84,8 +111,16 @@ android {
         minSdk = 24
         targetSdk = 35
 
-        versionCode = 16
-        versionName = '0.9'
+        versionCode = 17
+        versionName = '0.9.2'
+
+        // A test build's own version (tssm.versionCode, tssm.versionName).
+        if (tssmVersionCode != null) {
+            versionCode = tssmVersionCode.toString().toInteger()
+        }
+        if (tssmVersionName != null) {
+            versionName = tssmVersionName.toString()
+        }
 
         // A generated app_name, which takes the place of strings.xml's.
         if (!tssmLabel.isEmpty()) {
@@ -95,6 +130,15 @@ android {
         externalNativeBuild {
             cmake {
                 arguments(*cmakeArgs)
+
+                // The updater (CMakeLists.txt, TSSM_UPDATE) compares this
+                // app's versionName with the releases'.
+                if (tssmUpdate) {
+                    arguments '-DTSSM_UPDATE=ON',
+                            '-DTSSM_ANDROID_VERSION=' + android.defaultConfig.versionName
+                } else {
+                    arguments '-DTSSM_UPDATE=OFF'
+                }
 
                 // Just the game. Without this, AGP builds every target the
                 // CMake project defines.
@@ -147,6 +191,12 @@ android {
         }
     }
 
+    buildFeatures {
+        // BuildConfig.VERSION_NAME, which the updater checks against the
+        // version its native code was built with.
+        buildConfig = tssmUpdate
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -155,6 +205,20 @@ android {
     sourceSets {
         main {
             java.srcDirs += sdlJava
+            if (tssmUpdate) {
+                java.srcDirs += 'src/update/java'
+            }
+        }
+        // The updater's Java and its permissions only with tssm.update
+        // (src/update). Its desktop test, src/updateTest, is run with the
+        // JDK's own javac and java (docs/ANDROID.md "Updates"), not here.
+        if (tssmUpdate) {
+            debug {
+                manifest.srcFile 'src/update/AndroidManifest.xml'
+            }
+            release {
+                manifest.srcFile 'src/update/AndroidManifest.xml'
+            }
         }
         if (tssmIconRes != null) {
             debug {

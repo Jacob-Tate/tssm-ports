@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What in-app updates add to the app (docs/ANDROID.md "Updates"), merged
+     into src/main/AndroidManifest.xml only by builds made with
+     -Ptssm.update=true (app/build.gradle). A build without it has none of
+     these: no network, no installing. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The check and the download, from GitHub only (iUpdate.h). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- "Not connected to the internet" rather than a failed name lookup. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- The install: Android asks the player in its own window every time,
+         and first wants this app allowed to install apps ("Install unknown
+         apps" in its settings). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <!-- PackageInstaller's answers about the install. -->
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

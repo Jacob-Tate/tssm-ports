@@ -11,13 +11,25 @@ game files.
   phones today) and `armeabi-v7a` (older 32-bit phones). The 64-bit app has been played
   on one phone so far; the 32-bit one is build-checked only.
 - This branch still builds the Windows version too, exactly as on the `pc` branch.
-- **Prebuilt:** this repository's Releases page has both APKs as *TSSM Dehydrated* 0.9
-  (`TSSM-Dehydrated-0.9-Android.apk` for 64-bit phones, `TSSM-Dehydrated-0.9-Android-32bit.apk`
-  for older 32-bit-only ones), with no game data (you still need your own game files,
-  below): this branch's release build (`docs/ANDROID.md`, "Release APKs") with
-  `-Ptssm.releaseDebugKey=true`, `"-Ptssm.label=TSSM Dehydrated"`, FFmpeg for the movies
-  and the port's own icon (`tools/make_icons.ps1 -Background '#1E6FB0'` on the `switch`
-  branch's `dist/switch/default_icon.jpg`, passed as `-Ptssm.icon`).
+
+Two ways to play
+----------------
+
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
+  for Android: `TSSM-Dehydrated-0.9.2-Android.apk` for 64-bit phones and
+  `TSSM-Dehydrated-0.9.2-Android-32bit.apk` for older 32-bit-only ones, with no game data.
+  Install 0.9.2 by hand once (it installs over 0.9; saves stay); from then on it can update
+  itself when you ask: settings window (three fingers on the screen), Settings tab,
+  *Updates*, *Check for updates*. The APKs are this branch's release build
+  (`docs/ANDROID.md`, "Release APKs") with `-Ptssm.releaseDebugKey=true`,
+  `"-Ptssm.label=TSSM Dehydrated"`, `-Ptssm.update=true`, FFmpeg for the movies and the
+  port's own icon (`tools/make_icons.ps1 -Background '#1E6FB0'` on the `switch` branch's
+  `dist/switch/default_icon.jpg`, passed as `-Ptssm.icon`).
+- **Build it yourself** from this source, as below. A build of your own is called *The
+  SpongeBob SquarePants Movie Video Game*, and can have a launcher icon made from a picture
+  of your choice (`docs/ICON.md`). It has no updater unless you turn one on.
+
+Either way you bring your own copy of the game's files (below).
 
 This repository and its branches
 --------------------------------

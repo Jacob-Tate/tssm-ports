@@ -401,6 +401,19 @@ void iGui::HelpMarker(const char* text)
     }
 }
 
+bool iGui::BackPressed()
+{
+#ifdef __SWITCH__
+    // ImGui's own back button (the right face button) closes no modal, and
+    // the Switch has no Esc.
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+    {
+        return true;
+    }
+#endif
+    return ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+}
+
 bool iGui::TouchWords()
 {
     return ImGui::GetCurrentContext() != NULL &&

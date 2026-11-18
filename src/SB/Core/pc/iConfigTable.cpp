@@ -234,6 +234,13 @@ const iConfigSetting kConfigSettings[] = {
       "Size of the overlay and launcher: auto (from the display's scaling and the\n"
       "; window's height) or a factor from 0.5 to 4.",
       ICONFIG_FLOAT, "auto", 0.5f, 4.0f },
+#ifdef TSSM_UPDATE
+    // TSSM: in-app updates (iUpdate.h), only in builds that have them.
+    { "update", "check_at_start", "off",
+      "Check for a newer release when the game starts. It connects to GitHub only.\n"
+      "; Off: only the Check for updates button in the settings window does.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+#endif
 };
 
 const S32 kConfigSettingCount = (S32)(sizeof(kConfigSettings) / sizeof(kConfigSettings[0]));
