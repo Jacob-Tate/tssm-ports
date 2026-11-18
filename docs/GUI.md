@@ -380,7 +380,9 @@ the variable for that run.
   - `dx11` for `D3D11` (links `d3dcompiler`)
   - `opengl3` for `GL3`
 - The vendored SDL is built with `SDL_RENDER` and `SDL_DIALOG` on. An installed SDL3 normally has both.
-- The About tab's version line is `git describe` at configure time.
+- The About tab's version line is the branch and `git describe` at configure time, or `TSSM_VERSION_LINE` when
+  given (a release build's version). Its heading, the overlay's title, the launcher's heading and both windows'
+  titles are `TSSM_PC_TITLE` (src/SB/Core/pc/README.md).
 - The About tab's notices are generated at configure time into `gui/iGuiNotices.inc` in the build directory, from each
   component's own license file: this repository's `LICENSE` (CC0), ImGui, SDL, librw, FFmpeg's
   `copyright` from vcpkg, and Vulkan's when that backend is built.

@@ -12,6 +12,13 @@ assets that keep pointers in 4-byte slots are widened as they load
 (`iAssetWiden.h`). `tools/regress.py` runs both widths to gameplay and compares
 their frames with stored references (below).
 
+There are two ways to play: download the ready-made *TSSM Dehydrated* zip from
+the repository's Releases page (this port under that neutral name, with the
+port's own simple icon), or build it yourself from this source as below. Either
+way you bring your own copy of the game's Xbox files. A build of your own is
+called *The SpongeBob SquarePants Movie Video Game* and can carry an icon made
+from a picture of your choice (`docs/ICON.md`).
+
 ## Building on Windows
 
 Needs: Visual Studio 2022 (or its Build Tools) with the C++ workload and a
@@ -45,6 +52,13 @@ By hand:
 | `TSSM_GUI` | ON | the Dear ImGui launcher and in-game overlay (`third_party/imgui`, `docs/GUI.md`) |
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
+| `TSSM_PC_TITLE` | `The SpongeBob SquarePants Movie Video Game` | the program's name: the launcher's and the game's window titles, the launcher's heading, the settings window's title and About tab, message boxes, the first line of `config.ini`, and the name in `tssm.exe`'s version information (Explorer's Properties, Task Manager). No double quotes, backslashes or `%` |
+| `TSSM_PC_VERSION` | `0.9.2` | the version in `tssm.exe`'s version information: up to four numbers |
+| `TSSM_VERSION_LINE` | empty | the About tab's version line; empty: the branch and `git describe` |
+| `TSSM_ICON_DIR` | empty | a folder made by `tools/make_icons.ps1`: `tssm.exe`'s icon (`docs/ICON.md`); empty: no icon of its own |
+
+CMake caches these, so a build directory keeps what it was configured with until
+it is configured again with `-D...`.
 
 ## Building with MinGW (MSYS2)
 
@@ -182,6 +196,68 @@ out a `tssm.exe` with it linked in must also offer the FFmpeg source it was
 built from and `tools/mingw/build_ffmpeg.sh`, which is how it was configured;
 the port's own source covers the rest. Never hand out a build made with
 MSYS2's GPL FFmpeg package.
+
+## Building the TSSM Dehydrated release
+
+The ready-made Windows zips on the repository's Releases page are "TSSM
+Dehydrated": this port under a neutral name, with the port's own sponge-block
+icon and, like every build, none of the game's files (players bring their
+own, as above). They are ordinary Release builds of this branch with clang++ on
+the MSVC ABI (as `build-release.bat`), set up like this:
+
+- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.2` and
+  `TSSM_VERSION_LINE=0.9.2`: the name and version in every place the options
+  table above lists;
+- `TSSM_ICON_DIR`: `tools/make_icons.ps1` run on the drawn sponge block,
+  `dist/switch/default_icon.jpg` on the `switch` branch (the Switch's and the
+  Android app's default icon);
+- FFmpeg n9.0.2 from `tools/build_ffmpeg_msvc.sh`: five DLLs with the decoders
+  the game's movies and mods' sounds need, LGPL 2.1 or later;
+- the static C and C++ runtime (`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`;
+  FFmpeg's DLLs have it too), so nothing needs the Visual C++ runtime
+  installed;
+- only the `tssm` target built (`--target tssm`, and `TSSM_BUILD_TESTS=OFF`):
+  the output folder holds `tssm.exe` and the FFmpeg DLLs, no test programs.
+
+Build in a folder whose path has no spaces and nothing private in it: CMake
+maps the checkout out of `__FILE__` (`-fmacro-prefix-map`),
+`build_ffmpeg_msvc.sh` keeps its folders out of the DLLs, and a Release build
+has no debug information. In a command prompt with the 64-bit Visual Studio
+environment (`vcvarsall.bat x64`; for the 32-bit zip `x86`, the `-x86`
+folders and `-DTSSM_BUILD_32BIT=ON`), MSYS2 with `make` and `diffutils`, and
+FFmpeg n9.0.2's source
+(https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n9.0.2.tar.gz, sha256
+`6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`)
+extracted into the work folder:
+
+    set R=C:\tssm-rel\pc
+    rem %R%\src: this branch with its submodules (Building on Windows)
+    set MSYS2_PATH_TYPE=inherit
+    C:\msys64\usr\bin\bash -l -c "sh /c/tssm-rel/pc/src/tools/build_ffmpeg_msvc.sh /c/tssm-rel/pc/FFmpeg-n9.0.2 /c/tssm-rel/pc/ff-x64 /c/tssm-rel/pc/ffmpeg-x64"
+    git -C %R%\src show origin/switch:dist/switch/default_icon.jpg > %R%\default_icon.jpg
+    powershell -ExecutionPolicy Bypass -File %R%\src\tools\make_icons.ps1 -Image %R%\default_icon.jpg -OutDir %R%\icon
+    cmake -S %R%\src -B %R%\build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ^
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DTSSM_BUILD_TESTS=OFF ^
+          -DCMAKE_PREFIX_PATH=%R%/ffmpeg-x64 -DTSSM_ICON_DIR=%R%/icon ^
+          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.2 -DTSSM_VERSION_LINE=0.9.2 ^
+          -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%R%/bin-x64
+    cmake --build %R%\build-x64 --target tssm
+
+`%R%\bin-x64` then holds `tssm.exe` and the DLLs of `avcodec`, `avformat`,
+`avutil`, `swresample` and `swscale`: the zip is those six files with the
+release's `README.txt`, `LEGAL-NOTICE.md` and `THIRD-PARTY-NOTICES.txt`.
+Before sharing, check the name and version (Explorer: Properties, Details),
+that no file imports a Visual C++ runtime DLL
+(`llvm-objdump -p tssm.exe | findstr "DLL Name"`, and the same for each DLL),
+and that no file names the work folder:
+
+    findstr /m /i /c:"tssm-rel" %R%\bin-x64\*
+
+prints nothing (look for your user name the same way). FFmpeg's LGPL asks
+whoever hands out these DLLs to offer the FFmpeg source they were built from
+(the release carries it) and `tools/build_ffmpeg_msvc.sh`, which says how it
+was configured.
 
 ## The game's files
 

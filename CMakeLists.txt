@@ -108,11 +108,16 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SIZEOF_VOID_P EQUAL 4)
   endif()
 endif()
 
+# __FILE__ relative to the checkout (librw's messages and assertions carry
+# it), so the executable does not carry the folder it was built in: GCC, and
+# clang++ (the MSVC-ABI build and every other).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+   (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=>")
+endif()
+
 if(MINGW)
   add_link_options(-static)
-  # __FILE__ relative to the checkout (librw's messages and assertions carry
-  # it), so the executable does not carry the folder it was built in.
-  add_compile_options("-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
   # 32-bit MinGW's time_t is 32 bits unless asked (msvcrt's default), and ends
   # in January 2038; the MSVC x86 build's UCRT has a 64-bit one. Save dates
   # go through it (iHostWin32.cpp, iSaveFormat.cpp).
@@ -573,6 +578,34 @@ target_compile_options(tssm_rw PRIVATE ${TSSM_NO_WARNINGS})
 # TSSM_TEST_HANG_DUMP's heartbeat (iHangDump.h; the dump is in tssm_main.cpp).
 target_sources(tssm_rw PRIVATE ${PC_DIR}/iHangDump.cpp)
 
+# --- the program's name and version ------------------------------------------------
+# TSSM_PC_TITLE is what the program calls itself: the launcher's and the
+# game's window titles, the launcher's heading, the overlay's title, the About
+# tab's heading, every message box's caption, the first line of config.ini and
+# of the save tools' help, and the name in tssm.exe's version information
+# (Explorer's Properties, Task Manager, the volume mixer; with TSSM_PC_VERSION).
+# The game's own screens come from the player's game files and are not
+# touched. TSSM_VERSION_LINE is the About tab's version line. The TSSM
+# Dehydrated release sets all three (src/SB/Core/pc/README.md, "Building the
+# TSSM Dehydrated release").
+set(TSSM_PC_TITLE "The SpongeBob SquarePants Movie Video Game" CACHE STRING
+  "The program's name: window titles, the launcher, the overlay, message boxes, tssm.exe's version information")
+set(TSSM_PC_VERSION "0.9.2" CACHE STRING
+  "The version in tssm.exe's version information: up to four numbers, such as 0.9.1")
+set(TSSM_VERSION_LINE "" CACHE STRING
+  "The About tab's version line; empty: the branch and git describe")
+if(TSSM_PC_TITLE STREQUAL "" OR TSSM_PC_TITLE MATCHES "[\"\\\\%]")
+  message(FATAL_ERROR "TSSM_PC_TITLE is \"${TSSM_PC_TITLE}\": give a name without double quotes, "
+    "backslashes or percent signs.")
+endif()
+if(NOT TSSM_PC_VERSION MATCHES "^[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?(\\.[0-9]+)?$")
+  message(FATAL_ERROR "TSSM_PC_VERSION is \"${TSSM_PC_VERSION}\": give up to four numbers, such as 0.9.1.")
+endif()
+if(TSSM_VERSION_LINE MATCHES "[\"\\\\]")
+  message(FATAL_ERROR "TSSM_VERSION_LINE has a double quote or a backslash.")
+endif()
+message(STATUS "Program name: \"${TSSM_PC_TITLE}\", version ${TSSM_PC_VERSION}")
+
 # --- Dear ImGui and the GUI -----------------------------------------------------------
 # third_party/imgui is Dear ImGui (MIT), pinned to a release tag. One library
 # carries it and the backends this build can use: SDL3 for the platform side,
@@ -628,20 +661,25 @@ if(TSSM_GUI)
     ${PC_DIR}/gui/iGuiUtil.cpp
   )
 
-  # The About tab's version line: the branch and `git describe` at configure
-  # time (re-run CMake for a newer one).
-  execute_process(COMMAND git describe --always --dirty --abbrev=10
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  execute_process(COMMAND git rev-parse --abbrev-ref HEAD
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                  OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  if(NOT _tssm_describe)
-    set(_tssm_describe "unknown")
-  endif()
-  set(TSSM_GUI_VERSION "${_tssm_describe}")
-  if(_tssm_branch)
-    set(TSSM_GUI_VERSION "${_tssm_branch} ${_tssm_describe}")
+  # The About tab's version line: TSSM_VERSION_LINE when given (a release
+  # build's version), else the branch and `git describe` at configure time
+  # (re-run CMake for a newer one).
+  if(TSSM_VERSION_LINE)
+    set(TSSM_GUI_VERSION "${TSSM_VERSION_LINE}")
+  else()
+    execute_process(COMMAND git describe --always --dirty --abbrev=10
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND git rev-parse --abbrev-ref HEAD
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(NOT _tssm_describe)
+      set(_tssm_describe "unknown")
+    endif()
+    set(TSSM_GUI_VERSION "${_tssm_describe}")
+    if(_tssm_branch)
+      set(TSSM_GUI_VERSION "${_tssm_branch} ${_tssm_describe}")
+    endif()
   endif()
   set_source_files_properties(${PC_DIR}/gui/iGuiTabs.cpp PROPERTIES
     COMPILE_DEFINITIONS "TSSM_GUI_VERSION=\"${TSSM_GUI_VERSION}\"")
@@ -661,7 +699,7 @@ if(TSSM_GUI)
     endif()
     string(APPEND _notice_text "  { \"${name}\", \"${license}\", \"${what}\", \"${url}\",\n    R\"tssm_notice(${_body})tssm_notice\" },\n")
   endmacro()
-  tssm_gui_notice("The SpongeBob SquarePants Movie PC port" "CC0 1.0" "This program's own code."
+  tssm_gui_notice("${TSSM_PC_TITLE}, PC port" "CC0 1.0" "This program's own code."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
   tssm_gui_notice("Dear ImGui" "MIT" "The settings overlay and the launcher."
                   "https://github.com/ocornut/imgui" "${IMGUI_DIR}/LICENSE.txt")
@@ -837,6 +875,8 @@ endif()
 if(FMV_DEFINES)
   target_compile_definitions(tssm_platform PRIVATE ${FMV_DEFINES})
 endif()
+# The program's name (TSSM_PC_TITLE, above), as iHost.h's TSSM_GAME_TITLE.
+target_compile_definitions(tssm_platform PRIVATE "TSSM_GAME_TITLE=\"${TSSM_PC_TITLE}\"")
 if(ANDROID)
   target_link_libraries(tssm_platform PUBLIC log)
 endif()
@@ -1010,6 +1050,52 @@ if(WIN32)
         COMMENT "Staging SDL")
     endif()
   endif()
+endif()
+
+# --- tssm.exe's version information ----------------------------------------------
+# The name and version Windows shows for tssm.exe (Explorer's Properties,
+# Task Manager, the volume mixer): TSSM_PC_TITLE and TSSM_PC_VERSION, above.
+# The resource script is written into the build directory.
+if(WIN32 AND NOT ANDROID)
+  enable_language(RC)
+  string(REPLACE "." ";" _tssm_version_numbers "${TSSM_PC_VERSION}")
+  list(LENGTH _tssm_version_numbers _tssm_version_count)
+  while(_tssm_version_count LESS 4)
+    list(APPEND _tssm_version_numbers 0)
+    list(LENGTH _tssm_version_numbers _tssm_version_count)
+  endwhile()
+  string(REPLACE ";" "," _tssm_version_numbers "${_tssm_version_numbers}")
+  set(TSSM_VERSION_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_version")
+  file(GENERATE OUTPUT "${TSSM_VERSION_BUILD}/tssm_version.rc" CONTENT
+"1 VERSIONINFO
+FILEVERSION ${_tssm_version_numbers}
+PRODUCTVERSION ${_tssm_version_numbers}
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0x0
+FILEOS 0x40004
+FILETYPE 0x1
+FILESUBTYPE 0x0
+BEGIN
+  BLOCK \"StringFileInfo\"
+  BEGIN
+    BLOCK \"040904B0\"
+    BEGIN
+      VALUE \"FileDescription\", \"${TSSM_PC_TITLE}\"
+      VALUE \"FileVersion\", \"${TSSM_PC_VERSION}\"
+      VALUE \"InternalName\", \"tssm\"
+      VALUE \"OriginalFilename\", \"tssm.exe\"
+      VALUE \"ProductName\", \"${TSSM_PC_TITLE}\"
+      VALUE \"ProductVersion\", \"${TSSM_PC_VERSION}\"
+    END
+  END
+  BLOCK \"VarFileInfo\"
+  BEGIN
+    VALUE \"Translation\", 0x409, 1200
+  END
+END
+")
+  target_sources(tssm PRIVATE "${TSSM_VERSION_BUILD}/tssm_version.rc")
+  set_source_files_properties("${TSSM_VERSION_BUILD}/tssm_version.rc" PROPERTIES GENERATED ON)
 endif()
 
 # --- the app icon ----------------------------------------------------------------

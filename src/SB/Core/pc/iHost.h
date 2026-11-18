@@ -259,7 +259,11 @@ const char* iHostName();
 // this to have reached anyone.
 void iHostErrorBox(const char* title, const char* message);
 
-// The game's name, as its window and its message boxes are titled.
-#define TSSM_GAME_TITLE "The SpongeBob SquarePants Movie"
+// The program's name, as its windows and its message boxes are titled. The
+// platform layer gets it from CMake's TSSM_PC_TITLE (CMakeLists.txt, "the
+// program's name and version"), which a build can set to a name of its own.
+#ifndef TSSM_GAME_TITLE
+#define TSSM_GAME_TITLE "The SpongeBob SquarePants Movie Video Game"
+#endif
 
 #endif

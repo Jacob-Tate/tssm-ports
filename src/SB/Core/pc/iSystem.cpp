@@ -632,7 +632,7 @@ static void ClaimSaveFolder()
     {
         char message[1024];
         snprintf(message, sizeof(message),
-                 "The SpongeBob SquarePants Movie is already running, with the saves in\n%s\n\n"
+                 TSSM_GAME_TITLE " is already running, with the saves in\n%s\n\n"
                  "Only one copy can run at a time: both would take every controller press, "
                  "and their saves would overwrite each other.\n\n%s",
                  iSaveStoreRoot(),

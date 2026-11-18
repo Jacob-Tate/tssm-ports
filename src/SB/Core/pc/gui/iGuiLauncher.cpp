@@ -65,7 +65,7 @@ namespace
         ImGui::Begin("launcher", NULL, flags);
 
         ImGui::PushFont(NULL, ImGui::GetStyle().FontSizeBase * 1.6f);
-        ImGui::TextColored(ImVec4(0.96f, 0.82f, 0.25f, 1.0f), "The SpongeBob SquarePants Movie");
+        ImGui::TextColored(ImVec4(0.96f, 0.82f, 0.25f, 1.0f), TSSM_GAME_TITLE);
         ImGui::PopFont();
         ImGui::TextDisabled("PC port. Choose where the game's files are, check the settings, "
                             "then Play.");
@@ -190,7 +190,7 @@ void iGuiLauncherRun()
     }
 
     SDL_Window* window =
-        SDL_CreateWindow("The SpongeBob SquarePants Movie", (int)(820 * content), (int)(680 * content),
+        SDL_CreateWindow(TSSM_GAME_TITLE, (int)(820 * content), (int)(680 * content),
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
     SDL_Renderer* renderer = window != NULL ? SDL_CreateRenderer(window, NULL) : NULL;
     if (renderer == NULL)

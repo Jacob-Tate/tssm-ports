@@ -13,6 +13,30 @@ game's own decompiled code runs unchanged in behaviour; a new platform layer
   Start on a controller), controller and keyboard bindings, mods, and save import and
   export with Dolphin and the GameCube.
 
+Two ways to play
+----------------
+
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
+  for Windows: `TSSM-Dehydrated-0.9.2-Windows.zip` (64-bit) and
+  `TSSM-Dehydrated-0.9.2-Windows-32bit.zip` (32-bit). It is this branch, built under that
+  neutral name with the port's own simple icon, and has no game data. It has no updater: a
+  new version is a new zip.
+- **Build it yourself** from this source, as below. A build of your own is called *The
+  SpongeBob SquarePants Movie Video Game*, and can carry an icon made from a picture of your
+  choice (`docs/ICON.md`).
+
+Either way you bring your own copy of the game's files (below).
+
+To play the zip: unzip it into a folder of its own (not under `Program Files`) and start
+`tssm.exe`. The program is not signed, so Windows may warn that it does not know the
+publisher: choose *More info*, then *Run anyway*. On the first start the launcher asks for
+the game's files: *Browse...* to the folder that holds `boot.HIP`, `font.HIP` and `FMV`,
+then *Play*. `config.ini` is written beside `tssm.exe`, saves go to
+`%APPDATA%\tssm\saves`, and the log of the last run to `%APPDATA%\tssm\last_run.log`. The
+renderer is Direct3D 9 unless you pick Direct3D 11 or OpenGL 3 (launcher or settings
+window, Display, Renderer). `src/SB/Core/pc/README.md` ("Building the TSSM Dehydrated
+release") has the exact commands the zips were made with.
+
 This repository and its branches
 --------------------------------
 

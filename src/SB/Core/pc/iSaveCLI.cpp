@@ -14,7 +14,7 @@
 
 static void iSC_usage()
 {
-    printf("The SpongeBob SquarePants Movie (PC) -- save tools\n"
+    printf(TSSM_GAME_TITLE " (PC) -- save tools\n"
            "\n"
            "  tssm --saves [--all]                   list the save slots (--all: every folder)\n"
            "  tssm --import-save FILE [--slot S] [--pick N] [--force] [--dry-run]\n"

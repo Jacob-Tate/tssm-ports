@@ -25,6 +25,7 @@
 #include "gui/iGuiRender.h"
 
 #include "iConfig.h"
+#include "iHost.h"
 #include "iPadControls.h"
 #include "iPadHost.h"
 #include "iScreen.h"
@@ -384,7 +385,7 @@ namespace
                                        ImGuiWindowFlags_NoScrollbar |
                                        ImGuiWindowFlags_NoScrollWithMouse;
 
-        if (ImGui::Begin("The SpongeBob SquarePants Movie  |  PC port###tssm_overlay", NULL, flags))
+        if (ImGui::Begin(TSSM_GAME_TITLE "  |  PC port###tssm_overlay", NULL, flags))
         {
             if (iGui::SaveError() != NULL)
             {

@@ -35,7 +35,7 @@ extern "C" {
 
 void iGui::DrawAbout()
 {
-    ImGui::SeparatorText("The SpongeBob SquarePants Movie: PC port");
+    ImGui::SeparatorText(TSSM_GAME_TITLE ": PC port");
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
 #ifdef NDEBUG
     const char* config = "release";

@@ -504,8 +504,8 @@ bool iConfigWriteDefaults(const char* path)
         return false;
     }
 
-    // TSSM-ADAPTED: the game this file belongs to.
-    fprintf(f, "; The SpongeBob SquarePants Movie, PC port -- settings.\n");
+    // TSSM-ADAPTED: the program this file belongs to.
+    fprintf(f, "; %s, PC port -- settings.\n", TSSM_GAME_TITLE);
     fprintf(f, "; Every value here is the default, so deleting this file changes nothing.\n");
     fprintf(f, "; Booleans take on/off, true/false, yes/no or 1/0.\n");
 
