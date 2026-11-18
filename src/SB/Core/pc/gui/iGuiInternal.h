@@ -85,6 +85,12 @@ namespace iGui
     void SettingsGame();
     void SettingsInterface();
 
+    // The Updates section, the line at the top of the window when an update
+    // waits, and the start-up check (gui/iGuiUpdates.cpp; TSSM_UPDATE only).
+    void SettingsUpdates();
+    void UpdatesNotice();
+    void UpdatesStartup();
+
     // The other tabs.
     void DrawControls();
     void DrawSaves();

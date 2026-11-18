@@ -29,6 +29,9 @@
 #include "iPadControls.h"
 #include "iPadHost.h"
 #include "iScreen.h"
+#ifdef TSSM_UPDATE
+#include "iUpdate.h"
+#endif
 #include "iWindow.h"
 
 #ifdef __3DS__
@@ -114,6 +117,9 @@ namespace
     U64 sHintLastAt;
     bool sHintDue = true;
     bool sTapped;
+    // The game started without the DSP firmware (i3DSNoSoundText): the
+    // bottom screen says so above the line, and stays until a tap.
+    bool sNoSoundNote;
     int sResumes;
     S32 sHintAge;
     // The black is drawn this many times, kBlackEvery frames apart, then no
@@ -373,9 +379,37 @@ namespace
             char text[64];
             snprintf(text, sizeof(text), "%s: menu", iGui::PadComboName());
             const ImVec2 size = ImGui::CalcTextSize(text);
-            ImGui::SetCursorPos(
-                ImVec2((io.DisplaySize.x - size.x) * 0.5f, (io.DisplaySize.y - size.y) * 0.5f));
-            ImGui::TextDisabled("%s", text);
+            const char* note = sNoSoundNote ? i3DSNoSoundText() : NULL;
+            if (note != NULL)
+            {
+                // The no-sound note, the tap that hides it, then the line.
+                const char* const tap = "Tap the screen to hide this note.";
+                const float margin = ImGui::GetFontSize();
+                const float wrap = io.DisplaySize.x - 2.0f * margin;
+                const float gap = ImGui::GetTextLineHeight();
+                const ImVec2 noteSize = ImGui::CalcTextSize(note, NULL, false, wrap);
+                const ImVec2 tapSize = ImGui::CalcTextSize(tap);
+                const float total = noteSize.y + gap + tapSize.y + gap + size.y;
+                const float top = (io.DisplaySize.y - total) * 0.5f;
+                ImGui::SetCursorPos(ImVec2(margin, top > 0.0f ? top : 0.0f));
+                ImGui::PushTextWrapPos(margin + wrap);
+                ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 210, 80, 255));
+                ImGui::TextUnformatted(note);
+                ImGui::PopStyleColor();
+                ImGui::PopTextWrapPos();
+                ImGui::SetCursorPos(ImVec2((io.DisplaySize.x - tapSize.x) * 0.5f,
+                                           ImGui::GetCursorPosY() + gap));
+                ImGui::TextUnformatted(tap);
+                ImGui::SetCursorPos(ImVec2((io.DisplaySize.x - size.x) * 0.5f,
+                                           ImGui::GetCursorPosY() + gap));
+                ImGui::TextDisabled("%s", text);
+            }
+            else
+            {
+                ImGui::SetCursorPos(ImVec2((io.DisplaySize.x - size.x) * 0.5f,
+                                           (io.DisplaySize.y - size.y) * 0.5f));
+                ImGui::TextDisabled("%s", text);
+            }
         }
         ImGui::End();
     }
@@ -435,6 +469,22 @@ namespace
             }
         }
 
+        if (sTapped && sNoSoundNote)
+        {
+            // The note goes; the line stays as long as after start-up.
+            sTapped = false;
+            sNoSoundNote = false;
+            printf("tssm: gui: bottom screen: a tap hid the no-sound note\n");
+            if (sHintSeconds == 0)
+            {
+                HintEnter(HINT_FADE_OUT, 0);
+            }
+            else
+            {
+                sHintMs = 0;
+                sHintDue = true;
+            }
+        }
         if (sTapped)
         {
             sTapped = false;
@@ -459,7 +509,7 @@ namespace
         switch (sHint)
         {
         case HINT_SHOWN:
-            if (sHintSeconds > 0 && sHintMs >= (U64)sHintSeconds * 1000)
+            if (!sNoSoundNote && sHintSeconds > 0 && sHintMs >= (U64)sHintSeconds * 1000)
             {
                 HintEnter(HINT_FADE_OUT, 0);
             }
@@ -998,6 +1048,9 @@ namespace
                 ImGui::TextWrapped("%s", iGui::SaveError());
                 ImGui::PopStyleColor();
             }
+#ifdef TSSM_UPDATE
+            iGui::UpdatesNotice();
+#endif
             if (iGui::AnyRestartPending())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 210, 80, 255));
@@ -1258,8 +1311,9 @@ namespace
             SDL_SetCursor(SDL_GetDefaultCursor());
             iGuiRenderReleaseVolatile();
 #ifdef __3DS__
-            // Back to black: the line is not shown again until a tap.
-            HintEnter(sHintSeconds < 0 ? HINT_SHOWN : HINT_BLACK, 0);
+            // Back to black: the line is not shown again until a tap. The
+            // no-sound note comes back, until one.
+            HintEnter(sHintSeconds < 0 || sNoSoundNote ? HINT_SHOWN : HINT_BLACK, 0);
             sHintLastAt = 0;
             sTapped = false;
             if (i3DSProbeBannerShown())
@@ -1515,6 +1569,15 @@ void iGuiInit()
            : sHintSeconds < 0     ? "stays"
            : sHintSeconds == 0    ? "is not shown (black)"
                                   : "fades to black after a while");
+    // No sound (no DSP firmware at start-up): the note, until a tap.
+    if (!i3DSProbeBannerShown() && i3DSNoSoundText() != NULL)
+    {
+        sNoSoundNote = true;
+        sHint = HINT_SHOWN;
+        sHintMs = 0;
+        sBlackDraws = 0;
+        printf("tssm: gui: bottom screen: the no-sound note, until a tap\n");
+    }
     const char* every = getenv("TSSM_3DS_GUI_EVERY");
     if (every != NULL && every[0] != '\0')
     {
@@ -1596,6 +1659,12 @@ void iGuiInit()
 
     ReadDebugSwitches();
 
+#ifdef TSSM_UPDATE
+    // The Updates section's core, and the check at start-up when the player
+    // turned it on.
+    iGui::UpdatesStartup();
+#endif
+
     const char* open = getenv("TSSM_GUI_OPEN");
     if (((open != NULL && atoi(open) != 0) || sCapturing) && sOpenAt <= 0)
     {
@@ -1619,6 +1688,10 @@ void iGuiShutdown()
     {
         return;
     }
+
+#ifdef TSSM_UPDATE
+    iUpdateShutdown();
+#endif
 
     SDL_RemoveEventWatch(EventWatch, NULL);
     ImGui::SetCurrentContext(sContext);

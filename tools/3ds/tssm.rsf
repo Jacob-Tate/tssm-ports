@@ -1,5 +1,7 @@
 # The New 3DS port as an installed title: tssm.cia, made from tssm.elf by
 # CMakeLists.txt with makerom (docs/3DS.md, "The .cia", says why each value).
+# A template: CMake fills in the values marked with at signs (configure_file,
+# @ONLY); the $(...) ones are makerom's.
 
 BasicInfo:
   Title                   : "TSSM"
@@ -13,9 +15,10 @@ RomFs:
 
 TitleInfo:
   Category                : Application
-  # 000400000F755300: in the homebrew range, away from the known ones. Kept for
-  # every build, so a new one installs over the old.
-  UniqueId                : 0xF7553
+  # 0xF7553 (000400000F755300): in the homebrew range, away from the known
+  # ones. Kept for every build, so a new one installs over the old; a test
+  # build has its own (CMakeLists.txt, TSSM_3DS_UNIQUE_ID).
+  UniqueId                : @TSSM_3DS_UNIQUE_ID@
 
 Option:
   UseOnSD                 : true
@@ -140,7 +143,7 @@ AccessControlInfo:
    - soc:U
    - cfg:u
    - ptm:sysm
-
+@TSSM_RSF_UPDATE_SERVICES@
 SystemControlInfo:
   # Saves are files on the SD card, as for the .3dsx.
   SaveDataSize            : 0KB

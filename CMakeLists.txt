@@ -163,6 +163,77 @@ if(TSSM_3DS)
   # not yet shown to work on a console turned on, everything it needs compiled
   # into i3DS.cpp alone, so that the probes share one build directory.
   set(TSSM_3DS_PROBE "0" CACHE STRING "A console probe build, 1-11, 14-16 (docs/3DS.md); 0: the game")
+
+  # The installed title's unique ID: 0xF7553 is title 000400000F755300, the
+  # one every .cia of the game has, so a new one installs over the old. A test
+  # build takes another (docs/3DS.md "Updates": the update test kit's
+  # 0xF755C), so it is a title of its own beside the game.
+  set(TSSM_3DS_UNIQUE_ID "0xF7553" CACHE STRING "The .cia's unique ID (title 00040000<ID>00); 0xF7553 is the game's")
+  if(NOT TSSM_3DS_UNIQUE_ID MATCHES "^0x[Ff][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$")
+    message(FATAL_ERROR "3DS: TSSM_3DS_UNIQUE_ID is ${TSSM_3DS_UNIQUE_ID}; it must be 0xF0000-0xFFFFF (homebrew's range)")
+  endif()
+  string(SUBSTRING "${TSSM_3DS_UNIQUE_ID}" 2 5 _3ds_uid)
+  string(TOUPPER "${_3ds_uid}" _3ds_uid)
+  set(TSSM_3DS_TITLE_ID "000400000${_3ds_uid}00")
+endif()
+
+# --- in-app updates ----------------------------------------------------------------
+# The settings menu's Updates section: it reads the latest release of
+# TSSM_UPDATE_REPO on GitHub and can replace this build with that release's
+# file for the platform (src/SB/Core/pc/iUpdate.h; docs/3DS.md "Updates").
+# Off unless asked, so a build from source, with its own name, icon or files,
+# never offers to turn itself into the public one; the TSSM Dehydrated
+# release recipe turns it on. The repository's name is set here and nowhere
+# else.
+option(TSSM_UPDATE "Updates from the project's GitHub releases, in the settings menu" OFF)
+set(TSSM_UPDATE_REPO "aidp2/tssm-ports" CACHE STRING "The GitHub repository (owner/name) whose releases the updater reads")
+# A test build only (docs/3DS.md, the update test kit), never a release: the
+# updater's test hooks (test-env.txt's TSSM_TEST_UPDATE drives it without the
+# menu, TSSM_TEST_UPDATE_SELF names the .3dsx in an emulator), and config.ini
+# and the saves in TSSM_UPDATE_TEST_DATA instead of the game's folder, so a
+# test copy never changes the player's settings or saves. Needs a test title
+# ID, so it can never be the game's own title.
+option(TSSM_UPDATE_TEST_BUILD "Test builds only: the updater's test hooks, and config.ini and saves in a folder of their own" OFF)
+set(TSSM_UPDATE_TEST_DATA "sdmc:/3ds/tssm-update-test/data" CACHE STRING "Test builds only: the folder on the SD card for a test copy's config.ini and saves")
+# A test build only, too: the updater reads a folder on the SD card instead
+# of GitHub (3ds/i3DSUpdateTest.cpp).
+set(TSSM_UPDATE_TEST_SOURCE "" CACHE STRING "Test builds only: a folder on the SD card (sdmc:/...) standing in for GitHub's releases")
+if(TSSM_UPDATE)
+  if(NOT TSSM_3DS)
+    message(FATAL_ERROR "TSSM_UPDATE: this branch has the updater's transport and install for "
+      "the 3DS only.")
+  endif()
+  if(NOT TSSM_UPDATE_REPO MATCHES "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    message(FATAL_ERROR "TSSM_UPDATE_REPO is \"${TSSM_UPDATE_REPO}\"; it must be owner/name.")
+  endif()
+  if(TSSM_3DS_SPIKE)
+    message(FATAL_ERROR "TSSM_UPDATE: the spike has no settings menu.")
+  endif()
+  # Seen by the settings table, the GUI and the 3DS's quit as well as the
+  # updater's own files.
+  add_compile_definitions(TSSM_UPDATE)
+endif()
+if(TSSM_UPDATE_TEST_BUILD)
+  if(NOT TSSM_UPDATE)
+    message(FATAL_ERROR "TSSM_UPDATE_TEST_BUILD needs TSSM_UPDATE.")
+  endif()
+  if(TSSM_3DS_UNIQUE_ID MATCHES "^0x[Ff]7553$")
+    message(FATAL_ERROR "TSSM_UPDATE_TEST_BUILD: a test build must have a test title ID "
+      "(TSSM_3DS_UNIQUE_ID, e.g. 0xF755C), never the game's 0xF7553.")
+  endif()
+  if(NOT TSSM_UPDATE_TEST_DATA MATCHES "^sdmc:/[A-Za-z0-9_./-]+$" OR TSSM_UPDATE_TEST_DATA MATCHES "\\.\\."
+     OR TSSM_UPDATE_TEST_DATA MATCHES "/$" OR TSSM_UPDATE_TEST_DATA MATCHES "^sdmc:/3ds/tssm(/|$)")
+    message(FATAL_ERROR "TSSM_UPDATE_TEST_DATA is \"${TSSM_UPDATE_TEST_DATA}\"; it must be a folder "
+      "sdmc:/... outside the game's sdmc:/3ds/tssm.")
+  endif()
+endif()
+if(TSSM_UPDATE_TEST_SOURCE)
+  if(NOT TSSM_UPDATE_TEST_BUILD)
+    message(FATAL_ERROR "TSSM_UPDATE_TEST_SOURCE needs TSSM_UPDATE_TEST_BUILD.")
+  endif()
+  if(NOT TSSM_UPDATE_TEST_SOURCE MATCHES "^sdmc:/[A-Za-z0-9_./-]+$" OR TSSM_UPDATE_TEST_SOURCE MATCHES "\\.\\.")
+    message(FATAL_ERROR "TSSM_UPDATE_TEST_SOURCE is \"${TSSM_UPDATE_TEST_SOURCE}\"; it must be a folder sdmc:/...")
+  endif()
 endif()
 
 # --- render backends -----------------------------------------------------------
@@ -315,6 +386,10 @@ elseif(TSSM_3DS)
   # TSSM_3DS block above). Nothing of the game's is included there.
   set_source_files_properties(${PC_DIR}/3ds/i3DS.cpp ${PC_DIR}/3ds/i3DSSpike.cpp PROPERTIES
                               COMPILE_OPTIONS "-fshort-enums")
+  # The installed title's ID (TSSM_3DS_UNIQUE_ID): how the game tells a .cia
+  # from a .3dsx.
+  set_property(SOURCE ${PC_DIR}/3ds/i3DS.cpp APPEND PROPERTY
+               COMPILE_DEFINITIONS "TSSM_3DS_TITLE_ID=0x${TSSM_3DS_TITLE_ID}ull")
 else()
   set(HOST_SOURCES ${PC_DIR}/iHostPosix.cpp)
 endif()
@@ -815,6 +890,12 @@ if(TSSM_GUI)
                     "https://github.com/devkitPro/libctru" "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/libctru.txt")
     tssm_gui_notice("citro3d" "zlib" "The 3DS's GPU library, which draws the game. Linked statically."
                     "https://github.com/devkitPro/citro3d" "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/citro3d.txt")
+    if(TSSM_UPDATE)
+      tssm_gui_notice("Mbed TLS" "Apache 2.0" "The updater's secure connection. Linked statically."
+                      "https://github.com/Mbed-TLS/mbedtls" "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/mbedtls.txt")
+      tssm_gui_notice("Mozilla's CA certificates" "MPL 2.0" "The certificate authorities the updater trusts (update/cacert.pem in the RomFS)."
+                      "https://curl.se/docs/caextract.html" "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/cacert-MPL-2.0.txt")
+    endif()
   endif()
   if(TSSM_BACKEND_VULKAN)
     tssm_gui_notice("Vulkan-Headers" "Apache 2.0" "The Vulkan renderer's API headers."
@@ -1222,6 +1303,22 @@ if(TSSM_3DS)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt
                    ${TSSM_3DS_ROMFS}/licenses/imgui.txt COPYONLY)
   endif()
+  # The updater's (TSSM_UPDATE; 3ds/i3DSUpdateSys.cpp): Mozilla's CA list,
+  # which its TLS connection trusts, and the licences of that list and of
+  # mbedtls. art.txt joins them at build time (below). Taken out again when a
+  # build folder is configured without updates.
+  if(TSSM_UPDATE)
+    file(MAKE_DIRECTORY ${TSSM_3DS_ROMFS}/update)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/cacert.pem
+                   ${TSSM_3DS_ROMFS}/update/cacert.pem COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/mbedtls.txt
+                   ${TSSM_3DS_ROMFS}/licenses/mbedtls.txt COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/licenses/cacert-MPL-2.0.txt
+                   ${TSSM_3DS_ROMFS}/licenses/cacert-MPL-2.0.txt COPYONLY)
+  else()
+    file(REMOVE_RECURSE ${TSSM_3DS_ROMFS}/update)
+    file(REMOVE ${TSSM_3DS_ROMFS}/licenses/mbedtls.txt ${TSSM_3DS_ROMFS}/licenses/cacert-MPL-2.0.txt)
+  endif()
 
   # The icon: TSSM_3DS_ICON, an icon made from the player's own game files
   # (tools/3ds/icon_from_game_files.py; the .cia gets it too, below); else
@@ -1299,8 +1396,16 @@ if(TSSM_3DS)
   else()
     message(STATUS "3DS: icon: libctru's default")
   endif()
+  # An icon of the builder's own (their game files, their picture), for the
+  # updater (TSSM_UPDATE_OWN_ART, below): anything but the port's.
+  set(_3ds_own_art OFF)
+  if(_3ds_icon48 AND NOT _3ds_icon_real STREQUAL _3ds_own_icon)
+    set(_3ds_own_art ON)
+  elseif(NOT _3ds_icon48 AND TSSM_ICON_DIR)
+    set(_3ds_own_art ON)
+  endif()
 
-  set(TSSM_3DS_VERSION "0.1.0" CACHE STRING "The version in the 3DS's SMDH description")
+  set(TSSM_3DS_VERSION "0.9.2" CACHE STRING "The version in the 3DS's SMDH description")
   # The author the Homebrew Launcher shows (the .3dsx) and the publisher the
   # HOME Menu shows (the .cia).
   set(TSSM_3DS_AUTHOR "aidp2" CACHE STRING "The author and publisher in the 3DS's SMDH")
@@ -1311,7 +1416,7 @@ if(TSSM_3DS)
   # (docs/3DS.md, "Building the TSSM Dehydrated release").
   set(TSSM_3DS_TITLE "" CACHE STRING
     "The game's name on the 3DS (SMDH short and long title, the About tab's heading, the text screens); empty: the usual name")
-  set(_3ds_name "The SpongeBob SquarePants Movie Videogame")
+  set(_3ds_name "The SpongeBob SquarePants Movie Video Game")
   if(TSSM_3DS_TITLE)
     string(LENGTH "${TSSM_3DS_TITLE}" _3ds_name_len)
     if(_3ds_name_len GREATER 64 OR TSSM_3DS_TITLE MATCHES "\"")
@@ -1388,6 +1493,10 @@ if(TSSM_3DS)
       list(GET _ver 0 _major)
       list(GET _ver 1 _minor)
       list(GET _ver 2 _micro)
+      if(_major GREATER 63 OR _minor GREATER 63 OR _micro GREATER 15)
+        message(FATAL_ERROR "3DS: TSSM_3DS_VERSION ${TSSM_3DS_VERSION} does not fit a title version "
+          "(at most 63.63.15)")
+      endif()
       # Relative paths only: the tools are Windows programs under MSYS2's make.
       set(_cia ${CMAKE_CURRENT_BINARY_DIR}/cia)
       foreach(_f cia_banner.png cia_icon.png cia_chime.wav)
@@ -1408,7 +1517,15 @@ if(TSSM_3DS)
         set(_cia_icon_args -i cia/cia_icon.png)
         set(_cia_icon_deps ${_cia}/cia_icon.png)
       endif()
-      configure_file(tools/3ds/tssm.rsf ${_cia}/tssm.rsf COPYONLY)
+      # The RSF's @...@ values: the unique ID, and the services the updater
+      # adds (the network's state, AM for the install, and the ssl service's
+      # random numbers for TLS), only when it is built in.
+      if(TSSM_UPDATE)
+        set(TSSM_RSF_UPDATE_SERVICES "   # The updater (TSSM_UPDATE).\n   - ac:u\n   - am:net\n   - ssl:C")
+      else()
+        set(TSSM_RSF_UPDATE_SERVICES "")
+      endif()
+      configure_file(tools/3ds/tssm.rsf ${_cia}/tssm.rsf @ONLY)
       # The banner: the port's picture and chime made into cia/tssm.bnr, or the
       # player's own .bnr copied to cia/banner.bnr (copied when it changes).
       if(TSSM_3DS_BANNER AND NOT EXISTS "${TSSM_3DS_BANNER}")
@@ -1424,15 +1541,18 @@ if(TSSM_3DS)
         set(_cia_bnr cia/tssm.bnr)
         set(_cia_bnr_make COMMAND "${TSSM_BANNERTOOL}" makebanner -i cia/banner.png -a cia/cia_chime.wav -o cia/tssm.bnr)
         set(_cia_bnr_deps ${_cia}/banner.png ${_cia}/cia_chime.wav)
+        set(_cia_bnr_made ${_cia}/tssm.bnr)
       elseif(TSSM_3DS_BANNER)
         configure_file("${TSSM_3DS_BANNER}" ${_cia}/banner.bnr COPYONLY)
         set(_cia_bnr cia/banner.bnr)
         set(_cia_bnr_make)
         set(_cia_bnr_deps ${_cia}/banner.bnr)
+        set(_cia_bnr_made)
       else()
         set(_cia_bnr cia/tssm.bnr)
         set(_cia_bnr_make COMMAND "${TSSM_BANNERTOOL}" makebanner -i cia/cia_banner.png -a cia/cia_chime.wav -o cia/tssm.bnr)
         set(_cia_bnr_deps ${_cia}/cia_banner.png ${_cia}/cia_chime.wav)
+        set(_cia_bnr_made ${_cia}/tssm.bnr)
       endif()
       # The licence texts, so that a changed one remakes the .cia too.
       file(GLOB_RECURSE _cia_romfs ${TSSM_3DS_ROMFS}/*)
@@ -1447,17 +1567,50 @@ if(TSSM_3DS)
       else()
         message(WARNING "3DS: no Python (TSSM_PYTHON): the .cia's short name stays cut at 32 characters")
       endif()
-      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tssm.cia
+      # The SMDH and the banner on their own, before makerom: the updater's
+      # art.txt (below) is made from them and goes into the RomFS makerom packs.
+      add_custom_command(OUTPUT ${_cia}/tssm.icn ${_cia_bnr_made}
         ${_cia_bnr_make}
         COMMAND "${TSSM_BANNERTOOL}" makesmdh -s "${_cia_name}" -l "${_cia_name}"
                 -p "${TSSM_3DS_AUTHOR}" ${_cia_icon_args} -f visible,recordusage,nosavebackups,new3ds
                 -r regionfree -o cia/tssm.icn
         ${_cia_name_fix}
+        DEPENDS ${_cia_icon_deps} ${_cia_bnr_deps} ${CMAKE_CURRENT_SOURCE_DIR}/tools/3ds/smdh_names.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "tssm.cia's SMDH and banner"
+        VERBATIM)
+      set(_cia_art_icn ${_cia}/tssm.icn)
+      set(_cia_art_bnr ${CMAKE_CURRENT_BINARY_DIR}/${_cia_bnr})
+      # makerom v0.19.0 loses the minor number (its -minor writes outside the
+      # version, and -ver's minor is lost the same way): it gets the major and
+      # the micro, and tools/3ds/cia_version.py then writes the whole version
+      # into the TMD and the ticket, so that each release installs as newer
+      # than the last (0.9.1 is 0.9.1).
+      set(_cia_version_fix)
+      if(TSSM_PYTHON)
+        configure_file(tools/3ds/cia_version.py ${_cia}/cia_version.py COPYONLY)
+        set(_cia_version_fix COMMAND "${TSSM_PYTHON}" cia/cia_version.py tssm.cia "${_major}.${_minor}.${_micro}")
+      elseif(TSSM_UPDATE)
+        # The updater installs a .cia only when its title version is the one
+        # in its file name (3ds/i3DSUpdate.cpp), and the next release's must
+        # be newer than this one's.
+        message(FATAL_ERROR "3DS: TSSM_UPDATE needs Python (TSSM_PYTHON) for the .cia: without "
+          "tools/3ds/cia_version.py its title version would be ${_major}.0.${_micro}, not "
+          "${_major}.${_minor}.${_micro}.")
+      else()
+        message(WARNING "3DS: no Python (TSSM_PYTHON): the .cia's title version is ${_major}.0.${_micro}, not ${_major}.${_minor}.${_micro}")
+      endif()
+      set(_cia_update_art)
+      if(TSSM_UPDATE)
+        set(_cia_update_art ${TSSM_3DS_ROMFS}/update/art.txt)
+      endif()
+      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tssm.cia
         COMMAND "${TSSM_MAKEROM}" -f cia -o tssm.cia -target t -rsf cia/tssm.rsf -exefslogo
                 -elf $<TARGET_FILE_NAME:tssm> -icon cia/tssm.icn -banner ${_cia_bnr} -DROMFS=romfs
-                -major ${_major} -minor ${_minor} -micro ${_micro}
-        DEPENDS tssm ${_cia}/tssm.rsf ${_cia_icon_deps} ${_cia_bnr_deps}
-                ${_cia_romfs} ${CMAKE_CURRENT_SOURCE_DIR}/tools/3ds/smdh_names.py
+                -major ${_major} -micro ${_micro}
+        ${_cia_version_fix}
+        DEPENDS tssm ${_cia}/tssm.rsf ${_cia}/tssm.icn ${_cia_art_bnr} ${_cia_romfs} ${_cia_update_art}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/3ds/cia_version.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "tssm.cia"
         VERBATIM)
@@ -1475,6 +1628,129 @@ if(TSSM_3DS)
       message(STATUS "3DS: no makerom or bannertool (TSSM_CTR_TOOLS); tssm.3dsx only")
     endif()
   endif()
+
+  if(TSSM_UPDATE)
+    # romfs:/update/art.txt: the SHA-256 of the .3dsx's SMDH and of the .cia's
+    # icon and banner as this build packs them. The updater replaces only a
+    # copy whose own are these (3ds/i3DSUpdate.cpp): a .cia remade with a
+    # banner or icon of the player's own, from the same program, keeps the
+    # public art.txt and is left alone.
+    set(_art_args "-DSMDH=${CMAKE_CURRENT_BINARY_DIR}/tssm.smdh")
+    set(_art_deps ${CMAKE_CURRENT_BINARY_DIR}/tssm.smdh)
+    if(_cia_art_icn)
+      list(APPEND _art_args "-DICON=${_cia_art_icn}" "-DBANNER=${_cia_art_bnr}")
+      list(APPEND _art_deps ${_cia_art_icn} ${_cia_art_bnr})
+    endif()
+    add_custom_command(OUTPUT ${TSSM_3DS_ROMFS}/update/art.txt
+      COMMAND ${CMAKE_COMMAND} "-DOUT=${TSSM_3DS_ROMFS}/update/art.txt" ${_art_args}
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/3ds/update_art.cmake
+      DEPENDS ${_art_deps} ${CMAKE_CURRENT_SOURCE_DIR}/tools/3ds/update_art.cmake
+      COMMENT "romfs/update/art.txt"
+      VERBATIM)
+    add_custom_target(tssm_update_art DEPENDS ${TSSM_3DS_ROMFS}/update/art.txt)
+    # Before the packages are packed (3dsxtool and makerom read the folder).
+    add_dependencies(tssm_3dsx tssm_update_art)
+    if(TARGET tssm_cia)
+      add_dependencies(tssm_cia tssm_update_art)
+    endif()
+
+    # A banner of the builder's own: their game files' (.bnr), or a picture
+    # that is not one of the port's two.
+    if(TSSM_3DS_BANNER)
+      get_filename_component(_3ds_banner_real "${TSSM_3DS_BANNER}" REALPATH)
+      get_filename_component(_3ds_banner_plain "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/cia_banner.png" REALPATH)
+      get_filename_component(_3ds_banner_dry "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/cia_banner_dehydrated.png" REALPATH)
+      if(NOT _3ds_banner_real STREQUAL _3ds_banner_plain AND NOT _3ds_banner_real STREQUAL _3ds_banner_dry)
+        set(_3ds_own_art ON)
+      endif()
+    endif()
+    # The port's own pictures and chime, as committed: a builder who drew
+    # over them has art of their own under the usual names. When the port's
+    # art changes on purpose, its SHA-256 here changes with it (the warning
+    # names the file); until then every build counts as one with art of its
+    # own and never replaces itself.
+    foreach(_pair
+        "cia_icon.png|55aa1ce9854df236794af2358dbb76c8f7fe804f047f3f50e77e465c77c4495a"
+        "cia_banner.png|53d808f52261e8fc971935df53e034b3cf429e1b489c83c333a7e59e3bd696b0"
+        "cia_banner_dehydrated.png|fdac68e3336e36f57b1419572738e7b3933433121d5983bf82ec259d1d325f52"
+        "cia_chime.wav|83be7f7dbd05f9efe8962f7466e65d28d7fb5dedafc7754431d37554431c7256")
+      string(REPLACE "|" ";" _pair "${_pair}")
+      list(GET _pair 0 _art_file)
+      list(GET _pair 1 _art_want)
+      file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/dist/3ds/${_art_file}" _art_got)
+      if(NOT _art_got STREQUAL _art_want)
+        message(WARNING "Updates: dist/3ds/${_art_file} is not the port's own (SHA-256 "
+          "${_art_got}), so this build counts as one with art of its own. If the port's file "
+          "changed on purpose, put its SHA-256 in CMakeLists.txt.")
+        set(_3ds_own_art ON)
+      endif()
+    endforeach()
+    if(_3ds_own_art)
+      set_property(SOURCE ${PC_DIR}/3ds/i3DSUpdate.cpp APPEND PROPERTY COMPILE_DEFINITIONS TSSM_UPDATE_OWN_ART)
+      message(STATUS "Updates: this build has an icon or banner of its own: it reports new versions and never replaces itself")
+    endif()
+  endif()
+endif()
+
+# --- the updater's files (TSSM_UPDATE, above) ---------------------------------------
+# The core (iUpdate.cpp, the same on every platform), the Updates section and
+# the platform's transport and install. The version the updater compares is
+# the one the SMDH's description and the About tab show (TSSM_3DS_VERSION).
+if(TSSM_UPDATE)
+  if(NOT FMV_INCLUDES)
+    message(FATAL_ERROR "TSSM_UPDATE needs FFmpeg's libavutil (the download's SHA-256), and "
+      "FFmpeg was not found.")
+  endif()
+  if(NOT TSSM_GUI)
+    message(FATAL_ERROR "TSSM_UPDATE needs the settings menu (TSSM_GUI).")
+  endif()
+  if(NOT TSSM_3DS_VERSION MATCHES "^[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?$")
+    message(FATAL_ERROR "TSSM_UPDATE: TSSM_3DS_VERSION is \"${TSSM_3DS_VERSION}\"; the "
+      "updater compares versions made of up to three numbers (0.9, 0.9.1).")
+  endif()
+  # devkitPro's mbedtls (pacman: 3ds-mbedtls), for the TLS connection: the
+  # system's own HTTP service cannot reach GitHub (3ds/i3DSUpdateSys.cpp).
+  find_path(TSSM_MBEDTLS_INCLUDE_DIR mbedtls/ssl.h HINTS "${DEVKITPRO}/portlibs/3ds/include"
+            NO_CMAKE_FIND_ROOT_PATH)
+  find_library(TSSM_MBEDTLS_LIBRARY mbedtls HINTS "${DEVKITPRO}/portlibs/3ds/lib" NO_CMAKE_FIND_ROOT_PATH)
+  find_library(TSSM_MBEDX509_LIBRARY mbedx509 HINTS "${DEVKITPRO}/portlibs/3ds/lib" NO_CMAKE_FIND_ROOT_PATH)
+  find_library(TSSM_MBEDCRYPTO_LIBRARY mbedcrypto HINTS "${DEVKITPRO}/portlibs/3ds/lib" NO_CMAKE_FIND_ROOT_PATH)
+  if(NOT TSSM_MBEDTLS_INCLUDE_DIR OR NOT TSSM_MBEDTLS_LIBRARY OR NOT TSSM_MBEDX509_LIBRARY
+     OR NOT TSSM_MBEDCRYPTO_LIBRARY)
+    message(FATAL_ERROR "TSSM_UPDATE needs devkitPro's mbedtls for the 3DS: "
+      "pacman -S --needed 3ds-mbedtls (docs/3DS.md, Building).")
+  endif()
+  target_sources(tssm_platform PRIVATE
+    ${PC_DIR}/iUpdate.cpp
+    ${PC_DIR}/gui/iGuiUpdates.cpp
+    ${PC_DIR}/3ds/i3DSPackage.cpp
+    ${PC_DIR}/3ds/i3DSUpdate.cpp
+    ${PC_DIR}/3ds/i3DSUpdateSys.cpp)
+  # libctru's side, compiled as libctru and devkitPro's mbedtls are (short
+  # enums); mbedtls's headers for it alone.
+  set_source_files_properties(${PC_DIR}/3ds/i3DSUpdateSys.cpp PROPERTIES
+    COMPILE_OPTIONS "-fshort-enums"
+    INCLUDE_DIRECTORIES "${TSSM_MBEDTLS_INCLUDE_DIR}")
+  target_link_libraries(tssm_platform PRIVATE ${TSSM_MBEDTLS_LIBRARY} ${TSSM_MBEDX509_LIBRARY}
+    ${TSSM_MBEDCRYPTO_LIBRARY})
+  set_source_files_properties(${PC_DIR}/gui/iGuiUpdates.cpp PROPERTIES
+    COMPILE_DEFINITIONS "TSSM_UPDATE_REPO=\"${TSSM_UPDATE_REPO}\";TSSM_UPDATE_VERSION=\"${TSSM_3DS_VERSION}\"")
+  if(TSSM_UPDATE_TEST_BUILD)
+    set_property(SOURCE ${PC_DIR}/3ds/i3DSUpdate.cpp ${PC_DIR}/3ds/i3DSUpdateSys.cpp APPEND PROPERTY
+                 COMPILE_DEFINITIONS TSSM_UPDATE_TEST_BUILD)
+    set_property(SOURCE ${PC_DIR}/3ds/i3DS.cpp APPEND PROPERTY
+                 COMPILE_DEFINITIONS "TSSM_UPDATE_TEST_DATA=\"${TSSM_UPDATE_TEST_DATA}\"")
+    message(STATUS "Updates: TEST BUILD: test hooks on; config.ini and saves in ${TSSM_UPDATE_TEST_DATA} (title ${TSSM_3DS_TITLE_ID})")
+  endif()
+  if(TSSM_UPDATE_TEST_SOURCE)
+    target_sources(tssm_platform PRIVATE ${PC_DIR}/3ds/i3DSUpdateTest.cpp)
+    set_property(SOURCE ${PC_DIR}/3ds/i3DSUpdate.cpp ${PC_DIR}/3ds/i3DSUpdateTest.cpp APPEND PROPERTY
+                 COMPILE_DEFINITIONS "TSSM_UPDATE_TEST_SOURCE=\"${TSSM_UPDATE_TEST_SOURCE}\"")
+    message(STATUS "Updates: TEST BUILD: from the folder ${TSSM_UPDATE_TEST_SOURCE} on the SD card, not GitHub (title ${TSSM_3DS_TITLE_ID})")
+  endif()
+  message(STATUS "Updates: on, from the releases of ${TSSM_UPDATE_REPO}; this is version ${TSSM_3DS_VERSION}")
+else()
+  message(STATUS "Updates: off (TSSM_UPDATE)")
 endif()
 
 # --- tests ----------------------------------------------------------------------
@@ -1596,4 +1872,39 @@ if(TSSM_BUILD_TESTS AND NOT ANDROID AND NOT TSSM_SWITCH AND NOT TSSM_3DS)
   elseif(NOT APPLE)
     target_link_libraries(tssm_modtest PRIVATE dl)
   endif()
+endif()
+
+# --- tssm_updatetest ---------------------------------------------------------------
+# tssm_updatetest: the updater's core (iUpdate.cpp) on the PC, with a stand-in
+# for the network: versions, the release's JSON (saved from GitHub's API in
+# src/SB/Core/pc/tests/update/), the choice of each platform's file,
+# SHA256SUMS, SHA-256, URLs, the HTTP client, and whole checks and downloads
+# that succeed, fail or are cancelled. Built whether or not TSSM_UPDATE is on;
+# it needs FFmpeg's libavutil, as the updater does.
+#   build-*/tssm_updatetest <fixture folder> [scratch folder]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND FMV_INCLUDES)
+  add_executable(tssm_updatetest ${PC_DIR}/tests/update_test.cpp ${PC_DIR}/iUpdate.cpp
+    ${HOST_SOURCES})
+  target_include_directories(tssm_updatetest PRIVATE ${TSSM_INCLUDES} ${FMV_INCLUDES})
+  target_compile_options(tssm_updatetest PRIVATE ${TSSM_NO_WARNINGS})
+  target_link_libraries(tssm_updatetest PRIVATE ${FFMPEG_AVUTIL_LIBRARY})
+  if(WIN32)
+    target_link_libraries(tssm_updatetest PRIVATE dbghelp)
+  else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(tssm_updatetest PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  endif()
+  add_test(NAME tssm_updatetest
+           COMMAND tssm_updatetest ${PC_DIR}/tests/update ${CMAKE_CURRENT_BINARY_DIR}/updatetest_run)
+endif()
+
+# --- tssm_update3dstest ------------------------------------------------------------
+# tssm_update3dstest: the 3DS updater's reading of a .cia's header and TMD and
+# a .3dsx's header (3ds/i3DSPackage.cpp), and the title version a
+# TSSM_3DS_VERSION becomes, on the PC. Real files can be named as well:
+#   build-*/tssm_update3dstest [<.cia> <title ID> <version>] [<.3dsx>]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_update3dstest ${PC_DIR}/tests/update_3ds_test.cpp ${PC_DIR}/3ds/i3DSPackage.cpp)
+  target_include_directories(tssm_update3dstest PRIVATE ${PC_DIR})
+  add_test(NAME tssm_update3dstest COMMAND tssm_update3dstest)
 endif()

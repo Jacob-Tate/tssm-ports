@@ -17,12 +17,24 @@ screen.
   `tssm.cia` for the HOME Menu.
 - This branch still builds the Windows version too. It started from an early copy of the
   Switch port and still carries that copy: for the Switch, use the `switch` branch.
-- **Prebuilt:** this repository's Releases page has `TSSM-Dehydrated-0.9-3DS.3dsx` and
-  `TSSM-Dehydrated-0.9-3DS.cia` as *TSSM Dehydrated* 0.9: this branch built under that
-  name, with the port's own icon, banner and chime and no game data (you still need your
-  own game files, below). Install them as `tssm.3dsx` and `tssm.cia` below (the .3dsx
-  renamed to `tssm.3dsx`). `docs/3DS.md` ("Building the TSSM Dehydrated release") has the
-  exact commands.
+
+Two ways to play
+----------------
+
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
+  for the New 3DS: `TSSM-Dehydrated-0.9.2-3DS.3dsx` and `TSSM-Dehydrated-0.9.2-3DS.cia`.
+  They are this branch, built under that neutral name with the port's own icon, banner and
+  chime, and have no game data. Install them as `tssm.3dsx` and `tssm.cia` below (the
+  .3dsx renamed to `tssm.3dsx`). Install 0.9.2 by hand once; from then on it can update
+  itself when you ask: settings menu (START + SELECT), Settings tab, *Updates* at the
+  bottom, *Check for updates*. `docs/3DS.md` ("Updates", and "Building the TSSM Dehydrated
+  release" for the exact commands) has the details.
+- **Build it yourself** from this source, as below. A build of your own is called *The
+  SpongeBob SquarePants Movie Video Game*, and can make its HOME Menu icon and its
+  animated Patty Wagon banner from your own game files (step 6 below). It has no updater
+  unless you turn one on.
+
+Either way you bring your own copy of the game's files (below).
 
 This repository and its branches
 --------------------------------
@@ -109,7 +121,9 @@ Playing
      installer), find the file and choose *Install CIA*. The game is then on the HOME
      Menu.
 3. For sound, dump the console's DSP firmware once: Rosalina menu (L + Down + SELECT),
-   Miscellaneous options, Dump DSP firmware.
+   Miscellaneous options, Dump DSP firmware. Without it the bottom screen says so. In an
+   emulator, copy that dump from your 3DS into the emulator's `sdmc/3ds` folder
+   (`docs/3DS.md`, "No sound?").
 4. START + SELECT opens the settings menu on the bottom screen. Settings, saves and the
    log are written into `/3ds/tssm/`.
 

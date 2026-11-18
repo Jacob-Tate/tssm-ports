@@ -23,18 +23,29 @@ on the screen.
 
 1. A New 3DS, New 3DS XL or New 2DS XL running Luma3DS.
 2. `tssm.cia` or `tssm.3dsx` (or both): the prebuilt *TSSM Dehydrated* ones from this
-   repository's Releases page, or your own, built as described under *Building*.
+   repository's Releases page, or your own, built as described under *Building*. Your own
+   is named *The SpongeBob SquarePants Movie Video Game*, and can take its HOME Menu icon
+   and animated banner from your game files (*An icon from your own game files*, *An
+   animated HOME Menu banner from your own game files*).
 3. Your own copy of the game's **Xbox** files (the same files the PC, Android and Switch
    builds use).
 4. For sound, the console's DSP firmware dump, `sdmc:/3ds/dspfirm.cdc`. Make it once:
    open the Rosalina menu (L + Down + SELECT), Miscellaneous options, Dump DSP firmware.
    Without it the game runs silent and the log says so.
 
+**No sound?** Without that file the bottom screen says so when the game starts, with how to
+make it, until you tap it (the game keeps running), and the settings menu's Audio section
+says the same while the file is missing. Make the file, then restart the game. An emulator
+(Citra, Azahar) has no Rosalina menu, but the game needs the same file there: dump it from
+your own 3DS as above and copy it into the emulator's `sdmc/3ds` folder (File > Open Citra
+Folder, in Azahar Open Azahar Folder, then `sdmc`, then `3ds`). The game tells the two
+cases apart and the bottom screen says the right one.
+
 ### Installing
 
 **The .cia.** Copy `tssm.cia` anywhere on the SD card (for example `/cias/`), open a CIA
 installer such as FBI, find the file and choose *Install CIA*. The HOME Menu then has
-"The SpongeBob SquarePants Movie Videogame" ("TSSM Dehydrated" for the prebuilt one) with
+"The SpongeBob SquarePants Movie Video Game" ("TSSM Dehydrated" for the prebuilt one) with
 a sponge block icon (or an icon made from your own game files: see *An icon from your own
 game files*). A newer `tssm.cia` installs
 over the old one the same way; the settings and saves are files on the SD card
@@ -109,8 +120,10 @@ bottom button, `lt` ZL, `white` L).
 screen, and closes it again. While it is closed the bottom screen says "START + SELECT:
 menu" for 10 seconds after the game starts, then fades to black; a tap on the bottom
 screen brings the line back for another 10 seconds. `[gui] bottom_hint_seconds` in
-`config.ini` changes the 10 (-1 keeps the line, 0 never shows it). The game keeps running
-on the top screen while the menu is open, but takes no input from the buttons.
+`config.ini` changes the 10 (-1 keeps the line, 0 never shows it). Started without the
+sound firmware file, the game shows the no-sound note above the line instead, until a tap
+(*No sound?*, above). The game keeps running on the top screen while the menu is open, but
+takes no input from the buttons.
 
 - **Buttons**, by position as in the game: the D-pad or the Circle Pad moves, **B**
   chooses, **A** goes back (and closes a box), **L** and **R** change the tab. In the file
@@ -136,6 +149,67 @@ turns it off: the bottom screen stays dark and START and SELECT go straight to t
 backup. **Export** beside a slot, **Every save as a .zip** and **Every save into a GCI
 folder** write into `/3ds/tssm/export/`. A file too big for the memory free at the time is
 refused with a message (a 16 MB Dolphin card fits); anything over 64 MB is no save.
+
+### Updates
+
+The prebuilt *TSSM Dehydrated* files (0.9.2 and later) can update themselves from this
+repository's Releases page. Install 0.9.2 by hand once (the files before it have no
+updater); after that the game can fetch and install each new version itself. Builds made
+from the source have no updater unless their builder turned it on (`TSSM_UPDATE`,
+*Building the TSSM Dehydrated release*); their settings menu has no Updates section.
+
+Nothing goes online unless you ask. In the settings menu, Settings tab, at the bottom,
+**Updates**:
+
+- **This version**: the version you are running.
+- **Check for updates**: asks GitHub for the newest release. The answer is "You have the
+  newest version", or "Version X is available (size)".
+- **Download and install X**: downloads the new file (a progress bar shows how far it is;
+  **Cancel** stops it), checks it against the release's checksum file (SHA256SUMS), and
+  installs it the way your copy was installed:
+  - **the .cia** (started from the HOME Menu): the release's
+    `TSSM-Dehydrated-<version>-3DS.cia`, installed over this title by the system's own
+    installer, as FBI does. Then **Restart now** quits and starts the new version straight
+    away (progress since the last save is lost, as with Quit game), or close the game later
+    and start it from the HOME Menu.
+  - **the .3dsx** (started from the Homebrew Launcher): the release's
+    `TSSM-Dehydrated-<version>-3DS.3dsx`, put in place of the `.3dsx` you started (wherever
+    it is: `/3ds/tssm/tssm.3dsx`, `/3ds/tssm.3dsx`, ...). Quit, and start it again from the
+    Homebrew Launcher.
+- **Check for updates when the game starts**: off unless you turn it on; then the game
+  checks once at each start, and a line at the top of the menu says when a new version is
+  waiting.
+
+What it does and does not do:
+
+- It talks to GitHub only (`api.github.com`, `github.com` and its download servers), over
+  HTTPS with the certificate checks always on, and sends nothing about you or the console:
+  no IDs, no account, no telemetry. Each request carries only the address, `User-Agent:
+  TSSM-port-updater` (GitHub wants one), the kind of answer wanted and `Connection: close`.
+- A copy with pictures of its own is never replaced: a .cia or .3dsx built with an icon or
+  banner made from your game files (or any picture of your own), and a .cia remade with
+  makerom from the public program and a banner of your own. The check still says when a
+  new version is out, and why it will not install it; install that one by hand if you want
+  it.
+- Saves, settings, mods and the game's files are never touched. The download goes to the
+  SD card first (`/3ds/tssm/update.cia.download`, or `<your .3dsx>.download` beside it) and
+  is deleted afterwards.
+- Anything that goes wrong (no internet, the server, the checksum, a full card, the
+  system's installer) leaves the installed version as it was, and the Updates section says
+  what happened. "No update information found" means the releases could not be found at
+  all.
+- HOME and sleep work during a check or a download; a download the console slept through
+  stops with "the connection broke off" (try again). During the few seconds the .cia
+  install itself takes, HOME and sleep wait.
+- A .cia update goes in only when the version inside it (the one the HOME Menu shows) is
+  the version in its file name. Anything else is refused and the installed one stays.
+- A copy sent with 3dslink is not a file on the SD card and cannot update itself; start it
+  from the Homebrew Launcher.
+- If the console loses power in the second the .3dsx is swapped, the Homebrew Launcher may
+  not list the game any more: on the SD card, rename `<your .3dsx>.bak` back to `<your
+  .3dsx>` (it is the version you had), delete `<your .3dsx>.download`, and update again.
+- The console's date must be about right: the server's certificate is checked for its
+  dates, and a clock years off reads as a refused certificate (the message says so).
 
 ### 3D (the slider)
 
@@ -246,7 +320,9 @@ MSYS2 shell (Windows) or any shell with `DEVKITPRO` set (Linux, macOS, the
 1. **devkitPro** with the 3DS packages:
    `pacman -S 3ds-dev 3ds-cmake 3ds-pkg-config` (devkitARM, libctru, citro3d, citro2d and
    the 3DS tools: 3dsxtool, smdhtool, 3dslink, picasso, tex3ds). Tested with devkitARM's
-   GCC 16.1.
+   GCC 16.1. A build with the updater (`TSSM_UPDATE`, *Building the TSSM Dehydrated
+   release*) also needs devkitPro's mbedtls: `pacman -S --needed 3ds-mbedtls` (tested:
+   2.28.8-1, which brings 3ds-zlib).
 2. **The source and its submodules**:
 
        git clone --branch 3ds <this repository's address> tssm
@@ -302,7 +378,7 @@ of `CMakeLists.txt` (`CMAKE_SYSTEM_NAME` `Nintendo3DS`, from devkitPro's `3DS.cm
 SDL 3 from the prefix, the citro3d renderer (`TSSM_RENDER_BACKENDS=C3D`), the settings
 menu on the bottom screen (`TSSM_GUI`), FFmpeg's movie decoder when the prefix has it, no
 host tools or unit tests. The .3dsx carries a RomFS with the libraries' licences only, an
-SMDH with the name "The SpongeBob SquarePants Movie Videogame" (`TSSM_3DS_TITLE` replaces
+SMDH with the name "The SpongeBob SquarePants Movie Video Game" (`TSSM_3DS_TITLE` replaces
 it), the description "Homebrew port <version>" (`TSSM_3DS_VERSION`), the author "aidp2"
 (`TSSM_3DS_AUTHOR`) and a 48x48
 icon: the one made from your own game files with `TSSM_3DS_ICON` (see *An icon from your
@@ -313,7 +389,7 @@ own game files*), or else `TSSM_ICON_DIR`'s `icon-48.png` when one was made
 
 `tssm.cia` is the same `tssm.elf` and RomFS as the .3dsx, packed by makerom with
 `tools/3ds/tssm.rsf`, an SMDH made by bannertool (name and description "The SpongeBob
-SquarePants Movie Videogame", publisher "aidp2" (`TSSM_3DS_AUTHOR`), region free, New 3DS
+SquarePants Movie Video Game", publisher "aidp2" (`TSSM_3DS_AUTHOR`), region free, New 3DS
 only, no system save data; `tools/3ds/smdh_names.py` then writes the whole name, which
 bannertool cuts at 32 characters) and a banner. The banner picture, the icon and the
 banner's sound are the port's own, made by `tools/3ds/draw_cia_art.ps1` (a sponge block
@@ -336,26 +412,34 @@ game files*.
 | MaxCpu, CanAccessCore2 | `0x9E`, on | core 2 for SDL's audio thread on a New 3DS; the system core's 30% if core 2 is refused |
 | FileSystemAccess | DirectSdmc, DirectSdmcWrite | everything is in `sdmc:/3ds/tssm`, as for the .3dsx |
 | SaveDataSize | 0 | saves are files on the SD card |
-| ServiceAccessControl | APT:U, fs:USER, hid:USER, ir:rst, gsp::Gpu, dsp::DSP, soc:U, cfg:u, ptm:sysm | what the program uses |
+| ServiceAccessControl | APT:U, fs:USER, hid:USER, ir:rst, gsp::Gpu, dsp::DSP, soc:U, cfg:u, ptm:sysm; with `TSSM_UPDATE` also ac:u, am:net, ssl:C | what the program uses; the updater adds the network's state (ac:u), the title installer (am:net, as FBI's CIA has) and the ssl service's random numbers for its TLS (ssl:C) |
 | EnableCrypt | off | homebrew CIAs are not encrypted; Luma3DS runs them |
 
 At run time only where closing goes differs: libctru's exit returns an installed title to
 the HOME Menu and a .3dsx to the Homebrew Launcher. The log's start says which it is, and
-the settings menu's Quit names that menu. makerom v0.19.0 stores the title version 0.1.0
-as 0.0.0; the SMDH's description carries the real one.
+the settings menu's Quit names that menu.
+
+The title version follows `TSSM_3DS_VERSION`: 0.9.2 is the TMD's and the ticket's 0.9.2
+(`0 << 10 | 9 << 4 | 2`, 146), which the system compares when one build is installed over
+another. makerom v0.19.0 loses the minor number, so CMake gives makerom the major and the
+micro and `tools/3ds/cia_version.py` then writes the whole version into the TMD and the
+ticket (no hash covers the field). Without Python the version stays `major.0.micro` (a
+warning says so). The releases up to 0.9.1 carry 0.0.0 and 0.0.1.
 
 ### Building the TSSM Dehydrated release
 
 The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSSM
-Dehydrated*, are this build with five settings: the name "TSSM Dehydrated"
+Dehydrated*, are this build with six settings: the name "TSSM Dehydrated"
 (`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
 Menu, the About tab's heading and the game-files screen), the release's version
-(`TSSM_3DS_VERSION`, 0.9.1 for TSSM Dehydrated 0.9.1), author "aidp2", the port's own
-icon for both files (`dist/3ds/cia_icon.png`) and the banner picture
+(`TSSM_3DS_VERSION`, 0.9.2 for TSSM Dehydrated 0.9.2), author "aidp2", the updater
+(`TSSM_UPDATE`), the port's own icon for both files (`dist/3ds/cia_icon.png`) and the
+banner picture
 `dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
 256x128 PNG as well as a .bnr). `tools/3ds/draw_cia_art.ps1 -OutDir dist\3ds -Subtitle
 Dehydrated -BannerFile cia_banner_dehydrated.png -BannerOnly` draws that picture. Nothing
-of the game is in either file: the RomFS holds the licence texts only. The .cia keeps the
+of the game is in either file: the RomFS holds the licence texts only (and the updater's
+CA list, below). The .cia keeps the
 title ID `000400000F755300`, so it installs over an earlier build's .cia (the settings and
 saves are files on the SD card and stay).
 
@@ -373,22 +457,53 @@ bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work fold
     sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
     CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
       -DTSSM_PYTHON=/c/Python314/python.exe \
-      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.1 -DTSSM_3DS_AUTHOR=aidp2 \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.2 -DTSSM_3DS_AUTHOR=aidp2 \
       -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
-      -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png
+      -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png \
+      -DTSSM_UPDATE=ON
 
-`-DTSSM_PYTHON` names any Python 3 (step 6). On Linux or macOS, `MAP` is
+`-DTSSM_PYTHON` names any Python 3 (step 6; `tools/3ds/cia_version.py` also needs it, for
+the .cia's title version). On Linux or macOS, `MAP` is
 `-ffile-prefix-map=$R/=`. The files are `$R/build/tssm.3dsx` and `$R/build/tssm.cia`;
 keep `$R/build/tssm.elf` for crash reports. Before sharing them, look for your own folder
 and user names in both files, and in the .cia's program, which makerom compresses: unpack
 it with ctrtool (Project_CTR, tested v1.3.0). `x/exefs/icon.bin` is the SMDH (names,
-publisher, icon), and the RomFS holds the `licenses/` texts only:
+publisher, icon), and the RomFS holds the `licenses/` texts only (and, with the updater,
+`update/cacert.pem` and `update/art.txt`):
 
     cd $R/build && mkdir -p x
     ctrtool --contents=x/c tssm.cia
     ctrtool -t ncch --exefsdir=x/exefs --romfsdir=x/romfs x/c.0000.*
     arm-none-eabi-strings -a tssm.3dsx x/exefs/code.bin | grep -i -e <your user name> -e Users
     find x/romfs -type f
+
+`-DTSSM_UPDATE=ON` builds in the updater (*Updates*, above); the configure step prints
+`Updates: on, ...` with the repository and the version the updater compares. A new release
+raises `TSSM_3DS_VERSION` and publishes the files as `TSSM-Dehydrated-<that
+version>-3DS.cia` and `-3DS.3dsx`, each with its line in the release's SHA256SUMS.
+
+| Option | Default | What |
+|---|---|---|
+| `TSSM_UPDATE` | `OFF` | the Updates section in the settings menu; `ON` in the TSSM Dehydrated release |
+| `TSSM_UPDATE_REPO` | this repository | the GitHub repository (owner/name) whose latest release it reads; named nowhere else |
+| `TSSM_3DS_UNIQUE_ID` | `0xF7553` | the .cia's unique ID; another one makes a title of its own (test builds) |
+| `TSSM_UPDATE_TEST_BUILD` | `OFF` | test builds only, never a release: the updater's test hooks, and `config.ini` and the saves in `TSSM_UPDATE_TEST_DATA`; refused with the game's unique ID |
+| `TSSM_UPDATE_TEST_DATA` | `sdmc:/3ds/tssm-update-test/data` | a test build's folder for `config.ini` and the saves (never inside `sdmc:/3ds/tssm`) |
+| `TSSM_UPDATE_TEST_SOURCE` | empty | test builds only: a folder on the SD card that stands in for GitHub |
+
+Leave `TSSM_UPDATE` off for a build of your own (another name, icon or set of files). With
+it on and an icon or banner of your own (`TSSM_3DS_BANNER` a .bnr or a picture that is not
+one of the port's two, `TSSM_3DS_ICON` not `dist/3ds/cia_icon.png`, or `TSSM_ICON_DIR`),
+the configure step says `Updates: this build has an icon or banner of its own`: such a
+build reports new versions and never replaces itself. The same happens when one of the
+port's own pictures or its chime (`dist/3ds/cia_icon.png`, `cia_banner.png`,
+`cia_banner_dehydrated.png`, `cia_chime.wav`) is not the committed one: `CMakeLists.txt`
+keeps each one's SHA-256, and a warning names the file. With it on, the build needs
+FFmpeg (libavutil's SHA-256, already linked for the movies), the settings menu, mbedtls
+and, for the .cia, Python, and `TSSM_3DS_VERSION` must be up to three numbers (at most
+63.63.15): it is the version the updater compares, against the version in the release
+file's name, not the release's tag, and the updater installs a .cia only when its title
+version is that one.
 
 ### An animated HOME Menu banner from your own game files
 
@@ -658,6 +773,10 @@ take about 25, 35 and 50 minutes; in an emulator, which cannot restart them, a f
 | `src/SB/Core/pc/3ds/i3DS.cpp` | start-up (RomFS, 804 MHz, 3dslink, the log server, the New 3DS check), the memory report, HOME and sleep, the exception handler, the error screen, the quit, and the probes |
 | `src/SB/Core/pc/iWindow3DS.cpp` | the window seam: SDL's video opened and pumped, frame pacing |
 | `src/SB/Core/pc/3ds/iLayout3DS.cpp` | the compile-time layout checks |
+| `src/SB/Core/pc/3ds/i3DSUpdate.cpp` | the updater's platform side: which file, the checks of this copy and of the download (`TSSM_UPDATE`) |
+| `src/SB/Core/pc/3ds/i3DSUpdateSys.cpp` | the updater's libctru side: TLS with mbedtls, the install through AM, this title's own ExeFS |
+| `src/SB/Core/pc/3ds/i3DSPackage.cpp` | a .cia's TMD and a .3dsx's header, read (also on the PC: `tssm_update3dstest`) |
+| `src/SB/Core/pc/3ds/i3DSUpdateTest.cpp` | test builds only (`TSSM_UPDATE_TEST_SOURCE`): a folder on the SD card in GitHub's place |
 | `src/SB/Core/pc/3ds/c3d/` | `rw::c3d`, librw's render device on citro3d (below) |
 
 - **Memory.** 32-bit pointers, as in the Windows x86 build. The New 3DS mode gives about
@@ -685,7 +804,31 @@ take about 25, 35 and 50 minutes; in an emulator, which cannot restart them, a f
   system cancels the DSP's wake after HOME, the next audio restart lets go of ndsp and
   takes it again, so the DSP starts afresh. SDL's driver is patched (`tools/3ds/sdl/`):
   its waits wake every 50 ms, its close is bounded, and it resets its channel after such
-  a cancel. `TSSM_3DS_NDSP_HOLD=off` leaves ndsp to SDL alone.
+  a cancel. `TSSM_3DS_NDSP_HOLD=off` leaves ndsp to SDL alone. Without
+  `sdmc:/3ds/dspfirm.cdc` at start-up ndsp cannot start, so SDL's silent driver keeps the
+  movies' time instead, and the game asks the system whether it runs in an emulator
+  (`svcGetSystemInfo` type 0x20000, parameter 0: Citra and Azahar answer with their ID,
+  Luma3DS with 0) to pick the no-sound note's text; the log says which it found
+  (`tssm: 3ds: sound: no firmware file, on a console`, or `..., in an emulator`).
+- **The updater** (`TSSM_UPDATE`). The core (`src/SB/Core/pc/iUpdate.cpp`, the same on
+  every platform) reads the latest release's JSON, picks `TSSM-Dehydrated-<version>-3DS.cia`
+  for the installed title or `-3DS.3dsx` for a .3dsx, fetches SHA256SUMS and the file,
+  follows GitHub's redirects only to its four hosts, and hashes the download back from the
+  card before anything is installed. The TLS is **mbedtls** (devkitPro's 3ds-mbedtls
+  2.28.8) over the SOC service, not the system's HTTP service: the 3DS's ssl module cannot
+  finish a handshake with GitHub's servers (they offer ECDSA certificates from roots the
+  module does not have). mbedtls trusts Mozilla's CA list (`dist/3ds/cacert.pem`, curl's
+  extract, MPL 2.0; in the RomFS as `update/cacert.pem`), checks the host name and the
+  dates, and speaks TLS 1.2; the ssl service gives it random numbers. Every socket is
+  non-blocking, so Cancel, a stalled server, a sleep and the quit are noticed at once. For
+  the installed title, the download must be a .cia of this very title, by its own TMD and
+  by AM's reading of it, with room for it on the card; AM installs it (any failure cancels
+  the install and leaves the installed title as it was), with HOME and sleep held, and
+  **Restart now** sets libctru's chainloader to this title. For a .3dsx: the path the
+  Homebrew Launcher gave, the download's header checked, the RomFS unmounted, the file
+  renamed over it, the RomFS mounted again. `romfs:/update/art.txt` holds the SHA-256 of
+  the .3dsx's SMDH and the .cia's icon and banner as the build packed them; the updater
+  compares the running copy's own and replaces nothing when they differ.
 - **Closing.** Every `exit()` goes through one quit path (`-Wl,--wrap=exit`) that stops,
   one logged step at a time, everything that runs beside the main thread (the audio
   thread and ndsp, the log server, citro3d after a wait for the GPU, SDL, the sockets, the
@@ -776,6 +919,17 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   layer*, Closing), the probes 14-16 have made 39 launches on a console, each run quitting
   and starting the next, and none started with a program held. The game still reports
   held programs at start and asks for a restart when there are two or more.
+- **The updater** has not run on a console yet (0.9.2 is its first release). It is checked
+  on the PC (`tssm_updatetest`, `tssm_update3dstest`, against saved copies of the real
+  releases) and in Azahar: a .3dsx found the release on GitHub, downloaded its .3dsx
+  through GitHub's redirects with every certificate check on and put it in place with the
+  right checksum; a cancel left the file as it was; a test .cia (its own title ID)
+  installed a newer copy of itself through AM; a wrong checksum and a remade .cia with
+  another banner were refused. Azahar has no HOME Menu, so the restart through it, the
+  handshake's time on a console, AM installing over the running title, and a sleep or HOME
+  during a download wait for a console. Each step writes a `tssm: update:` line to
+  `last_run.log`. mbedtls is devkitPro's 2.28.8, the last package of a branch Mbed TLS no
+  longer fixes.
 - **The animated banner** (made from your own game files, above) has not been tried on a
   console in its default form; `banner_flat.bnr` is the fallback.
 - **The icon made from your own game files** has been checked in the built `.3dsx` and
@@ -788,7 +942,8 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   copy (`docs/SWITCH.md`, `src/SB/Core/pc/switch`, `tools/switch`). For the Switch, use
   the `switch` branch.
 - **Licences when you share a build:** the RomFS carries libctru's and citro3d's licences
-  (`dist/3ds/licenses`, with citro3d's copyright line; libctru names no holder), and
+  (`dist/3ds/licenses`, with citro3d's copyright line; libctru names no holder), with the
+  updater also mbedtls's (Apache 2.0) and the CA list's (MPL 2.0), and
   `libctru.txt` names newlib's and the GCC runtime's. newlib's notices are not in the
   RomFS: pass them on beside the files. FFmpeg is linked into the program statically; the
   LGPL allows that because anyone can rebuild the program from this source with a changed

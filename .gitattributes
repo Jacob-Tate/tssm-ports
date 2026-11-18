@@ -20,3 +20,6 @@ tools/switch/sdl/*.patch text eol=lf
 
 # Patches applied to the 3DS SDL3 source by tools/3ds/build_sdl.sh
 tools/3ds/sdl/*.patch text eol=lf
+
+# Mozilla's CA list, byte for byte as curl publishes it (its SHA-256 in docs/3DS.md).
+dist/3ds/cacert.pem -text

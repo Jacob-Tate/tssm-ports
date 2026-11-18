@@ -52,6 +52,20 @@ void i3DSLinkWrite(const char* data, size_t len);
 // unusable answer keeps the last good one.
 const char* i3DSAddress();
 
+// The SOC service up (socInit with its memory block), for the updater's
+// connections: nonzero once it is. Starts no log server. Any thread.
+int i3DSNetStart();
+
+// How many times the console has gone to sleep since the game started (the
+// APT hook counts them). Any thread.
+uint32_t i3DSSleepCount();
+
+// The game started without sdmc:/3ds/dspfirm.cdc and so has no sound: the
+// note the bottom screen and the Audio settings show (how to make the file on
+// a console, or what an emulator needs), NULL when it had the file. Asks the
+// SD card again at most every 5 s, for a file made since. Main thread.
+const char* i3DSNoSoundText();
+
 // The system tick in nanoseconds (unaffected by the wall clock, and by the
 // New 3DS's clock speed), and a sleep, for iHostMonotonicNs /
 // iHostSleepUntilNs.

@@ -5,6 +5,9 @@
 // file is compiled with libctru's short enums (CMakeLists.txt).
 #include "i3DS.h"
 #include "iStereo3DS.h"
+#ifdef TSSM_UPDATE
+#include "i3DSUpdate.h"
+#endif
 #ifdef RW_C3D
 // C types only, as i3DS.h: safe on this, libctru's, side of the enum line.
 #include "c3d/rwc3d.h"
@@ -92,8 +95,46 @@ namespace
     Result sRomfsResult;
     bool sNew3DS;
     int sHomeHolds;
+    // i3DSHoldHome is called from the game thread (saves) and from the
+    // updater's thread (its install), so the count and the two APT calls
+    // after it change together.
+    LightLock sHomeHoldLock;
+    bool sHomeHoldLockMade;
+    // Times the console went to sleep (i3DSSleepCount).
+    volatile u32 sSleeps;
+    // i3DSNetStart, which the updater's thread calls.
+    LightLock sNetLock;
     // i3DSServeFile: what the pull-log server sends instead of last_run.log.
     char sServed[300];
+    // The game started without the DSP firmware (kDspFirm), so it has no
+    // sound: 0 it had it, 1 on a console, 2 in an emulator (i3DSNoSoundText).
+    int sNoSound;
+    // The file made since (Rosalina's dump works while the game runs): asked
+    // again at most every few seconds while the note is shown.
+    bool sNoSoundFileNow;
+    u64 sNoSoundAskedAt;
+    const char kDspFirm[] = "sdmc:/3ds/dspfirm.cdc";
+    const char kNoSoundConsole[] =
+        "No sound: this 3DS's sound firmware file is missing. Make it once: L + Down + SELECT "
+        "(Rosalina menu), Miscellaneous options, Dump DSP firmware, then restart the game.";
+    const char kNoSoundEmulator[] =
+        "No sound: the emulator needs the 3DS sound firmware file dspfirm.cdc, dumped from "
+        "your own 3DS (Rosalina menu, Miscellaneous options, Dump DSP firmware), copied into "
+        "the emulator's sdmc/3ds folder. Then restart the game.";
+    const char kNoSoundThereNow[] =
+        "No sound in this run: the sound firmware file is there now. Restart the game for sound.";
+
+    // Citra and Azahar answer svcGetSystemInfo's type 0x20000, parameter 0,
+    // with their ID (1 Citra, 2 Azahar); Luma3DS answers it with 0.
+    s64 EmulatorId()
+    {
+        s64 id = 0;
+        if (R_FAILED(svcGetSystemInfo(&id, 0x20000, 0)))
+        {
+            id = 0;
+        }
+        return id;
+    }
 
     // ------------------------------------------------------------ the exit fix
 
@@ -344,6 +385,7 @@ namespace
             Away("the HOME menu is open");
             break;
         case APTHOOK_ONSLEEP:
+            __atomic_add_fetch(&sSleeps, 1u, __ATOMIC_ACQ_REL);
             Away("the console is asleep");
             break;
         case APTHOOK_ONRESTORE:
@@ -364,10 +406,15 @@ namespace
 
     void Line(int fd, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
-    // The installed title's own ID (tools/3ds/tssm.rsf's UniqueId). A .3dsx
-    // runs under another title's (the Homebrew Launcher's host, or none in
-    // an emulator), so the ID, not envIsHomebrew, tells the two apart.
-    const u64 kCiaTitleId = 0x000400000F755300ull;
+    // The installed title's own ID (tools/3ds/tssm.rsf's UniqueId, which
+    // CMakeLists.txt's TSSM_3DS_UNIQUE_ID sets; 000400000F755300 unless a test
+    // build gives another). A .3dsx runs under another title's (the Homebrew
+    // Launcher's host, or none in an emulator), so the ID, not envIsHomebrew,
+    // tells the two apart.
+#ifndef TSSM_3DS_TITLE_ID
+#define TSSM_3DS_TITLE_ID 0x000400000F755300ull
+#endif
+    const u64 kCiaTitleId = TSSM_3DS_TITLE_ID;
     bool sInstalled;
 
     const char* ProgramName()
@@ -732,8 +779,10 @@ namespace
     // the pull-log server on TCP 28772. The SOC service wants a page-aligned
     // buffer of the program's that it maps until socExit: the only memory
     // block this program gives a service, so the sockets start only when
-    // something uses them (3dslink, the spike, TSSM_3DS_LOG_SERVER=on).
-    void StartSockets(bool link)
+    // something uses them (3dslink, the spike, TSSM_3DS_LOG_SERVER=on, the
+    // updater). `server`: the pull-log server too (the updater does not ask
+    // for it).
+    void StartSockets(bool link, bool server = true)
     {
         if (sSocketsUp)
         {
@@ -749,7 +798,10 @@ namespace
                 sLinkSocket = ConnectLink(3000);
             }
             AskAddress();
-            StartLogServer();
+            if (server)
+            {
+                StartLogServer();
+            }
         }
         else
         {
@@ -1726,9 +1778,21 @@ namespace
 
     // The quit with the exit fix: the system core's thread first, then every
     // other thread, then the services, each waited for.
+    // The updater's worker thread uses the sockets, the SD card and AM: it
+    // stops before any of them goes. A check or a download is cancelled and
+    // ends within a moment; an install under way is let finish.
+    void StopUpdater()
+    {
+#ifdef TSSM_UPDATE
+        Step("stopping the updater");
+        i3DSUpdateStop();
+#endif
+    }
+
     void StopEverythingFixed()
     {
         LogThreads("at the start");
+        StopUpdater();
 
         StopAudio();
         const int core1 = ThreadsOnCore(1);
@@ -1833,6 +1897,7 @@ namespace
         }
         i3DSQuitLine("the exit fix is off (TSSM_3DS_EXITFIX=off): the old quit");
         LogThreads("at the start");
+        StopUpdater();
 
         if (sServerThreadUp)
         {
@@ -4680,6 +4745,9 @@ void i3DSEarly()
 {
     // RomFS: the port's own files packed into the .3dsx or the .cia (the
     // license texts). Never the game's.
+    LightLock_Init(&sHomeHoldLock);
+    LightLock_Init(&sNetLock);
+    sHomeHoldLockMade = true;
     sRomfsResult = romfsInit();
     sRomfs = R_SUCCEEDED(sRomfsResult);
     // The thread i3DSQuit stops the others from.
@@ -4851,6 +4919,37 @@ void i3DSStartup()
             }
         }
     }
+#ifdef TSSM_UPDATE_TEST_DATA
+    // A test build of the updater (CMakeLists.txt, TSSM_UPDATE_TEST_BUILD):
+    // config.ini and the saves in a folder of their own, so nothing a test
+    // copy writes (the check-at-start box, a save) reaches the player's game.
+    // test-env.txt can still name others; the log stays in k3DSRoot.
+    {
+        char dir[160];
+        snprintf(dir, sizeof(dir), "%s", TSSM_UPDATE_TEST_DATA);
+        for (char* s = strchr(dir + 6, '/'); s != NULL; s = strchr(s + 1, '/'))
+        {
+            *s = '\0';
+            mkdir(dir, 0777);
+            *s = '/';
+        }
+        mkdir(dir, 0777);
+        char path[200];
+        if (getenv("TSSM_CONFIG") == NULL)
+        {
+            snprintf(path, sizeof(path), "%s/config.ini", TSSM_UPDATE_TEST_DATA);
+            setenv("TSSM_CONFIG", path, 1);
+        }
+        if (getenv("TSSM_SAVE_DIR") == NULL)
+        {
+            snprintf(path, sizeof(path), "%s/saves", TSSM_UPDATE_TEST_DATA);
+            mkdir(path, 0777);
+            setenv("TSSM_SAVE_DIR", path, 1);
+        }
+        printf("tssm: 3ds: update test build: config.ini %s, saves %s\n", getenv("TSSM_CONFIG"),
+               getenv("TSSM_SAVE_DIR"));
+    }
+#endif
     if (ThisProbe() != NULL)
     {
         ApplyProbe();
@@ -4928,11 +5027,27 @@ void i3DSStartup()
     // Without the console's DSP firmware dump there is no sound (SDL's audio
     // opens ndsp, which loads it).
     struct stat dsp;
-    if (stat("sdmc:/3ds/dspfirm.cdc", &dsp) != 0)
+    if (stat(kDspFirm, &dsp) != 0)
     {
+        const s64 emulator = EmulatorId();
+        sNoSound = emulator != 0 ? 2 : 1;
+        sNoSoundAskedAt = osGetTime();
         printf("tssm: 3ds: no sdmc:/3ds/dspfirm.cdc, so no sound. Make it once from the "
                "Rosalina menu (L + Down + SELECT): Miscellaneous options, Dump DSP firmware "
                "(docs/3DS.md)\n");
+        if (emulator != 0)
+        {
+            printf("tssm: 3ds: sound: no firmware file, in an emulator (%s, ID %d): the bottom "
+                   "screen and the Audio settings say to copy a dump from the player's 3DS "
+                   "into its sdmc/3ds\n",
+                   emulator == 1 ? "Citra" : emulator == 2 ? "Azahar" : "not known",
+                   (int)emulator);
+        }
+        else
+        {
+            printf("tssm: 3ds: sound: no firmware file, on a console: the bottom screen and the "
+                   "Audio settings say how to dump it with Rosalina\n");
+        }
         // ndsp without its firmware never asks for sound, and closing that
         // device waits forever (a movie with sound hung there). SDL's silent
         // driver keeps time instead.
@@ -4954,8 +5069,37 @@ void i3DSServeFile(const char* path)
     snprintf(sServed, sizeof(sServed), "%s", path != NULL ? path : "");
 }
 
+const char* i3DSNoSoundText()
+{
+    if (sNoSound == 0)
+    {
+        return NULL;
+    }
+    const u64 now = osGetTime();
+    if (!sNoSoundFileNow && now - sNoSoundAskedAt >= 5000)
+    {
+        sNoSoundAskedAt = now;
+        struct stat dsp;
+        if (stat(kDspFirm, &dsp) == 0)
+        {
+            sNoSoundFileNow = true;
+            printf("tssm: 3ds: sound: sdmc:/3ds/dspfirm.cdc is there now; sound from the next "
+                   "start\n");
+            fflush(stdout);
+        }
+    }
+    return sNoSoundFileNow ? kNoSoundThereNow
+           : sNoSound == 2 ? kNoSoundEmulator
+                           : kNoSoundConsole;
+}
+
 void i3DSHoldHome(int hold)
 {
+    // Made in i3DSEarly, before any second thread.
+    if (sHomeHoldLockMade)
+    {
+        LightLock_Lock(&sHomeHoldLock);
+    }
     sHomeHolds += hold ? 1 : -1;
     if (sHomeHolds < 0)
     {
@@ -4964,7 +5108,62 @@ void i3DSHoldHome(int hold)
     const bool allowed = sHomeHolds == 0;
     aptSetHomeAllowed(allowed);
     aptSetSleepAllowed(allowed);
+    if (sHomeHoldLockMade)
+    {
+        LightLock_Unlock(&sHomeHoldLock);
+    }
 }
+
+uint32_t i3DSSleepCount()
+{
+    return __atomic_load_n(&sSleeps, __ATOMIC_ACQUIRE);
+}
+
+int i3DSNetStart()
+{
+    LightLock_Lock(&sNetLock);
+    StartSockets(false, false);
+    const bool up = sSocketsUp;
+    LightLock_Unlock(&sNetLock);
+    return up ? 1 : 0;
+}
+
+#ifdef TSSM_UPDATE
+int i3DSUpdateInstalled(uint64_t* titleId)
+{
+    // Not a .3dsx either: the Homebrew Launcher can be started by taking
+    // over the game's own title (Rosalina), and a .3dsx then runs under the
+    // game's ID. Only the installed title itself installs a .cia over it.
+    const bool homebrew = envIsHomebrew();
+    const bool cia = sInstalled && !homebrew;
+    if (sInstalled && homebrew)
+    {
+        printf("tssm: update: 3ds: a .3dsx running under the game's title ID: not the .cia\n");
+    }
+    *titleId = cia ? kCiaTitleId : 0;
+    return cia ? 1 : 0;
+}
+
+void i3DSUpdateReleaseRomfs()
+{
+    if (sRomfs)
+    {
+        romfsExit();
+        sRomfs = false;
+        printf("tssm: update: 3ds: RomFS unmounted\n");
+    }
+}
+
+void i3DSUpdateRemountRomfs()
+{
+    if (!sRomfs)
+    {
+        const Result r = romfsInit();
+        sRomfs = R_SUCCEEDED(r);
+        printf("tssm: update: 3ds: RomFS mounted again: %#lx\n", (unsigned long)r);
+    }
+}
+#endif
 
 void i3DSErrorBox(const char* title, const char* message)
 {

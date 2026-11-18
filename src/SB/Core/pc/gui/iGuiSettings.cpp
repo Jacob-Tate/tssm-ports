@@ -29,6 +29,7 @@
 
 #ifdef __3DS__
 #include "3ds/c3d/rwc3d.h"
+#include "3ds/i3DS.h"
 #endif
 
 #include <stdio.h>
@@ -897,6 +898,15 @@ void iGui::Settings3D()
 void iGui::SettingsAudio()
 {
     ImGui::SeparatorText("Audio");
+#ifdef __3DS__
+    // Started without the DSP firmware: no sound in this run (i3DS.cpp).
+    if (const char* note = i3DSNoSoundText())
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(250, 210, 80, 255));
+        ImGui::TextWrapped("%s", note);
+        ImGui::PopStyleColor();
+    }
+#endif
     if (!BeginRows("audio"))
     {
         return;
@@ -1136,4 +1146,8 @@ void iGui::DrawSettings()
     SettingsGameFiles();
     ImGui::Spacing();
     SettingsInterface();
+#ifdef TSSM_UPDATE
+    ImGui::Spacing();
+    SettingsUpdates();
+#endif
 }
