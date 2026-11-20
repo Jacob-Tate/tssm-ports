@@ -73,6 +73,10 @@ void iHDRGlowRender(RwCamera* cam, F32 overbrighten, S32 downsamples, S32 downSr
 // pass existed.
 void iHDRGlowSetEnabled(S32 enabled);
 
+// Whether it is on: video.hdr_glow is the switch for the Xbox glow
+// (iXboxGlow.h) and the menus' glow as well.
+S32 iHDRGlowEnabled();
+
 // TSSM_HDR_VIEW, for looking at the pass: "mask" replaces the frame with its
 // alpha channel (the glow mask) in grey, "glow" with the glow alone over
 // black. Read once, at the first render.

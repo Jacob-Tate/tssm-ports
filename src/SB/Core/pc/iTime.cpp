@@ -4,6 +4,7 @@
 // shared code spells it (see iTime.h).
 #include "iTime.h"
 #include "iHost.h"
+#include "iWindow.h"
 
 #include <types.h>
 
@@ -162,6 +163,30 @@ void iTimeSetGame(F32 time)
 F32 iTimeGetGame()
 {
     return sGameTime;
+}
+
+F32 iTimeFrameShare(F32 dt)
+{
+    // TSSM_TEST_FRAME_SHARE=0: always 1, the port before the share existed, for
+    // comparing the two in one build (docs/EXTRAS.md).
+    static S32 sOff = -1;
+    if (sOff < 0)
+    {
+        const char* e = getenv("TSSM_TEST_FRAME_SHARE");
+        sOff = (e != NULL && e[0] == '0') ? 1 : 0;
+    }
+    if (sOff)
+    {
+        return 1.0f;
+    }
+
+    const S32 paced = iWindowGetPacedRate();
+    if (paced > 0 && paced <= 60)
+    {
+        return 1.0f;
+    }
+    const F32 share = dt * 60.0f;
+    return share > 0.0f && share < 1.0f ? share : 1.0f;
 }
 
 // The GameCube build reads the calendar through OSTicksToCalendarTime; on a

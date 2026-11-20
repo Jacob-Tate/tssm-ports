@@ -51,6 +51,11 @@ DEFAULTS = {
     "dist/3ds/cia_banner.png": "e8ef84983c15b982f852c9ffb02a20ebcb7b9fc4",
     "dist/3ds/cia_banner_dehydrated.png": "ba4482791aa021447941a63adbb2722be6ec5b3b",
     "dist/3ds/cia_icon.png": "d226450ed38a80e6e56d83a973bb3c425b008ed2",
+    # The PC build's default icon: the same sponge block, made by
+    # tools/make_icons.ps1 from dist/switch/default_icon.jpg (the switch branch);
+    # byte for byte what the releases' tssm.exe carries.
+    "dist/pc/default_icon.ico": "2675ce9b25f41895f063b98328c64e14bb727a9a",
+    "dist/pc/default_icon-64.png": "8172b8c9f987fa8511f608e1c40f1cadfc09aa41",
 }
 
 IMAGE_EXTENSIONS = {
@@ -228,6 +233,10 @@ def main():
         name = path.rsplit("/", 1)[-1]
         ext = os.path.splitext(name)[1].lower()
         kind = image_magic(blob_heads.get(sha, b""))
+        # A default is a default, also when an art folder holds a copy of it
+        # (the release's icon folder is made from the same picture).
+        if DEFAULTS.get(path) == sha:
+            continue
         if sha in art:
             problems.append(f"{path}: identical to {art[sha]}")
         elif name.lower() in GENERATED_NAMES or "tssm-logo" in name.lower():

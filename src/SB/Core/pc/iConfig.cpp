@@ -112,6 +112,54 @@ namespace
         return NULL;
     }
 
+    // Settings that moved to a new name. A file's line under the old name is
+    // read as the new one, so an older config.ini keeps working; when a file
+    // has both, the new name wins. The first change made to it in the game's
+    // settings writes the new name and takes the old line out (iConfigSet).
+    //
+    // [video] water is the name the Xbox water had in the first builds that
+    // had it. It is [extras] water now, beside the other features of the Xbox
+    // release (iExtras.h).
+    struct MovedKey
+    {
+        const char* from;
+        const char* to;
+    };
+
+    // The mouse's two settings from when it turned the camera through the
+    // right stick's value. They are mouse look's now (iMouseLook.h).
+    const MovedKey kMovedKeys[] = {
+        { "video.water", "extras.water" },
+        { "input.mouse_camera", "input.mouse_look" },
+        { "input.mouse_sensitivity", "input.mouse_sensitivity_x" },
+    };
+
+    // The new name of an old key, or NULL.
+    const char* movedTo(const char* key)
+    {
+        for (size_t i = 0; i < sizeof(kMovedKeys) / sizeof(kMovedKeys[0]); i++)
+        {
+            if (iHostStrCaseCmp(kMovedKeys[i].from, key) == 0)
+            {
+                return kMovedKeys[i].to;
+            }
+        }
+        return NULL;
+    }
+
+    // The old name of a key that moved, or NULL.
+    const char* movedFrom(const char* key)
+    {
+        for (size_t i = 0; i < sizeof(kMovedKeys) / sizeof(kMovedKeys[0]); i++)
+        {
+            if (iHostStrCaseCmp(kMovedKeys[i].to, key) == 0)
+            {
+                return kMovedKeys[i].from;
+            }
+        }
+        return NULL;
+    }
+
     // [pad] and [keyboard]. One line per game button, and the grammar spelled
     // out once at the top of each -- a comment per binding would be thirty
     // paragraphs all saying the same thing.
@@ -184,7 +232,7 @@ namespace
             ";   backspace, shift, ctrl, alt, up, down, left, right, f1 to f12,\n"
             ";   numpad0 to numpad9 -- and mouse1 to mouse5, wheelup, wheeldown",
             "; Keys play alongside a controller (input.keyboard). The mouse turns the\n"
-            "; camera (input.mouse_camera).\n"
+            "; camera (input.mouse_look).\n"
             ";\n");
     }
 
@@ -200,12 +248,27 @@ namespace
         return NULL;
     }
 
+    // The file's line for `key`, or for the old name of a key that moved.
+    const Entry* findEntryOrMoved(const char* key)
+    {
+        const Entry* e = findEntry(key);
+        if (e == NULL)
+        {
+            const char* from = movedFrom(key);
+            if (from != NULL)
+            {
+                e = findEntry(from);
+            }
+        }
+        return e;
+    }
+
     // What a query should read, in order: the file, then the table's default,
     // then the caller's fallback for a key that is in neither. The middle step
     // is what keeps the written defaults and the running defaults the same.
     const char* valueOf(const char* key)
     {
-        const Entry* e = findEntry(key);
+        const Entry* e = findEntryOrMoved(key);
         if (e != NULL)
         {
             return e->value;
@@ -295,8 +358,15 @@ namespace
 
         if (iConfigTableFind(e->key) == NULL && bindingDefault(e->key) == NULL)
         {
-            printf("tssm: %s:%d: unknown setting '%s', ignored\n", path, (int)lineNo, e->key);
-            return;
+            const char* to = movedTo(e->key);
+            if (to == NULL)
+            {
+                printf("tssm: %s:%d: unknown setting '%s', ignored\n", path, (int)lineNo, e->key);
+                return;
+            }
+            // Kept under its old name, so the new name's own line still wins.
+            printf("tssm: %s:%d: '%s' is now '%s'; read as that\n", path, (int)lineNo, e->key,
+                   to);
         }
 
         sCount++;
@@ -343,7 +413,9 @@ namespace
         char key[kMaxKey];
         snprintf(key, sizeof(key), "%s.%s", section, name);
         lowerInPlace(key);
-        return findEntry(key) != NULL;
+        // A line under a setting's old name counts: appending the new name at
+        // its default would override what that line says.
+        return findEntryOrMoved(key) != NULL;
     }
 
     // Settings this build has that the file does not.
@@ -363,6 +435,34 @@ namespace
     // The section headers therefore repeat. The parser tracks the current
     // section as it goes and does not care, and one block under one banner is
     // easier to find than the same keys threaded back into place would be.
+    //
+    // A setting split off from another starts from what the file says for
+    // that one, so the player keeps what they had: the mouse's two invert
+    // settings were camera_invert_x and _y's ("stick and mouse") before the
+    // mouse had its own.
+    const char* startValue(const iConfigSetting& s)
+    {
+        static const char* const kFrom[][2] = {
+            { "input.mouse_invert_x", "input.camera_invert_x" },
+            { "input.mouse_invert_y", "input.camera_invert_y" },
+        };
+
+        char key[kMaxKey];
+        snprintf(key, sizeof(key), "%s.%s", s.section, s.name);
+        for (size_t i = 0; i < sizeof(kFrom) / sizeof(kFrom[0]); i++)
+        {
+            if (strcmp(key, kFrom[i][0]) == 0)
+            {
+                const Entry* e = findEntry(kFrom[i][1]);
+                if (e != NULL)
+                {
+                    return e->value;
+                }
+            }
+        }
+        return s.value;
+    }
+
     void appendMissingSettings(const char* path)
     {
         S32 missing = 0;
@@ -406,7 +506,8 @@ namespace
         fprintf(f, "\n");
         fprintf(f, "; ------------------------------------------------------------------\n");
         fprintf(f, "; Settings added by a newer build of the port. Every value below is\n");
-        fprintf(f, "; its default, so this block changes nothing.\n");
+        fprintf(f, "; its default (or what this file had for the setting it came from),\n");
+        fprintf(f, "; so this block changes nothing.\n");
 
         const char* section = NULL;
         for (size_t i = 0; i < (size_t)kConfigSettingCount; i++)
@@ -420,8 +521,24 @@ namespace
                 section = kConfigSettings[i].section;
                 fprintf(f, "\n[%s]\n", section);
             }
+            const char* value = startValue(kConfigSettings[i]);
             fprintf(f, "\n; %s\n", kConfigSettings[i].comment);
-            fprintf(f, "%s = %s\n", kConfigSettings[i].name, kConfigSettings[i].value);
+            fprintf(f, "%s = %s\n", kConfigSettings[i].name, value);
+
+            // This run reads what the file now says.
+            if (strcmp(value, kConfigSettings[i].value) != 0 && sCount < kMaxEntries)
+            {
+                Entry* e = &sEntries[sCount++];
+                snprintf(e->key, sizeof(e->key), "%s.%s", kConfigSettings[i].section,
+                         kConfigSettings[i].name);
+                lowerInPlace(e->key);
+                // `value` is another entry's: copied before anything moves.
+                char copy[kMaxValue];
+                snprintf(copy, sizeof(copy), "%s", value);
+                snprintf(e->value, sizeof(e->value), "%s", copy);
+                printf("tssm: %s: %s starts as %s, the setting it was part of\n", path, e->key,
+                       e->value);
+            }
         }
 
         // The keyboard bindings, one line each, carrying their grammar in the
@@ -504,11 +621,11 @@ bool iConfigWriteDefaults(const char* path)
         return false;
     }
 
-    // TSSM-ADAPTED: the game this file belongs to.
+    // TSSM-ADAPTED: the program this file belongs to.
 #if defined(__SWITCH__) || defined(__3DS__)
     fprintf(f, "; The SpongeBob SquarePants Movie (port) -- settings.\n");
 #else
-    fprintf(f, "; The SpongeBob SquarePants Movie, PC port -- settings.\n");
+    fprintf(f, "; %s, PC port -- settings.\n", TSSM_GAME_TITLE);
 #endif
     fprintf(f, "; Every value here is the default, so deleting this file changes nothing.\n");
     fprintf(f, "; Booleans take on/off, true/false, yes/no or 1/0.\n");
@@ -620,6 +737,38 @@ namespace
         *name = dot + 1;
         return true;
     }
+
+    // Takes `lower` out, and has the next save remove its line.
+    void removeEntry(const char* lower)
+    {
+        for (S32 i = 0; i < sCount; i++)
+        {
+            if (strcmp(sEntries[i].key, lower) == 0)
+            {
+                memmove(&sEntries[i], &sEntries[i + 1], (size_t)(sCount - i - 1) * sizeof(Entry));
+                memmove(&sChanged[i], &sChanged[i + 1], (size_t)(sCount - i - 1) * sizeof(bool));
+                sCount--;
+                break;
+            }
+        }
+
+        forgetRemoved(lower);
+        if (sRemovedCount < kMaxRemoved)
+        {
+            snprintf(sRemoved[sRemovedCount++], kMaxKey, "%s", lower);
+        }
+    }
+
+    // A setting set or unset under its new name: the line under its old name
+    // goes, so the file says it once.
+    void removeMovedLine(const char* lower)
+    {
+        const char* from = movedFrom(lower);
+        if (from != NULL && findEntry(from) != NULL)
+        {
+            removeEntry(from);
+        }
+    }
 } // namespace
 
 void iConfigUnset(const char* key)
@@ -629,23 +778,8 @@ void iConfigUnset(const char* key)
     char lower[kMaxKey];
     snprintf(lower, sizeof(lower), "%s", key);
     lowerInPlace(lower);
-
-    for (S32 i = 0; i < sCount; i++)
-    {
-        if (strcmp(sEntries[i].key, lower) == 0)
-        {
-            memmove(&sEntries[i], &sEntries[i + 1], (size_t)(sCount - i - 1) * sizeof(Entry));
-            memmove(&sChanged[i], &sChanged[i + 1], (size_t)(sCount - i - 1) * sizeof(bool));
-            sCount--;
-            break;
-        }
-    }
-
-    forgetRemoved(lower);
-    if (sRemovedCount < kMaxRemoved)
-    {
-        snprintf(sRemoved[sRemovedCount++], kMaxKey, "%s", lower);
-    }
+    removeMovedLine(lower);
+    removeEntry(lower);
 }
 
 void iConfigSet(const char* key, const char* value)
@@ -656,6 +790,7 @@ void iConfigSet(const char* key, const char* value)
     snprintf(lower, sizeof(lower), "%s", key);
     lowerInPlace(lower);
     forgetRemoved(lower);
+    removeMovedLine(lower);
 
     for (S32 i = 0; i < sCount; i++)
     {

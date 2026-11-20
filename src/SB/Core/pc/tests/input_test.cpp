@@ -1,4 +1,4 @@
-// tssm_input_test: the input layer, end to end, with no game data, no window
+// tssm_input_test: the input layer, end to end, with no game data, no screen
 // and no real device.
 //
 // It drives SDL's own virtual controllers -- attached, pressed and unplugged
@@ -14,6 +14,9 @@
 // Exit status 0 when every check passes.
 
 #include "iConfig.h"
+#include "iCameraLook.h"
+#include "iFile.h"
+#include "iMouseLook.h"
 #include "iPad.h"
 #include "iPadBind.h"
 #include "iPadControls.h"
@@ -29,6 +32,8 @@
 #include "xTRC.h"
 
 #include <SDL3/SDL.h>
+
+#include <rwcore.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -77,6 +82,16 @@ S32 zGameIsPaused()
     return 0;
 }
 
+// The menu pointer is a game unit (it reads the game's UI widgets), and there
+// is no game here: a menu is up when the test says so, and takes no clicks.
+static bool sMenuUp;
+
+U32 iMenuMouseUpdate(S32, U32 on)
+{
+    iMouseLookSetPointer(sMenuUp);
+    return iMouseLookSpentOut(on);
+}
+
 // No packages are loaded, so no prompt asset exists; the prompt code is tested
 // on buffers below.
 void* xSTFindAsset(U32, U32* size)
@@ -86,6 +101,20 @@ void* xSTFindAsset(U32, U32* size)
         *size = 0;
     }
     return NULL;
+}
+
+// Nor does any package: the prompts ask which release the font came from.
+char* xST_xAssetID_HIPFullPath(U32)
+{
+    return NULL;
+}
+
+// So the answer is none here, without iFile.cpp: on this branch that file
+// also times its reads and tells the 3DS spike of them (iD0Stats.h,
+// iSpike.h), which would bring the renderer and the game into this test.
+iGCPlatform iFilePackagePlatformOf(const char*)
+{
+    return IGCPLAT_NONE;
 }
 
 U32 xStrHash(const char* str)
@@ -370,6 +399,16 @@ static void TestTables()
     CheckBits(iPadPromptsTextureBits("pad_button3"), XPAD_BUTTON_TRIANGLE, "pad_button3 is B");
     CheckBits(iPadPromptsTextureBits("pad_button4"), XPAD_BUTTON_O, "pad_button4 is X");
 
+    // The disc's raster of a texture (zSpotlight's flares ask for TT01's pad_button1): one that
+    // nothing has swapped keeps its own. No package is loaded, so nothing is swapped here.
+    {
+        RwTexture tex;
+        memset(&tex, 0, sizeof(tex));
+        tex.raster = (RwRaster*)&tex;
+        Check(iPadPromptsDiscRaster(&tex) == tex.raster, "an unswapped texture keeps its raster");
+        Check(iPadPromptsDiscRaster(NULL) == NULL, "no texture, no raster");
+    }
+
     // The parser.
     S32 count;
     const iPadBindToken* tokens = iPadPadTokens(&count);
@@ -600,15 +639,90 @@ static void TestKeyboard()
     CheckInt(Frame().analog2.x, 127, "L turns the camera like the C-stick pushed right");
     KeysUp();
 
-    // The mouse: a distance becomes deflection past the game's 32.
+    // The mouse. With no on-foot camera asking for the turn (there is no game
+    // here; a car's or a boss's camera has the view), a distance becomes
+    // deflection past the game's 32.
     sKeyboard.mouse_dx = 10.0f;
     {
         S32 x = Frame().analog2.x;
         Check(x < -32 && x >= -110, "mouse right turns the view right (C-stick left)");
     }
+    Check(iMouseLookSteering(), "the mouse has the camera once it has moved");
     CheckInt(Frame().analog2.x, 0, "and stops when the mouse does");
     sKeyboard.mouse_dy = 10.0f;
     Check(Frame().analog2.y < -32, "mouse down looks down (the camera rises)");
+    Frame();
+
+    // The on-foot camera takes the turn itself (iCameraOrbit.cpp calls
+    // iCameraLookTake every frame it runs): the mouse then turns it directly,
+    // in radians, and the right stick's value is left alone.
+    {
+        F32 yaw = 0.0f;
+        F32 pitch = 0.0f;
+        iCameraLookTake(&yaw, &pitch);
+        sKeyboard.mouse_dx = 100.0f;
+        sKeyboard.mouse_dy = -40.0f;
+        _tagxPad& p = Frame();
+        Check(p.analog2.x == 0 && p.analog2.y == 0, "mouse look does not go through the stick");
+        Check(iCameraLookTake(&yaw, &pitch) != 0, "the mouse is steering");
+        Check(fabsf(yaw - 0.35f) < 0.0001f, "100 counts right turn the view 0.35 rad right");
+        Check(fabsf(pitch + 0.14f) < 0.0001f, "40 counts forward look 0.14 rad up");
+        Frame();
+        iCameraLookTake(&yaw, &pitch);
+        Check(yaw == 0.0f && pitch == 0.0f, "and the camera stays where it was pointed");
+
+        // Each axis has its speed and its direction.
+        iPadSettings& cfg = iPadSettingsEdit();
+        cfg.mouse_sensitivity_x = 2.0f;
+        cfg.mouse_sensitivity_y = 0.5f;
+        cfg.mouse_invert_x = 1;
+        cfg.mouse_invert_y = 1;
+        sKeyboard.mouse_dx = 100.0f;
+        sKeyboard.mouse_dy = -40.0f;
+        Frame();
+        iCameraLookTake(&yaw, &pitch);
+        Check(fabsf(yaw + 0.70f) < 0.0001f, "sensitivity x 2, inverted: 0.70 rad left");
+        Check(fabsf(pitch - 0.07f) < 0.0001f, "sensitivity y 0.5, inverted: 0.07 rad down");
+        cfg.mouse_sensitivity_x = 1.0f;
+        cfg.mouse_sensitivity_y = 1.0f;
+        cfg.mouse_invert_x = 0;
+        cfg.mouse_invert_y = 0;
+
+        // The camera keys (the right stick) take the camera back, with the
+        // game's own camera, until the mouse moves again.
+        sKeys[SDL_SCANCODE_L] = true;
+        sKeyboard.mouse_dx = 50.0f;
+        CheckInt(Frame().analog2.x, 127, "the camera keys win over the mouse");
+        Check(!iMouseLookSteering() && iCameraLookTake(&yaw, &pitch) == 0 && yaw == 0.0f,
+              "and the mouse stops steering");
+        KeysUp();
+        Frame();
+        iCameraLookTake(&yaw, &pitch);
+        Check(!iMouseLookSteering(), "it stays the stick's with the keys let go");
+        sKeyboard.mouse_dx = 20.0f;
+        Frame();
+        Check(iCameraLookTake(&yaw, &pitch) != 0 && fabsf(yaw - 0.07f) < 0.0001f,
+              "and the mouse takes it back when it moves");
+
+        // Mouse look off: nothing from the mouse, on either path.
+        cfg.mouse_look = 0;
+        sKeyboard.mouse_dx = 50.0f;
+        CheckInt(Frame().analog2.x, 0, "mouse look off: no stick deflection");
+        Check(iCameraLookTake(&yaw, &pitch) == 0 && yaw == 0.0f, "mouse look off: no turn");
+        cfg.mouse_look = 1;
+        Frame();
+        Frame();
+    }
+
+    // A click a menu took comes out of the button the mouse button is bound
+    // to (X), but not while a key is holding that button as well.
+    sKeys[KEY_MOUSE_LEFT] = true;
+    Frame();
+    Check(iMouseLookBound(1) == XPAD_BUTTON_O, "a taken left click takes X with it");
+    sKeys[SDL_SCANCODE_F] = true;
+    Frame();
+    Check(iMouseLookBound(1) == 0, "but not the X the F key is holding");
+    KeysUp();
     Frame();
 
     // Rebinding the keyboard, and more than one key on a row.
@@ -694,6 +808,18 @@ static void TestOtherPads()
         Frame();
 
         CheckStr(iPadPromptsLabelFor("gamecube", "white"), "Z+L", "GC icons: white is Z+L");
+
+        // The GameCube release's font.HIP has GameCube pictures: the gamecube
+        // set keeps them, and the xbox set draws its own.
+        iPadPromptsSetGameCubeFont(true);
+        CheckStr(iPadPromptsLabelFor("gamecube", "b"), "gamecube:B",
+                 "GC font: GC icons keep the disc's B (west)");
+        CheckStr(iPadPromptsLabelFor("gamecube", "x"), "gamecube:X",
+                 "GC font: GC icons keep the disc's X (east)");
+        CheckStr(iPadPromptsLabelFor("gamecube", "white"), "Z+L", "GC font: white is still Z+L");
+        CheckStr(iPadPromptsLabelFor("xbox", "b"), "X", "GC font: xbox icons are drawn");
+        iPadPromptsSetGameCubeFont(false);
+        CheckStr(iPadPromptsLabelFor("xbox", "b"), "xbox:X", "Xbox font: xbox icons keep the disc's");
         Detach(pad);
         Frame();
         Frame();
@@ -862,6 +988,237 @@ static void TestMenus()
     Frame();
 }
 
+// What a real mouse does, as SDL posts it: 40 counts right, a left click and a
+// notch of the wheel.
+static void PostMouse()
+{
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.which = 1;
+    e.motion.xrel = 40.0f;
+    SDL_PushEvent(&e);
+
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    e.button.which = 1;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.down = true;
+    SDL_PushEvent(&e);
+    e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.down = false;
+    SDL_PushEvent(&e);
+
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_WHEEL;
+    e.wheel.which = 1;
+    e.wheel.y = 1.0f;
+    SDL_PushEvent(&e);
+}
+
+static void PostButton(bool down)
+{
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.which = 1;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.down = down;
+    SDL_PushEvent(&e);
+}
+
+// The Escape key going down, as SDL posts it. (The keyboard's state is not
+// changed by a posted event, so nothing it is bound to is pressed: Escape by
+// itself, as with pause moved to another key.)
+static void PostEscape()
+{
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.key.scancode = SDL_SCANCODE_ESCAPE;
+    e.key.key = SDLK_ESCAPE;
+    e.key.down = true;
+    SDL_PushEvent(&e);
+}
+
+// Escape frees the pointer, and what takes it back. With the real mouse path
+// on `window`, the pointer held for mouse look.
+static void TestEscape(SDL_Window* window)
+{
+    iPadSettings& cfg = iPadSettingsEdit();
+
+    // Whatever is on screen, whatever it is bound to.
+    PostEscape();
+    {
+        _tagxPad& p = Frame();
+        Check(!SDL_GetWindowRelativeMouseMode(window) && !iMouseLookHeld(),
+              "Escape frees the pointer");
+        CheckBits(p.on & XPAD_BUTTON_START, 0, "also where it is not the pause key");
+    }
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.which = 1;
+    e.motion.xrel = 25.0f;
+    SDL_PushEvent(&e);
+    Frame();
+    Frame();
+    Check(!SDL_GetWindowRelativeMouseMode(window), "and it stays free while the mouse moves");
+
+    // A click in the window takes it back, and is not the game's.
+    PostButton(true);
+    {
+        _tagxPad& p = Frame();
+        Check(SDL_GetWindowRelativeMouseMode(window) && iMouseLookHeld(),
+              "a click in the window takes the pointer back");
+        CheckBits(p.on & XPAD_BUTTON_O, 0, "that click is not X (attack)");
+        CheckBits(Frame().on & XPAD_BUTTON_O, 0, "nor while it is held");
+    }
+    PostButton(false);
+    Frame();
+    PostButton(true);
+    CheckBits(Frame().on & XPAD_BUTTON_O, XPAD_BUTTON_O, "the next click is X again");
+    PostButton(false);
+    Frame();
+
+    // Between polls (a loading screen): the window's pump lets go at once.
+    PostEscape();
+    iMouseLookPump();
+    Check(!SDL_GetWindowRelativeMouseMode(window), "Escape frees it between polls too");
+    Frame();
+    Check(!iMouseLookHeld(), "and the next poll leaves it free");
+
+    // The pause menu Escape opens by default: the pointer comes back when
+    // play goes on after it.
+    sMenuUp = true;
+    Frame();
+    Frame();
+    Check(!SDL_GetWindowRelativeMouseMode(window), "free in the menu Escape opened");
+    PostButton(true);
+    Frame();
+    Check(!SDL_GetWindowRelativeMouseMode(window), "a click in a menu does not take it back");
+    PostButton(false);
+    Frame();
+    sMenuUp = false;
+    Frame();
+    Frame();
+    Check(SDL_GetWindowRelativeMouseMode(window), "held again when play goes on after the menu");
+
+    // Escape in a menu (it closes the pause menu) frees nothing afterwards.
+    sMenuUp = true;
+    Frame();
+    Frame();
+    PostEscape();
+    Frame();
+    sMenuUp = false;
+    Frame();
+    Frame();
+    Check(SDL_GetWindowRelativeMouseMode(window), "Escape that closes a menu leaves it held after");
+
+    // mouse_menus off: no pointer to click with, but the mouse is let go.
+    cfg.mouse_menus = 0;
+    sMenuUp = true;
+    Frame();
+    Frame();
+    Check(!SDL_GetWindowRelativeMouseMode(window) && !iMouseLookHeld(),
+          "mouse_menus off: a menu still frees the pointer");
+    PostButton(true);
+    CheckBits(Frame().on & XPAD_BUTTON_O, XPAD_BUTTON_O,
+              "mouse_menus off: a click in a menu is the button it is bound to");
+    PostButton(false);
+    Frame();
+    sMenuUp = false;
+    Frame();
+    Frame();
+    Check(SDL_GetWindowRelativeMouseMode(window), "mouse_menus off: held again after the menu");
+    cfg.mouse_menus = 1;
+
+    // A click a menu took that closes the menu ("Return to Game") is not a
+    // new press in play while the button is still down.
+    sMenuUp = true;
+    Frame();
+    Frame();
+    PostButton(true);
+    Frame();
+    iMouseLookSpend(1);
+    sMenuUp = false;
+    {
+        _tagxPad& p = Frame();
+        CheckBits((p.on | p.pressed) & XPAD_BUTTON_O, 0,
+                  "the click that closed a menu is not X in play");
+        _tagxPad& q = Frame();
+        CheckBits((q.on | q.pressed) & XPAD_BUTTON_O, 0, "for as long as it is held");
+    }
+    PostButton(false);
+    Frame();
+    PostButton(true);
+    CheckBits(Frame().pressed & XPAD_BUTTON_O, XPAD_BUTTON_O, "and the next click is X");
+    PostButton(false);
+    Frame();
+    Check(SDL_GetWindowRelativeMouseMode(window), "the pointer is held at the end");
+}
+
+// The launcher brings the input layer up and down before the game does
+// (gui/iGuiLauncher.cpp). The real mouse path, so a window that has the
+// keyboard: SDL's dummy video driver gives one without a screen.
+static void TestLauncherMouse()
+{
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    SDL_Window* window = NULL;
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        window = SDL_CreateWindow("tssm_input_test", 320, 240, 0);
+    }
+    Check(window != NULL && SDL_GetKeyboardFocus() == window, "a window with the keyboard");
+    if (window == NULL)
+    {
+        return;
+    }
+
+    iPadKeyboardSetTestSource(NULL);
+    xPadKill();
+
+    // The launcher's turn.
+    iPadHostInit();
+    PostMouse();
+    iPadHostPollDevices();
+    Check(!SDL_GetWindowRelativeMouseMode(window), "the launcher does not hold the pointer");
+    iPadHostExit();
+
+    // The game's. Its first read of the mouse is xPadEnable's.
+    xPadInit();
+    xPadEnable(0);
+
+    F32 dx;
+    F32 dy;
+    U32 held;
+    U32 pressed;
+    S32 wheel;
+    CheckBits(mPad[0].on, 0, "the click on the launcher presses nothing in the game");
+    iPadKeyboardMouse(&dx, &dy, &held, &pressed, &wheel);
+    Check(dx == 0.0f && dy == 0.0f, "the mouse's movement over the launcher is not the game's");
+    Check(held == 0 && pressed == 0 && wheel == 0, "nor its click or its wheel");
+    Check(!iMouseLookSteering(), "and mouse look has not started");
+
+    PostMouse();
+    CheckBits(Frame().on & XPAD_BUTTON_O, XPAD_BUTTON_O, "a click in the game is X (attack)");
+    iPadKeyboardMouse(&dx, &dy, &held, &pressed, &wheel);
+    Check(dx == 40.0f && (pressed & SDL_BUTTON_LMASK) != 0 && wheel == 1,
+          "and the mouse's movement and wheel are read");
+    Check(SDL_GetWindowRelativeMouseMode(window), "the game holds the pointer for mouse look");
+    Frame();
+    Frame();
+
+    TestEscape(window);
+
+    // The stand-in keyboard again before the window goes, so nothing asks
+    // about the window afterwards.
+    iPadKeyboardSetTestSource(&sKeyboard);
+    Frame();
+    SDL_DestroyWindow(window);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
 int main(int argc, char** argv)
 {
     char dir[512];
@@ -903,6 +1260,7 @@ int main(int argc, char** argv)
     TestN3DS();
     TestStickRim();
     TestMenus();
+    TestLauncherMouse();
 
     xPadKill();
 

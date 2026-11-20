@@ -64,6 +64,16 @@ void iTimeFixedStepFrame();
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 F32 iTimeGetGame();
+
+// PC-only: the share of a 60 fps frame that a game frame of `dt` seconds is, for
+// game code that adds a fixed amount once a frame (or once a 1/60 s step)
+// without a time factor. Neither console ever ran it above 60, so above 60 such
+// code went faster than on either. dt * 60 while the pacer runs above 60 (or
+// uncapped) and dt is shorter than 1/60 s; exactly 1 otherwise, so at a cap of
+// 60 or below, frame time jitter included, the code is bit-identical.
+// TSSM_TEST_FRAME_SHARE=0 makes it always 1 (the port before it), for checks
+// that compare the two in one build.
+F32 iTimeFrameShare(F32 dt);
 void iProfileClear(U32 sceneID);
 void iFuncProfileFuncs(S32, S32, F32);
 void iFuncProfileDump();

@@ -50,6 +50,7 @@
 
 #include "../../rw/stereomath.h"
 
+#include <malloc.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1832,13 +1833,17 @@ namespace rw
             {
                 // A level was loaded since the last frame: what it left
                 // (the margins it keeps).
+                // The C heap too (models, sounds, the level's own blocks): in
+                // use, and the most malloc has taken from the system so far.
+                const struct mallinfo heap = mallinfo();
                 printf("tssm: c3d: memory after a load (%u textures made): %u textures, VRAM %u "
                        "KB, linear %u KB; %u camera textures, %u KB of VRAM; VRAM free %u KB, "
-                       "linear free %u KB\n",
+                       "linear free %u KB; C heap %u KB in use, %u KB obtained\n",
                        (unsigned)s.loadTextures, (unsigned)s.textures, (unsigned)(s.texVram >> 10),
                        (unsigned)(s.texLinear >> 10), (unsigned)s.targets,
                        (unsigned)(s.targetVram >> 10), (unsigned)(vramSpaceFree() >> 10),
-                       (unsigned)(linearSpaceFree() >> 10));
+                       (unsigned)(linearSpaceFree() >> 10), (unsigned)(heap.uordblks >> 10),
+                       (unsigned)(heap.arena >> 10));
                 fflush(stdout);
                 abLog("memory after a load (%u textures made): %u textures, VRAM %u KB, linear %u "
                       "KB; %u camera textures and copy blocks, %u KB of VRAM; VRAM free %u KB, "

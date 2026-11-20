@@ -79,8 +79,6 @@ TREEDOME = [
     # input devices
     "iPadStick.h",
     "iPadStick.cpp",
-    "iCameraLook.h",
-    "iCameraLook.cpp",
     "iTouchOverlay.h",
     "iTouchOverlay.cpp",
     # audio device (the seam and both backends are adapted, below)
@@ -135,6 +133,9 @@ TREEDOME_ADAPTED = [
     "iPadTokens.h",
     "iPadTokens.cpp",
     "iPadTouch.h",
+    # mouse look: the turn taken in one call, and who asked for it
+    "iCameraLook.h",
+    "iCameraLook.cpp",
     "iFile.h",
     "iFile.cpp",
     "iTime.cpp",

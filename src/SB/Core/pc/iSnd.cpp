@@ -1,5 +1,7 @@
 #include "iSnd.h"
 #include "iSndData.h"
+#include "iSndDsp.h"
+#include "iSndGC.h"
 #include "iSndHost.h"
 #include "iSndMeter.h"
 #include "iSndXbox.h"
@@ -39,6 +41,15 @@
 // xSndMgr cannot tell, because iSndLookup still answers in the console's shape
 // (uFlags 0x2 for a stream, 0x1 for a loop).
 //
+// **Or the GameCube's.** A package from the GameCube release -- a mod's, or
+// every one when the game runs from a GameCube disc -- holds the console's own
+// table (iSndGC.h): FSB3 banks of DSP-ADPCM inside the SNDI asset, and the
+// cutscene tracks' DSP headers, their samples being in the cutscenes. Such a
+// table is read in place and its sounds are decoded with iSndDsp.h: an effect
+// whole (iSndData), a stream a few seconds ahead (iPumpStream), a cutscene
+// track as its chunks come in (iPumpFeed), the history carried from block to
+// block as the console's DSP does. Tables of both kinds can be loaded at once.
+//
 // Differences from the console a player could notice:
 //
 //  - Streams start at once. The console opens one stream at a time from disc
@@ -65,7 +76,8 @@
 //    nothing.
 //
 // Diagnostics: TSSM_SND=<n> logs the first n plays and every sound table
-// loaded; TSSM_SNDMIX logs the live voices once a second; TSSM_SND_DUMP=<dir>
+// loaded; TSSM_SNDMIX logs the live voices once a second, with how far ahead
+// each stream is decoded; TSSM_SND_DUMP=<dir>
 // writes each sound decoded, and each stream and cutscene track fed, there as
 // WAV; TSSM_SND_TEST=<seconds> plays sounds of the first scene's tables
 // through xSndMgr before the scene starts and reports how long each lasted
@@ -79,10 +91,16 @@
 
 struct pcentry
 {
-    iSndXboxEntry fmt; // the table's entry, verbatim
+    iSndXboxEntry fmt; // the table's entry, verbatim (a GameCube sound's: made up, below)
     U32 offset; // the asset's bytes in the package; size 0 when it has none
     U32 size; // (a CSSS: its PCM is in a cutscene)
+    U8 flags; // iSndFileInfo's uFlags
+    const iSndGCSound* gc; // a GameCube table's sound, or NULL
 };
+
+// The format_tag a GameCube sound's made-up entry carries: no WAVEFORMATEX tag,
+// so nothing that reads Xbox entries takes it for one.
+#define ISND_FORMAT_GCDSP 0xD5D5
 
 struct pctable
 {
@@ -93,6 +111,7 @@ struct pctable
     iSndFileInfo* info; // sorted by asset id, for iSndLookup
     pcentry* entry; // parallel to info
     bool sorted; // false only if sorting ran out of memory
+    iSndGCTable gc; // a GameCube table's sounds and cutscene tracks; empty for Xbox
 };
 
 static pctable sTables[ISND_MAX_TABLES];
@@ -127,9 +146,17 @@ struct pcslot
     bool held; // waiting for iSndStartStereo
     U32 feedAsset;
     U32 feedFrameBytes;
-    U8 carry[8]; // a frame split across two blocks
+    U8 carry[ISNDDSP_FRAME_BYTES * ISNDDSP_MAX_CHANNELS]; // a frame split across two blocks
     U32 carryBytes;
     U32 fedFrames; // TSSM_SND_METER's track clock
+
+    // A stream or cutscene track of a GameCube table: DSP-ADPCM, decoded with
+    // its history carried from one read to the next.
+    bool dsp;
+    iSndDspChannel dspCh[ISNDDSP_MAX_CHANNELS];
+    iSndDspState dspState;
+    U32 dspLeft; // sample frames still to play (the last block is padded)
+    U32 dspTotal;
 
     // TSSM_SND_DUMP's copy of a fed track.
     S16* dump;
@@ -170,6 +197,16 @@ S32 iSndD0Voices(S32* playing)
 // A stream is kept this far ahead of the mixer, decoded, which covers a game
 // frame of that length; its ring holds twice that.
 #define ISND_STREAM_AHEAD_SEC 3
+// Below this much the stream is filled at once; above it, a game frame decodes
+// at least 1/ISND_STREAM_STEP_DIV of a second more (in whole reads) until it is
+// ISND_STREAM_AHEAD_SEC ahead. A stream's start (music, some voices) used to
+// decode all three seconds in the frame that started it, a hitch of its own
+// (docs/PACING.md); now that frame decodes one second and the next frames a
+// read or so each. The step is counted in sample frames, not reads, because a
+// read's length depends on the format; an eighth of a second outruns a frame
+// at any rate the game runs at.
+#define ISND_STREAM_MUST_SEC 1
+#define ISND_STREAM_STEP_DIV 8
 #define ISND_STREAM_CAPACITY (1U << 19)
 #define ISND_STREAM_BLOCKS 128 // ADPCM blocks per read
 #define ISND_MAX_BLOCK_ALIGN (36 * 8)
@@ -449,6 +486,7 @@ static void iFreeTables()
     {
         free(sTables[i].info);
         free(sTables[i].entry);
+        iSndGCFreeTable(&sTables[i].gc);
     }
 
     memset(sTables, 0, sizeof(sTables));
@@ -590,6 +628,26 @@ static U32 iReadPkg(void* ctx, U32 offset, void* buf, U32 size)
     return iFileRead(file, buf, size);
 }
 
+// The reader iSndGCReadTable is given: the SNDI asset, in place in its
+// package. A GameCube table holds its sound banks (mnuc.HIP's is 131 MB), so
+// it is not read whole.
+struct iGCTableReader
+{
+    iPkgReader pkg;
+    U32 base;
+    U32 size;
+};
+
+static U32 iReadGCTable(void* ctx, U32 offset, void* buf, U32 size)
+{
+    iGCTableReader* r = (iGCTableReader*)ctx;
+    if (offset > r->size || size > r->size - offset)
+    {
+        return 0;
+    }
+    return iReadPkg(&r->pkg, r->base + offset, buf, size);
+}
+
 static const iSndHipAsset* iFindHipAsset(const iSndHipAsset* list, S32 n, U32 aid)
 {
     S32 lo = 0;
@@ -629,7 +687,8 @@ static int iCompareByAid(const void* a, const void* b)
 // of contents, read here: an id can be in several loaded packages at different
 // offsets, and the packer's lookups (xSTGetAssetInfo, xST_xAssetID_HIPFullPath)
 // may answer from two different ones. Every sound a table names is in the
-// table's own package (all 3,356 entries on the disc).
+// table's own package (all 3,356 entries on the Xbox disc); a GameCube table
+// holds its sounds itself.
 static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
 {
     pctable* t = &sTables[index];
@@ -671,27 +730,64 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
         sndiSize = self->size;
     }
 
-    U8* raw = sndiSize != 0 ? (U8*)malloc(sndiSize) : NULL;
-    bool ok = raw != NULL && iReadPkg(&reader, sndiOffset, raw, sndiSize) == sndiSize;
+    // Which release's table: an Xbox one is exactly 12 + 44 * n bytes by its
+    // own counts, a GameCube one starts with the console's header (iSndGC.h).
+    U8 head[0x20];
+    const U32 headBytes = sndiSize < sizeof(head) ? sndiSize : (U32)sizeof(head);
+    const bool headOk =
+        headBytes != 0 && iReadPkg(&reader, sndiOffset, head, headBytes) == headBytes;
+    U32 count = 0;
+    const bool xbox = headOk && headBytes >= sizeof(iSndXboxTable) &&
+                      iSndXboxTableEntries(head, sndiSize, &count) != NULL;
+    const bool gamecube = !xbox && headOk && iSndGCLooksLikeTable(head, headBytes, sndiSize);
+
+    U8* raw = NULL;
+    const iSndXboxEntry* entries = NULL;
+    bool gcOk = false;
+    char why[160];
+    why[0] = '\0';
+
+    if (xbox)
+    {
+        raw = (U8*)malloc(sndiSize);
+        if (raw != NULL && iReadPkg(&reader, sndiOffset, raw, sndiSize) == sndiSize)
+        {
+            entries = iSndXboxTableEntries(raw, sndiSize, &count);
+        }
+    }
+    else if (gamecube)
+    {
+        iGCTableReader gr = { reader, sndiOffset, sndiSize };
+        gcOk = iSndGCReadTable(iReadGCTable, &gr, sndiSize, &t->gc, why, sizeof(why)) &&
+               t->gc.numSounds <= 0xFFFF;
+        count = gcOk ? t->gc.numSounds : 0;
+    }
     iFileClose(&file);
 
-    U32 count = 0;
-    const iSndXboxEntry* entries = ok ? iSndXboxTableEntries(raw, sndiSize, &count) : NULL;
-
-    if (entries == NULL || count > 0xFFFF)
+    if ((entries == NULL && !gcOk) || count > 0xFFFF)
     {
-        printf("iSnd: sound table %08x in %s is not an Xbox SNDI (%u bytes); its sounds are "
-               "silent\n",
-               sndi.aid, t->path, sndiSize);
+        if (gamecube)
+        {
+            printf("iSnd: sound table %08x in %s is a GameCube table the port cannot read (%s); "
+                   "its sounds are silent\n",
+                   sndi.aid, t->path, why[0] != '\0' ? why : "too many sounds");
+        }
+        else
+        {
+            printf("iSnd: sound table %08x in %s is not an Xbox or GameCube SNDI (%u bytes); its "
+                   "sounds are silent\n",
+                   sndi.aid, t->path, sndiSize);
+        }
         fflush(stdout);
         free(raw);
         free(assets);
+        iSndGCFreeTable(&t->gc);
         memset(t, 0, sizeof(*t));
         return false;
     }
 
     t->count = count;
-    t->numSfx = ((const iSndXboxTable*)raw)->num_sfx;
+    t->numSfx = gcOk ? count - t->gc.numStreams : ((const iSndXboxTable*)raw)->num_sfx;
     t->info = (iSndFileInfo*)calloc(count != 0 ? count : 1, sizeof(iSndFileInfo));
     t->entry = (pcentry*)calloc(count != 0 ? count : 1, sizeof(pcentry));
     U16* order = (U16*)malloc(sizeof(U16) * (count != 0 ? count : 1));
@@ -703,6 +799,7 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
         free(order);
         free(raw);
         free(assets);
+        iSndGCFreeTable(&t->gc);
         memset(t, 0, sizeof(*t));
         return false;
     }
@@ -711,15 +808,42 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
     for (U32 k = 0; k < count; k++)
     {
         pcentry* e = &t->entry[k];
-        e->fmt = entries[k];
 
-        const iSndHipAsset* a =
-            nAssets > 0 ? iFindHipAsset(assets, nAssets, entries[k].assetID) : NULL;
-        if (a != NULL && a->type != 'SNDI')
+        if (gcOk)
         {
-            e->offset = a->offset;
-            e->size = a->size;
+            // An entry made up from the GameCube sound, so that what reads
+            // entries (the reports, the self test) has its rate and channels.
+            const iSndGCSound* g = &t->gc.sounds[k];
+            memset(&e->fmt, 0, sizeof(e->fmt));
+            e->fmt.format_tag = ISND_FORMAT_GCDSP;
+            e->fmt.channels = g->channels;
+            e->fmt.samples_per_sec = g->rate;
+            e->fmt.block_align = (U16)(ISNDDSP_FRAME_BYTES * g->channels);
+            e->fmt.bits_per_sample = 4;
+            e->fmt.data_size = g->size;
+            e->fmt.assetID = g->assetID;
+            e->fmt.loop_flag = g->flags & 0x1;
+            e->flags = g->flags & 0x3;
+            e->gc = g;
+
+            // The samples are inside the table itself.
+            e->offset = sndiOffset + g->offset;
+            e->size = g->size;
             located++;
+        }
+        else
+        {
+            e->fmt = entries[k];
+            e->flags = (k >= t->numSfx ? 0x2 : 0) | (entries[k].loop_flag != 0 ? 0x1 : 0);
+
+            const iSndHipAsset* a =
+                nAssets > 0 ? iFindHipAsset(assets, nAssets, entries[k].assetID) : NULL;
+            if (a != NULL && a->type != 'SNDI')
+            {
+                e->offset = a->offset;
+                e->size = a->size;
+                located++;
+            }
         }
 
         order[k] = (U16)k;
@@ -739,8 +863,7 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
 
             iSndFileInfo* fi = &t->info[k];
             fi->uAssetID = sorted[k].fmt.assetID;
-            fi->uFlags =
-                (order[k] >= t->numSfx ? 0x2 : 0) | (sorted[k].fmt.loop_flag != 0 ? 0x1 : 0);
+            fi->uFlags = sorted[k].flags;
             fi->uTableIndex = (U8)index;
             fi->uEntryIndex = (U16)k;
         }
@@ -756,7 +879,7 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
         {
             iSndFileInfo* fi = &t->info[k];
             fi->uAssetID = t->entry[k].fmt.assetID;
-            fi->uFlags = (k >= t->numSfx ? 0x2 : 0) | (t->entry[k].fmt.loop_flag != 0 ? 0x1 : 0);
+            fi->uFlags = t->entry[k].flags;
             fi->uTableIndex = (U8)index;
             fi->uEntryIndex = (U16)k;
         }
@@ -764,8 +887,13 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
 
     if (sReportTables)
     {
-        printf("iSnd: table %08x from %s: %u sounds, %u streams; %u of them in the package\n",
-               sndi.aid, t->path, t->numSfx, count - t->numSfx, located);
+        printf("iSnd: table %08x from %s: %u sounds, %u streams; %u of them in the package%s\n",
+               sndi.aid, t->path, t->numSfx, count - t->numSfx, located,
+               gcOk ? " (a GameCube table)" : "");
+        if (gcOk && t->gc.numCutscene != 0)
+        {
+            printf("iSnd:   and %u cutscene track(s)\n", t->gc.numCutscene);
+        }
         fflush(stdout);
     }
 
@@ -773,6 +901,33 @@ static bool iLoadTable(U32 index, const PKRAssetTOCInfo& sndi)
     free(raw);
     free(assets);
     return true;
+}
+
+// A sound's length in sample frames, from its table entry alone.
+static U32 iEntryFrames(const pcentry* e)
+{
+    if (e == NULL)
+    {
+        return 0;
+    }
+    return e->gc != NULL ? e->gc->samples : iSndXboxFrames(&e->fmt);
+}
+
+// A GameCube table's cutscene track of that id, or NULL.
+static const iSndGCCutscene* iFindGCCutscene(U32 id)
+{
+    for (U32 i = 0; i < sTableCount; i++)
+    {
+        const iSndGCTable* g = &sTables[i].gc;
+        for (U32 j = 0; j < g->numCutscene; j++)
+        {
+            if (g->cutscenes[j].assetID == id)
+            {
+                return &g->cutscenes[j];
+            }
+        }
+    }
+    return NULL;
 }
 
 // TSSM_SND_TEST: the game's whole sound path, once, on the first tables
@@ -846,7 +1001,7 @@ static void iSndSelfTest(S32 seconds)
             picks[n].aid = e->fmt.assetID;
             picks[n].stream = c == 1;
             picks[n].expect = e->fmt.samples_per_sec != 0 ?
-                                  (F32)iSndXboxFrames(&e->fmt) / (F32)e->fmt.samples_per_sec :
+                                  (F32)iEntryFrames(e) / (F32)e->fmt.samples_per_sec :
                                   0.0f;
             picks[n].handle = (iSndHandle)-1;
             picks[n].endNs = 0;
@@ -1137,7 +1292,7 @@ xSndVoiceInfo* iSndGetFreeVoiceInfo(U32 priority, U32 flags)
 }
 
 static void iReport(const xSndVoiceInfo* vp, const char* kind, const pcentry* e, U32 frames,
-                    bool looping, bool nodata)
+                    bool looping, bool nodata, U32 rate = 0, U32 channels = 0)
 {
     if (sReportPlays <= 0)
     {
@@ -1146,8 +1301,8 @@ static void iReport(const xSndVoiceInfo* vp, const char* kind, const pcentry* e,
 
     sReportPlays--;
     printf("iSnd: play %08x %-8s %5u Hz %u ch %8u frames%s%s cat %d vol %.2f pitch %+.2f%s\n",
-           vp->assetID, kind, e != NULL ? e->fmt.samples_per_sec : 0,
-           e != NULL ? e->fmt.channels : 0, frames, looping ? " loop" : "",
+           vp->assetID, kind, e != NULL ? e->fmt.samples_per_sec : rate,
+           e != NULL ? e->fmt.channels : channels, frames, looping ? " loop" : "",
            (vp->flags & 0x8000) ? " 3d" : "", vp->category, vp->vol, vp->xpitch,
            nodata ? "  NO DATA (silent, timed)" : "");
     if (sReportPlays == 0)
@@ -1210,6 +1365,7 @@ bool iSndPlay(xSndVoiceInfo* vp)
     src.block_align = e->fmt.block_align;
     src.bits = e->fmt.bits_per_sample;
     src.sample_rate = e->fmt.samples_per_sec;
+    src.gc = e->gc;
 
     U32 bytes = 0;
     const void* data = iSndDataAcquire(vp->assetID, &src, &bytes);
@@ -1228,7 +1384,7 @@ bool iSndPlay(xSndVoiceInfo* vp)
     sample.bits = 16;
     sample.sample_rate = e->fmt.samples_per_sec;
     sample.looping = looping;
-    sample.num_samples = data != NULL ? bytes / (2 * src.channels) : iSndXboxFrames(&e->fmt);
+    sample.num_samples = data != NULL ? bytes / (2 * src.channels) : iEntryFrames(e);
 
     vp->ps.channel = i;
 
@@ -1248,15 +1404,24 @@ bool iSndPlay(xSndVoiceInfo* vp)
 // held until the cutscene's first frame (iSndStartStereo).
 static bool iPlayCutscene(S32 i, xSndVoiceInfo* vp)
 {
+    // An Xbox table's 16-bit PCM entry, or a GameCube table's DSP-ADPCM header
+    // (gc/iSnd.cpp's iSndFindCutsceneHeader).
     pcentry* e = iFindEntry(vp->assetID);
+    const iSndGCCutscene* gct = NULL;
     if (e == NULL || e->fmt.format_tag != ISNDXBOX_FORMAT_PCM || e->fmt.bits_per_sample != 16)
+    {
+        e = NULL;
+        gct = iFindGCCutscene(vp->assetID);
+    }
+
+    if (e == NULL && gct == NULL)
     {
         // The console fails the play too when the track has no header.
         if (!sSaidNoTrack)
         {
             sSaidNoTrack = true;
-            printf("iSnd: cutscene track %08x is not in a loaded sound table as 16-bit PCM; the "
-                   "cutscene is silent\n",
+            printf("iSnd: cutscene track %08x is not in a loaded sound table as 16-bit PCM or "
+                   "GameCube DSP-ADPCM; the cutscene is silent\n",
                    vp->assetID);
             fflush(stdout);
         }
@@ -1270,7 +1435,8 @@ static bool iPlayCutscene(S32 i, xSndVoiceInfo* vp)
     }
 
     pcslot* s = &sSlots[i];
-    U32 channels = e->fmt.channels != 0 ? e->fmt.channels : 1;
+    U32 channels = gct != NULL ? 1 : (e->fmt.channels != 0 ? e->fmt.channels : 1);
+    U32 rate = gct != NULL ? gct->rate : e->fmt.samples_per_sec;
 
     s->host = host;
     s->feed = true;
@@ -1278,8 +1444,19 @@ static bool iPlayCutscene(S32 i, xSndVoiceInfo* vp)
     s->feedAsset = vp->assetID;
     s->feedFrameBytes = 2 * channels;
     s->channels = channels;
-    s->dumpRate = e->fmt.samples_per_sec;
+    s->dumpRate = rate;
     s->fedFrames = 0;
+
+    if (gct != NULL)
+    {
+        // A GameCube track is one channel of DSP-ADPCM (FSOUND_MONO), decoded
+        // across the chunks with its history carried.
+        s->dsp = true;
+        s->dspCh[0] = gct->ch;
+        iSndDspReset(&s->dspState, s->dspCh, 1, false);
+        s->dspLeft = gct->samples;
+        s->dspTotal = gct->samples;
+    }
 
     vp->ps.channel = i;
 
@@ -1288,9 +1465,10 @@ static bool iPlayCutscene(S32 i, xSndVoiceInfo* vp)
     iApplyPitch(i, vp->xpitch);
     iApplyMix(i, vp->vol);
     iApplySend(i);
-    iSndHostStartFeed(host, channels, e->fmt.samples_per_sec, ISND_FEED_CAPACITY, true);
+    iSndHostStartFeed(host, channels, rate, ISND_FEED_CAPACITY, true);
 
-    iReport(vp, "cutscene", e, iSndXboxFrames(&e->fmt), false, false);
+    iReport(vp, "cutscene", e, e != NULL ? iEntryFrames(e) : gct->samples, false, false, rate,
+            channels);
     return TRUE;
 }
 
@@ -1336,20 +1514,30 @@ static void iPumpStream(S32 i)
 
     U32 ch = s->feedFrameBytes / 2;
     U32 ahead = s->rate * ISND_STREAM_AHEAD_SEC;
+    U32 must = s->rate * ISND_STREAM_MUST_SEC;
+    U32 step = s->rate / ISND_STREAM_STEP_DIV;
+    U32 fed = 0;
 
     for (S32 guard = 0; guard < 256; guard++)
     {
-        if (iSndHostFeedQueued(s->host) >= ahead)
+        U32 queued = iSndHostFeedQueued(s->host);
+        if (queued >= ahead || (queued >= must && fed >= step))
         {
             return;
         }
 
-        if (s->srcPos >= s->srcSize)
+        if (s->srcPos >= s->srcSize || (s->dsp && s->dspLeft == 0))
         {
             if (s->looping && s->srcSize >= s->blockAlign)
             {
                 s->srcPos = 0;
                 s->dumpWrapped = true;
+                if (s->dsp)
+                {
+                    // The DSP goes back to the loop's own history.
+                    iSndDspReset(&s->dspState, s->dspCh, ch, true);
+                    s->dspLeft = s->dspTotal;
+                }
             }
             else
             {
@@ -1359,7 +1547,12 @@ static void iPumpStream(S32 i)
             }
         }
 
-        U32 want = ISND_STREAM_BLOCKS * s->blockAlign;
+        // DSP-ADPCM blocks are small (8 bytes a channel), and 16-bit PCM's are
+        // one sample frame, so a read of either takes as many as the buffers
+        // hold.
+        const bool small = s->dsp || s->formatTag != ISNDXBOX_FORMAT_ADPCM;
+        U32 want = small ? (U32)sizeof(sStreamRead) / s->blockAlign * s->blockAlign :
+                           ISND_STREAM_BLOCKS * s->blockAlign;
         if (want > s->srcSize - s->srcPos)
         {
             want = s->srcSize - s->srcPos;
@@ -1378,7 +1571,18 @@ static void iPumpStream(S32 i)
         s->srcPos += want;
 
         U32 frames = 0;
-        if (s->formatTag == ISNDXBOX_FORMAT_ADPCM)
+        if (s->dsp)
+        {
+            frames = iSndDspDecode(sStreamRead, want, ch, s->dspCh, &s->dspState, sStreamPcm,
+                                   want / s->blockAlign);
+            // The last block's padding is not played.
+            if (frames > s->dspLeft)
+            {
+                frames = s->dspLeft;
+            }
+            s->dspLeft -= frames;
+        }
+        else if (s->formatTag == ISNDXBOX_FORMAT_ADPCM)
         {
             frames = iSndXboxDecodeAdpcmBlocks(sStreamRead, want, ch, s->blockAlign, sStreamPcm,
                                                ISND_STREAM_BLOCKS);
@@ -1389,6 +1593,7 @@ static void iPumpStream(S32 i)
             memcpy(sStreamPcm, sStreamRead, (size_t)frames * s->feedFrameBytes);
         }
 
+        fed += frames;
         iSndHostFeed(s->host, sStreamPcm, frames);
         iSndMeterS16(iSNDMETER_STREAM, sStreamPcm, frames, ch);
         if (!s->dumpWrapped)
@@ -1404,12 +1609,14 @@ static bool iPlayStream(S32 i, xSndVoiceInfo* vp, S32 host, const pcentry* e, bo
 {
     pctable* t = iTableOf(vp->pSndFileInfo);
     U32 ch = e->fmt.channels != 0 ? e->fmt.channels : 1;
-    bool adpcm = e->fmt.format_tag == ISNDXBOX_FORMAT_ADPCM;
-    bool pcm16 = e->fmt.format_tag == ISNDXBOX_FORMAT_PCM && e->fmt.bits_per_sample == 16;
-    U32 align = adpcm ? e->fmt.block_align : 2 * ch;
+    bool dsp = e->gc != NULL;
+    bool adpcm = !dsp && e->fmt.format_tag == ISNDXBOX_FORMAT_ADPCM;
+    bool pcm16 = !dsp && e->fmt.format_tag == ISNDXBOX_FORMAT_PCM && e->fmt.bits_per_sample == 16;
+    U32 align = dsp ? ISNDDSP_FRAME_BYTES * ch : (adpcm ? e->fmt.block_align : 2 * ch);
 
-    if (t == NULL || e->size == 0 || ch > 8 || (!adpcm && !pcm16) || align == 0 ||
-        align > ISND_MAX_BLOCK_ALIGN || (adpcm && (align % ch != 0 || align / ch < 5)))
+    if (t == NULL || e->size == 0 || ch > 8 || (!adpcm && !pcm16 && !dsp) || align == 0 ||
+        align > ISND_MAX_BLOCK_ALIGN || (adpcm && (align % ch != 0 || align / ch < 5)) ||
+        (dsp && ch > ISNDDSP_MAX_CHANNELS))
     {
         return false;
     }
@@ -1435,6 +1642,15 @@ static bool iPlayStream(S32 i, xSndVoiceInfo* vp, S32 host, const pcentry* e, bo
     s->rate = e->fmt.samples_per_sec != 0 ? e->fmt.samples_per_sec : 44100;
     s->dumpRate = s->rate;
 
+    if (dsp)
+    {
+        s->dsp = true;
+        memcpy(s->dspCh, e->gc->ch, sizeof(s->dspCh));
+        iSndDspReset(&s->dspState, s->dspCh, ch, false);
+        s->dspLeft = e->gc->samples;
+        s->dspTotal = e->gc->samples;
+    }
+
     vp->ps.channel = i;
 
     iApplyPitch(i, vp->xpitch);
@@ -1443,8 +1659,63 @@ static bool iPlayStream(S32 i, xSndVoiceInfo* vp, S32 host, const pcentry* e, bo
     iSndHostStartFeed(host, ch, s->rate, ISND_STREAM_CAPACITY, false);
     iPumpStream(i);
 
-    iReport(vp, "stream", e, iSndXboxFrames(&e->fmt), looping, false);
+    iReport(vp, "stream", e, iEntryFrames(e), looping, false);
     return true;
+}
+
+// A block of a GameCube cutscene track: DSP-ADPCM, decoded into the voice's
+// ring with the history carried on from the block before. A frame split
+// across two blocks is carried over (none is on the disc: every SOUND record
+// is whole frames). The padding of the last frame is not played.
+static void iFeedDsp(pcslot* s, const U8* p, U32 size)
+{
+    const U32 frame = ISNDDSP_FRAME_BYTES; // one channel
+    const U32 most = (U32)(sizeof(sStreamPcm) / sizeof(sStreamPcm[0])) / ISNDDSP_FRAME_SAMPLES;
+
+    if (s->carryBytes != 0 && size != 0)
+    {
+        U32 take = frame - s->carryBytes;
+        if (take > size)
+        {
+            take = size;
+        }
+        memcpy(s->carry + s->carryBytes, p, take);
+        s->carryBytes += take;
+        p += take;
+        size -= take;
+
+        if (s->carryBytes == frame)
+        {
+            U32 n = iSndDspDecode(s->carry, frame, 1, s->dspCh, &s->dspState, sStreamPcm, 1);
+            n = n < s->dspLeft ? n : s->dspLeft;
+            s->dspLeft -= n;
+            iSndHostFeed(s->host, sStreamPcm, n);
+            iDumpFeed(s, sStreamPcm, n);
+            s->carryBytes = 0;
+        }
+    }
+
+    while (size >= frame && s->dspLeft != 0)
+    {
+        U32 blocks = size / frame;
+        if (blocks > most)
+        {
+            blocks = most;
+        }
+        U32 n = iSndDspDecode(p, blocks * frame, 1, s->dspCh, &s->dspState, sStreamPcm, blocks);
+        n = n < s->dspLeft ? n : s->dspLeft;
+        s->dspLeft -= n;
+        iSndHostFeed(s->host, sStreamPcm, n);
+        iDumpFeed(s, sStreamPcm, n);
+        p += blocks * frame;
+        size -= blocks * frame;
+    }
+
+    if (size != 0 && size < frame && s->dspLeft != 0)
+    {
+        memcpy(s->carry, p, size);
+        s->carryBytes = size;
+    }
 }
 
 // Copies whatever the cutscene has read of this track into the voice's ring.
@@ -1468,6 +1739,12 @@ static void iPumpFeed(S32 i)
         if (p == NULL)
         {
             return;
+        }
+
+        if (s->dsp)
+        {
+            iFeedDsp(s, p, size);
+            continue;
         }
 
         // A frame split across two blocks is carried over.
@@ -1790,10 +2067,18 @@ static void iReportMix()
             continue;
         }
 
+        // A stream's decoded lead over the mixer (iPumpStream).
+        char ahead[32] = "";
+        if (s->stream && s->rate != 0)
+        {
+            snprintf(ahead, sizeof(ahead), " %.2f s ahead",
+                     (double)iSndHostFeedQueued(s->host) / (double)s->rate);
+        }
+
         xSndVoiceInfo* vp = &gSnd.voice[i];
-        printf("iSnd:   [%2d] %08x cat %d vol %.2f flags %08x %s%s%s%s\n", i, vp->assetID,
+        printf("iSnd:   [%2d] %08x cat %d vol %.2f flags %08x %s%s%s%s%s\n", i, vp->assetID,
                vp->category, vp->vol, vp->flags, iSndHostIsPlaying(s->host) ? "playing" : "ended",
-               s->feed ? " cutscene" : (s->stream ? " stream" : ""), s->held ? " held" : "",
+               s->feed ? " cutscene" : (s->stream ? " stream" : ""), ahead, s->held ? " held" : "",
                s->paused ? " paused" : "");
     }
 

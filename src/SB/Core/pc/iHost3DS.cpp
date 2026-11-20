@@ -322,6 +322,16 @@ S32 iHostClaimInstance(const char*, U32* holder)
     return 1;
 }
 
+bool iHostInstanceHeld(const char*, U32* holder)
+{
+    // Never another copy (iHostClaimInstance).
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+    return false;
+}
+
 S32 iHostRaiseProcessWindow(U32)
 {
     return 0;

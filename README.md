@@ -21,14 +21,15 @@ screen.
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
-  for the New 3DS: `TSSM-Dehydrated-0.9.2-3DS.3dsx` and `TSSM-Dehydrated-0.9.2-3DS.cia`.
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.4
+  for the New 3DS: `TSSM-Dehydrated-0.9.4-3DS.3dsx` and `TSSM-Dehydrated-0.9.4-3DS.cia`.
   They are this branch, built under that neutral name with the port's own icon, banner and
   chime, and have no game data. Install them as `tssm.3dsx` and `tssm.cia` below (the
-  .3dsx renamed to `tssm.3dsx`). Install 0.9.2 by hand once; from then on it can update
-  itself when you ask: settings menu (START + SELECT), Settings tab, *Updates* at the
-  bottom, *Check for updates*. `docs/3DS.md` ("Updates", and "Building the TSSM Dehydrated
-  release" for the exact commands) has the details.
+  .3dsx renamed to `tssm.3dsx`). Install 0.9.4 by hand once, also over 0.9.2: 0.9.2's
+  updater cannot reach GitHub on a real 3DS. From 0.9.4 on it can update itself when you
+  ask: settings menu (START + SELECT), Settings tab, *Updates* at the bottom, *Check for
+  updates*. `docs/3DS.md` ("Updates", and "Building the TSSM Dehydrated release" for the
+  exact commands) has the details.
 - **Build it yourself** from this source, as below. A build of your own is called *The
   SpongeBob SquarePants Movie Video Game*, and can make its HOME Menu icon and its
   animated Patty Wagon banner from your own game files (step 6 below). It has no updater

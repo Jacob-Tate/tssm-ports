@@ -6,6 +6,7 @@
 // the iHost seam's 3DS spelling is iHost3DS.cpp, which uses these.
 // docs/3DS.md is the player's and the tester's side of it.
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -55,6 +56,31 @@ const char* i3DSAddress();
 // The SOC service up (socInit with its memory block), for the updater's
 // connections: nonzero once it is. Starts no log server. Any thread.
 int i3DSNetStart();
+
+// A non-blocking connect() is asked again with a second connect() on the
+// same socket once poll counts it writable; SO_ERROR cannot tell on the
+// console: libctru hands the SOC service's own number back unmapped, and it
+// stays -26 (EINPROGRESS) after the connection is up (libctru issue #412).
+// What one connect() call said (its return, and errno when that is not 0):
+// up (0 or EISCONN), waiting (EINPROGRESS, EALREADY, EAGAIN) or failed
+// (anything else; errno says why). The service's own numbers for the same
+// codes (-30, -26, -7, -6) count alike, should one come back unmapped.
+static const int k3DSConnectFailed = -1;
+static const int k3DSConnectWaiting = 0;
+static const int k3DSConnectUp = 1;
+static inline int i3DSConnectState(int rc, int err)
+{
+    if (rc == 0 || err == EISCONN || err == -30)
+    {
+        return k3DSConnectUp;
+    }
+    if (err == EINPROGRESS || err == EALREADY || err == EAGAIN || err == EWOULDBLOCK ||
+        err == -26 || err == -7 || err == -6)
+    {
+        return k3DSConnectWaiting;
+    }
+    return k3DSConnectFailed;
+}
 
 // How many times the console has gone to sleep since the game started (the
 // APT hook counts them). Any thread.

@@ -6,6 +6,7 @@
 #include "iConfigTable.h"
 #include "iHost.h"
 #include "iPadHost.h"
+#include "iMouseLook.h"
 #include "iPadKeyboard.h"
 #include "iPadLayout.h"
 #include "iPadPrompts.h"
@@ -403,5 +404,5 @@ void iPadControlsGetLive(iPadControlsLive* out)
 
 void iPadControlsSetMouseCapture(bool allowed)
 {
-    iPadKeyboardSetMouseCapture(allowed);
+    iMouseLookAllow(allowed);
 }

@@ -10,11 +10,29 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 namespace
 {
     iPadSettings sSettings = {
-        IPAD_KEYBOARD_ALWAYS, IPAD_CURVE_XBOX, 0.30f, -1.0f, 1.0f, 0, 0, 1, 1.0f, 1.0f, IPAD_TEST_OFF,
+        IPAD_KEYBOARD_ALWAYS,
+        IPAD_CURVE_XBOX,
+        0.30f,
+        -1.0f,
+        1.0f,
+        0,
+        0,
+        1,
+        1.0f,
+        1.0f,
+        0,
+        0,
+        1,
+        0.0f,
+        "f2",
+        1,
+        1.0f,
+        IPAD_TEST_OFF,
     };
 
     F32 clampf(F32 v, F32 lo, F32 hi)
@@ -76,8 +94,26 @@ void iPadSettingsLoad()
     s.camera_invert_x = iConfigGetBool("input.camera_invert_x", FALSE);
     s.camera_invert_y = iConfigGetBool("input.camera_invert_y", FALSE);
 
-    s.mouse_camera = iConfigGetBool("input.mouse_camera", TRUE);
-    s.mouse_sensitivity = clampf(iConfigGetFloat("input.mouse_sensitivity", 1.0f), 0.05f, 20.0f);
+    s.mouse_look = iConfigGetBool("input.mouse_look", TRUE);
+    s.mouse_sensitivity_x =
+        clampf(iConfigGetFloat("input.mouse_sensitivity_x", 1.0f), 0.05f, 20.0f);
+    // "same" (the default) follows left/right.
+    const char* sy = iConfigGetString("input.mouse_sensitivity_y", "same");
+    char* syEnd = NULL;
+    F32 syValue = (F32)strtod(sy, &syEnd);
+    s.mouse_sensitivity_y = (syEnd == sy) ? s.mouse_sensitivity_x : clampf(syValue, 0.05f, 20.0f);
+    s.mouse_invert_x = iConfigGetBool("input.mouse_invert_x", FALSE);
+    s.mouse_invert_y = iConfigGetBool("input.mouse_invert_y", FALSE);
+    s.mouse_raw = iConfigGetBool("input.mouse_raw", TRUE);
+    s.mouse_smoothing =
+        clampf(iConfigGetFloat("input.mouse_smoothing", 0.0f), 0.0f, 200.0f) * 0.001f;
+    const char* release = iConfigGetString("input.mouse_release_key", "f2");
+    if (iHostStrCaseCmp(release, "none") == 0)
+    {
+        release = "";
+    }
+    snprintf(s.mouse_release_key, sizeof(s.mouse_release_key), "%s", release);
+    s.mouse_menus = iConfigGetBool("input.mouse_menus", TRUE);
 
     s.rumble = clampf(iConfigGetFloat("input.rumble", 100.0f), 0.0f, 100.0f) * 0.01f;
 

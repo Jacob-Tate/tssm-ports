@@ -114,4 +114,12 @@ void iDeviceResetSetReleaseHook(void (*release)());
 // camera update or present. TRUE on every other backend.
 bool iDeviceUsable();
 
+// A count that moves whenever what is in D3DPOOL_DEFAULT may have been lost --
+// the device found lost or resettable at a camera update or present, or a
+// camera update that lets librw reset or resize -- so a camera texture drawn
+// before it is no longer to be trusted (the Xbox water's early targets,
+// iXboxWater.h). It moves more often than a reset happens, never less. 0, and
+// still, on every other backend.
+unsigned iDeviceResetEpoch();
+
 #endif

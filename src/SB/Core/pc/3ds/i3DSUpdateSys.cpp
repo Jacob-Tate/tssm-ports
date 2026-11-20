@@ -226,7 +226,10 @@ namespace
         }
     }
 
-    // A non-blocking connect, waited for in naps.
+    // A non-blocking connect, waited for in naps: when poll counts the socket
+    // writable, and once more when the wait runs out, a second connect() says
+    // whether it is up (i3DSConnectState; the console's SO_ERROR cannot). Only
+    // poll's count is read: libctru's POLL* bits are not the console's.
     int Connect(i3DSTls* t, const struct sockaddr* addr, socklen_t len, char* detail,
                 size_t detailSize)
     {
@@ -242,44 +245,83 @@ namespace
         }
         if (fcntl(t->fd, F_SETFL, O_NONBLOCK) < 0)
         {
-            Say(detail, detailSize, "fcntl: errno %d", errno);
+            // libctru's fcntl leaves its errno negative.
+            Say(detail, detailSize, "fcntl: errno %d", abs(errno));
             return k3DSNetError;
         }
-        if (connect(t->fd, addr, len) != 0 && errno != EINPROGRESS && errno != EALREADY &&
-            !WouldBlock())
+        char ip[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &((const struct sockaddr_in*)addr)->sin_addr, ip, sizeof(ip)) == NULL)
         {
-            Say(detail, detailSize, "connect: errno %d", errno);
-            return k3DSNetConnect;
+            snprintf(ip, sizeof(ip), "?");
         }
         const uint64_t since = NowMs();
-        while (true)
+        int rc = connect(t->fd, addr, len);
+        int err = rc == 0 ? 0 : errno;
+        int state = i3DSConnectState(rc, err);
+        int asked = 0;
+        while (state == k3DSConnectWaiting)
         {
             struct pollfd pfd = { t->fd, POLLOUT, 0 };
             const int ready = poll(&pfd, 1, 0);
-            if (ready == 1)
-            {
-                int err = -1;
-                socklen_t errLen = sizeof(err);
-                if (getsockopt(t->fd, SOL_SOCKET, SO_ERROR, &err, &errLen) != 0 || err != 0)
-                {
-                    Say(detail, detailSize, "connect: error %d", err);
-                    return k3DSNetConnect;
-                }
-                return k3DSNetOk;
-            }
             if (ready < 0)
             {
                 Say(detail, detailSize, "poll: errno %d", errno);
                 return k3DSNetConnect;
             }
+            if (ready == 1)
+            {
+                rc = connect(t->fd, addr, len);
+                err = rc == 0 ? 0 : errno;
+                state = i3DSConnectState(rc, err);
+                asked++;
+                if (state != k3DSConnectWaiting)
+                {
+                    break;
+                }
+            }
             const int why = Nap(t, since);
+            if (why == k3DSNetTimeout)
+            {
+                // One last connect(): the console's poll may never count a
+                // failed connect (libctru issue #412), and this one says why.
+                rc = connect(t->fd, addr, len);
+                err = rc == 0 ? 0 : errno;
+                state = i3DSConnectState(rc, err);
+                asked++;
+                if (state != k3DSConnectWaiting)
+                {
+                    break;
+                }
+            }
             if (why != k3DSNetOk)
             {
-                Say(detail, detailSize, "connect: %s",
-                    why == k3DSNetTimeout ? "timed out" : "stopped");
+                Say(detail, detailSize, "connect to %s: %s after %llu ms", ip,
+                    why == k3DSNetTimeout ? "timed out" : "stopped",
+                    (unsigned long long)(NowMs() - since));
                 return why;
             }
         }
+        const unsigned long long ms = NowMs() - since;
+        if (state == k3DSConnectFailed)
+        {
+            const char* words = strerror(err);
+            Say(detail, detailSize, "connect to %s: %s (errno %d) after %llu ms", ip,
+                words != NULL && words[0] != '\0' ? words : "unknown error", err, ms);
+            return k3DSNetConnect;
+        }
+        char said[32];
+        if (rc == 0)
+        {
+            snprintf(said, sizeof(said), "0");
+        }
+        else
+        {
+            snprintf(said, sizeof(said), "errno %d%s", err, err == EISCONN ? " (EISCONN)" : "");
+        }
+        printf("tssm: update: 3ds: connected to %s in %llu ms (connect() asked again %d time(s), "
+               "the last said %s)\n",
+               ip, ms, asked, said);
+        return k3DSNetOk;
     }
 
     // The handshake's failure as the core names it, with the details.

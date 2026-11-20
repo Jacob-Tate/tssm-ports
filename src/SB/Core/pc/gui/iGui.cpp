@@ -26,6 +26,7 @@
 #include "gui/iGuiRender.h"
 
 #include "iConfig.h"
+#include "iHost.h"
 #include "iPadControls.h"
 #include "iPadHost.h"
 #include "iScreen.h"
@@ -49,18 +50,9 @@ void iGuiSelfTestRun(S32 frames);
 
 namespace
 {
-    enum
-    {
-        TAB_SETTINGS,
-        TAB_CONTROLS,
-        TAB_SAVES,
-        TAB_MODS,
-        TAB_ABOUT,
-        TAB_COUNT
-    };
-
-    const char* const kTabNames[TAB_COUNT] = { "settings", "controls", "saves", "mods", "about" };
-    const char* const kTabLabels[TAB_COUNT] = { "Settings", "Controls", "Saves", "Mods", "About" };
+    // The tabs are iGui::TabAt's (gui/iGuiTabs.cpp), shared with the launcher;
+    // TSSM_GUI_TAB's list holds at most this many.
+    const S32 kMaxTabList = 16;
 
     ImGuiContext* sContext;
     SDL_Window* sWindow;
@@ -174,7 +166,7 @@ namespace
     bool sCycleTabs;
     S32 sCaptureTab = -1;
     // TSSM_GUI_TAB as a list ("saves,mods"), captured in that order.
-    S32 sTabList[TAB_COUNT];
+    S32 sTabList[kMaxTabList];
     S32 sTabListCount;
     S32 sTabListPos;
     // TSSM_GUI_OPEN_AT: open at this present instead of at startup, so a
@@ -217,33 +209,6 @@ namespace
     void SetOpen(bool open);
     void ReadConfig();
     void UpdateScale();
-
-    // The controllers the input backend has open, handed to ImGui's SDL3
-    // backend so it navigates with them without opening or closing anything
-    // itself (its "manual" mode). Refreshed every frame the overlay is open,
-    // which is what picks up a controller plugged in meanwhile.
-    void UpdateGamepads()
-    {
-        SDL_Gamepad* pads[8];
-        int count = 0;
-
-        int n = 0;
-        SDL_JoystickID* ids = SDL_GetGamepads(&n);
-        if (ids != NULL)
-        {
-            for (int i = 0; i < n && count < 8; i++)
-            {
-                SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
-                if (pad != NULL)
-                {
-                    pads[count++] = pad;
-                }
-            }
-            SDL_free(ids);
-        }
-
-        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, pads, count);
-    }
 
     // Back and Start held together on any open controller. The physical
     // buttons, not the game's bindings: rebinding Start to something else must
@@ -599,9 +564,10 @@ namespace
 
     void CapturePathFor(S32 tab, char* out, size_t size)
     {
+        const char* name = iGui::TabAt(tab).name;
         if (strstr(sCapturePattern, "%s") != NULL)
         {
-            snprintf(out, size, sCapturePattern, kTabNames[tab]);
+            snprintf(out, size, sCapturePattern, name);
             return;
         }
 
@@ -615,12 +581,12 @@ namespace
         const char* dot = strrchr(sCapturePattern, '.');
         if (dot == NULL)
         {
-            snprintf(out, size, "%s_%s.png", sCapturePattern, kTabNames[tab]);
+            snprintf(out, size, "%s_%s.png", sCapturePattern, name);
         }
         else
         {
-            snprintf(out, size, "%.*s_%s%s", (int)(dot - sCapturePattern), sCapturePattern,
-                     kTabNames[tab], dot);
+            snprintf(out, size, "%.*s_%s%s", (int)(dot - sCapturePattern), sCapturePattern, name,
+                     dot);
         }
     }
 
@@ -632,7 +598,7 @@ namespace
         {
             if (SDL_strcasecmp(tab, "all") == 0)
             {
-                for (S32 i = 0; i < TAB_COUNT; i++)
+                for (S32 i = 0; i < iGui::TabCount() && sTabListCount < kMaxTabList; i++)
                 {
                     sTabList[sTabListCount++] = i;
                 }
@@ -640,16 +606,14 @@ namespace
             else
             {
                 const char* c = tab;
-                while (*c != '\0' && sTabListCount < TAB_COUNT)
+                while (*c != '\0' && sTabListCount < kMaxTabList)
                 {
                     const char* comma = strchr(c, ',');
                     const size_t len = comma != NULL ? (size_t)(comma - c) : strlen(c);
-                    for (S32 i = 0; i < TAB_COUNT; i++)
+                    const S32 i = iGui::TabFind(c, len);
+                    if (i >= 0)
                     {
-                        if (strlen(kTabNames[i]) == len && SDL_strncasecmp(c, kTabNames[i], len) == 0)
-                        {
-                            sTabList[sTabListCount++] = i;
-                        }
+                        sTabList[sTabListCount++] = i;
                     }
                     c = comma != NULL ? comma + 1 : c + len;
                 }
@@ -832,12 +796,10 @@ namespace
             }
             else if (strncmp(s.action, "tab:", 4) == 0)
             {
-                for (S32 t = 0; t < TAB_COUNT; t++)
+                const S32 t = iGui::TabFind(s.action + 4, strlen(s.action + 4));
+                if (t >= 0)
                 {
-                    if (SDL_strcasecmp(s.action + 4, kTabNames[t]) == 0)
-                    {
-                        sSelectTab = t;
-                    }
+                    sSelectTab = t;
                 }
             }
             else if (sscanf(s.action, "drag:%f:%f:%f:%f", &x, &y, &x2, &y2) == 4)
@@ -939,18 +901,6 @@ namespace
 
     // --- the window ---------------------------------------------------------------
 
-    void DrawPanel(iGuiPanel panel, void (*fallback)())
-    {
-        if (sPanelFn[panel] != NULL)
-        {
-            sPanelFn[panel](sPanelUser[panel]);
-        }
-        else
-        {
-            fallback();
-        }
-    }
-
     void DrawQuitPopup()
     {
 #ifdef __3DS__
@@ -1038,7 +988,7 @@ namespace
 #if TSSM_GUI_CONSOLE
         const char* const title = "The SpongeBob SquarePants Movie###tssm_overlay";
 #else
-        const char* const title = "The SpongeBob SquarePants Movie  |  PC port###tssm_overlay";
+        const char* const title = TSSM_GAME_TITLE "  |  PC port###tssm_overlay";
 #endif
         if (ImGui::Begin(title, NULL, flags))
         {
@@ -1075,11 +1025,12 @@ namespace
 
             if (ImGui::BeginTabBar("tabs"))
             {
-                for (S32 t = 0; t < TAB_COUNT; t++)
+                for (S32 t = 0; t < iGui::TabCount(); t++)
                 {
+                    const iGui::Tab& tab = iGui::TabAt(t);
                     const ImGuiTabItemFlags tabFlags =
                         (sSelectTab == t) ? ImGuiTabItemFlags_SetSelected : 0;
-                    if (ImGui::BeginTabItem(kTabLabels[t], NULL, tabFlags))
+                    if (ImGui::BeginTabItem(tab.label, NULL, tabFlags))
                     {
 #if TSSM_GUI_CONSOLE
                         sShownTab = t;
@@ -1089,24 +1040,7 @@ namespace
                         // Every line wraps at the screen's edge rather than run off it.
                         ImGui::PushTextWrapPos(0.0f);
 #endif
-                        switch (t)
-                        {
-                        case TAB_SETTINGS:
-                            iGui::DrawSettings();
-                            break;
-                        case TAB_CONTROLS:
-                            DrawPanel(IGUI_PANEL_CONTROLS, iGui::DrawControls);
-                            break;
-                        case TAB_SAVES:
-                            DrawPanel(IGUI_PANEL_SAVES, iGui::DrawSaves);
-                            break;
-                        case TAB_MODS:
-                            DrawPanel(IGUI_PANEL_MODS, iGui::DrawMods);
-                            break;
-                        default:
-                            iGui::DrawAbout();
-                            break;
-                        }
+                        tab.draw();
 #ifdef __3DS__
                         ImGui::PopTextWrapPos();
 #endif
@@ -1127,11 +1061,11 @@ namespace
             {
                 if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false))
                 {
-                    sSelectTab = (sShownTab + TAB_COUNT - 1) % TAB_COUNT;
+                    sSelectTab = (sShownTab + iGui::TabCount() - 1) % iGui::TabCount();
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false))
                 {
-                    sSelectTab = (sShownTab + 1) % TAB_COUNT;
+                    sSelectTab = (sShownTab + 1) % iGui::TabCount();
                 }
             }
 #endif
@@ -1237,7 +1171,7 @@ namespace
 
         ImGui::SetCurrentContext(sContext);
         ReadConfig();
-        UpdateGamepads();
+        iGui::UseOpenGamepads();
         UpdateScale();
 
         iGuiRenderNewFrame();

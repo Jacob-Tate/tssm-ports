@@ -134,9 +134,24 @@ takes no input from the buttons.
   .3dsx), the same way HOME's Close does (progress since the last save is lost).
 - **Settings:** the frame rate (30, or 60 for light scenes), field of view, the glow and
   the screen warp, 3D (Auto, Always or Off) and 3D depth (*3D*, below), the four volumes,
-  the logo movies, the save folder and the menu's text size. What does nothing on the 3DS
-  (the renderer, window and render size, anti-aliasing, vertical sync, rumble, touch
-  controls, keyboard and mouse) is left out.
+  the logo movies, the save screens' text, the save folder and the menu's text size. What
+  does nothing on the 3DS (the renderer, window and render size, anti-aliasing, vertical
+  sync, rumble, touch controls, the keyboard and mouse settings, the Xbox extras) is left
+  out.
+- **Save screen text** (since 0.9.4): what the save and load screens say in place of the
+  Xbox disc's "Please don't turn off your Xbox console." Automatic is the 3DS's own words
+  ("Please don't turn off the power or close the game."); the other choices are the Xbox's
+  and the GameCube's original lines, the PS2's, a plain one, and the PC's, the phone's and
+  the Switch's. It changes at once, a line already on screen too (`[game] save_text` in
+  `config.ini`).
+- **The GameCube look** (since 0.9.4): the 3DS plays the Xbox files the way the GameCube
+  release looks. Every `[extras]` key (glow, spotlights, crowds, water, frame_lock;
+  `docs/EXTRAS.md`) is `gamecube` here and has no row in the menu: the moving spotlights of
+  No Cheese!, Bubble Blowing Baby Hunt and Turn the Tables on Plankton are off, the fish
+  crowds of No Cheese! and Sandwich Driving 101 stand still, and the water (the tanks in
+  Google-Eyes and Smelly Knick Knacks, the sea in Dennis Strikes Back) is the GameCube's.
+  The 3DS's renderer has no Xbox glow, light beams or Xbox water, so those stay `gamecube`
+  whatever `config.ini` says.
 
 The game sees START and SELECT a moment late: each is held back for up to 120 ms in case
 the other follows. If the menu ever misbehaves, `[gui] overlay = off` in `config.ini`
@@ -152,9 +167,10 @@ refused with a message (a 16 MB Dolphin card fits); anything over 64 MB is no sa
 
 ### Updates
 
-The prebuilt *TSSM Dehydrated* files (0.9.2 and later) can update themselves from this
-repository's Releases page. Install 0.9.2 by hand once (the files before it have no
-updater); after that the game can fetch and install each new version itself. Builds made
+The prebuilt *TSSM Dehydrated* files (0.9.4 and later) can update themselves from this
+repository's Releases page. Install 0.9.4 by hand once (the files before 0.9.2 have no
+updater, and 0.9.2's cannot reach GitHub on a real 3DS: *Coming from 0.9.2*, below); after
+that the game can fetch and install each new version itself. Builds made
 from the source have no updater unless their builder turned it on (`TSSM_UPDATE`,
 *Building the TSSM Dehydrated release*); their settings menu has no Updates section.
 
@@ -179,6 +195,13 @@ Nothing goes online unless you ask. In the settings menu, Settings tab, at the b
 - **Check for updates when the game starts**: off unless you turn it on; then the game
   checks once at each start, and a line at the top of the menu says when a new version is
   waiting.
+
+**Coming from 0.9.2 on a console:** 0.9.2's updater cannot reach GitHub on a real 3DS (it
+always says "Could not connect to the update server": it misread the console's answer to
+the connect, and emulators answer differently). Get 0.9.4 by hand once, the way you
+installed 0.9.2: the new `.cia` installed over the old one with FBI (*Installing*), or the
+new `.3dsx` copied over your old one. Your settings and saves stay. From 0.9.4 on, the
+menu's updater works.
 
 What it does and does not do:
 
@@ -419,8 +442,8 @@ At run time only where closing goes differs: libctru's exit returns an installed
 the HOME Menu and a .3dsx to the Homebrew Launcher. The log's start says which it is, and
 the settings menu's Quit names that menu.
 
-The title version follows `TSSM_3DS_VERSION`: 0.9.2 is the TMD's and the ticket's 0.9.2
-(`0 << 10 | 9 << 4 | 2`, 146), which the system compares when one build is installed over
+The title version follows `TSSM_3DS_VERSION`: 0.9.4 is the TMD's and the ticket's 0.9.4
+(`0 << 10 | 9 << 4 | 4`, 148), which the system compares when one build is installed over
 another. makerom v0.19.0 loses the minor number, so CMake gives makerom the major and the
 micro and `tools/3ds/cia_version.py` then writes the whole version into the TMD and the
 ticket (no hash covers the field). Without Python the version stays `major.0.micro` (a
@@ -432,7 +455,7 @@ The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSS
 Dehydrated*, are this build with six settings: the name "TSSM Dehydrated"
 (`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
 Menu, the About tab's heading and the game-files screen), the release's version
-(`TSSM_3DS_VERSION`, 0.9.2 for TSSM Dehydrated 0.9.2), author "aidp2", the updater
+(`TSSM_3DS_VERSION`, 0.9.4 for TSSM Dehydrated 0.9.4), author "aidp2", the updater
 (`TSSM_UPDATE`), the port's own icon for both files (`dist/3ds/cia_icon.png`) and the
 banner picture
 `dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
@@ -457,7 +480,7 @@ bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work fold
     sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
     CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
       -DTSSM_PYTHON=/c/Python314/python.exe \
-      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.2 -DTSSM_3DS_AUTHOR=aidp2 \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.4 -DTSSM_3DS_AUTHOR=aidp2 \
       -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
       -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png \
       -DTSSM_UPDATE=ON
@@ -582,6 +605,11 @@ The steps, run from this repository's folder:
 
 **Keep it to yourself.** The banner folder, the `.bnr` files and any `.cia` built with them
 contain the game's model, textures and voice from your copy: do not share or upload them.
+
+Your banner build is the same title as the release's `.cia` (the unique ID `0xF7553`), so
+installing the release's `.cia` on that 3DS (with FBI, or its QR code) replaces yours, with
+its banner, icon and full name; the settings and saves stay. Install your own `.cia` again
+to get it back.
 
 The script keeps the 3D banner to what the HOME Menu loads: the model file at most 512 KB,
 its textures and lookup tables on 128-byte boundaries (it checks the file pycgfx made and
@@ -820,7 +848,14 @@ take about 25, 35 and 50 minutes; in an emulator, which cannot restart them, a f
   module does not have). mbedtls trusts Mozilla's CA list (`dist/3ds/cacert.pem`, curl's
   extract, MPL 2.0; in the RomFS as `update/cacert.pem`), checks the host name and the
   dates, and speaks TLS 1.2; the ssl service gives it random numbers. Every socket is
-  non-blocking, so Cancel, a stalled server, a sleep and the quit are noticed at once. For
+  non-blocking, so Cancel, a stalled server, a sleep and the quit are noticed at once. A
+  connection is up when a second `connect()` says so (0 or `EISCONN`) after `poll` counts
+  the socket writable, or once more when the 20 seconds run out (`i3DSConnectState` in
+  `3ds/i3DS.h`; the 3dslink connection does the same, in polls of 100 ms at most).
+  `SO_ERROR` cannot tell on a console: libctru passes the SOC service's own number
+  through, and it stays -26 (`EINPROGRESS`) after the connection is up (an emulator
+  answers 0), which is why 0.9.2's updater failed every connect on a console. Only
+  `poll`'s count is used, as libctru's `POLL*` bits are not the console's. For
   the installed title, the download must be a .cia of this very title, by its own TMD and
   by AM's reading of it, with room for it on the card; AM installs it (any failure cancels
   the install and leaves the installed title as it was), with HOME and sleep held, and
@@ -900,11 +935,28 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   work that probes 15 and 16 measure (speed3: the right eye's shadow pass left out, the
   shorter skinning path, the starting picture's copy in VRAM).
 - **Not drawn on the 3DS:** the PC's extras (MSAA, per-pixel lighting, shadow maps, toon
-  shading, outlines, the Xbox glow and distortion), point and spot lights, and Im3D's
-  lighting. Each is named once in the log.
+  shading, outlines, the Xbox glow and distortion, the Xbox water and light beams), point
+  and spot lights, and Im3D's lighting. Each is named once in the log.
 
 ## Known gaps
 
+- **0.9.4 has not been played on a console yet.** It brings the Windows 0.9.3 and 0.9.4
+  work (*The GameCube look*, *Save screen text*, mod levels without a `.HOP`, the menu's
+  shared tabs) and the updater's connect fix. It is checked on the PC and in Azahar: the
+  title, three levels from the Xbox files, the settings menu's five tabs, the save
+  screens' text, a level whose own `.HOP` is missing (the log names the file and the game
+  stops at the error box) and a mod level that is one `.HIP` with no `.HOP` (it loads and
+  plays); the installed `.cia` starts as the title and says 0.9.4. The program is 240 KB
+  larger than 0.9.2's (the GameCube files' conversion, the extras' decisions and the PC's
+  mouse code, which do nothing here), so the heap is that much smaller; what the game
+  takes in a level is the same to within 8 KB. The water in Dennis Strikes Back has not
+  been looked at on the 3DS.
+- **The frame-rate cap is the 3DS's own.** With the cap at 60 (Settings), the levels the
+  GameCube holds at 30 fps are not held there, as in 0.9.2.
+- **GameCube disc files** start and play in Azahar, as on the PC, but take about 13 MB
+  more memory in the first level, and the game's font is drawn too widely spaced with
+  them. No console has run them, so the settings menu and the game-files screen still ask
+  for the Xbox files.
 - **Played on a console mostly in scripted runs.** On a New 3DS XL the console probes
   14-16 (*Developer tools*) have played BB01, BB02, GG02, TR01 and JK01, the opening
   fly-through, the title screen and the pause menu with every effect on: 27 to 30 fps in 2D
@@ -919,15 +971,19 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
   layer*, Closing), the probes 14-16 have made 39 launches on a console, each run quitting
   and starting the next, and none started with a program held. The game still reports
   held programs at start and asks for a restart when there are two or more.
-- **The updater** has not run on a console yet (0.9.2 is its first release). It is checked
-  on the PC (`tssm_updatetest`, `tssm_update3dstest`, against saved copies of the real
-  releases) and in Azahar: a .3dsx found the release on GitHub, downloaded its .3dsx
-  through GitHub's redirects with every certificate check on and put it in place with the
-  right checksum; a cancel left the file as it was; a test .cia (its own title ID)
-  installed a newer copy of itself through AM; a wrong checksum and a remade .cia with
-  another banner were refused. Azahar has no HOME Menu, so the restart through it, the
-  handshake's time on a console, AM installing over the running title, and a sleep or HOME
-  during a download wait for a console. Each step writes a `tssm: update:` line to
+- **The updater** (since 0.9.2; 0.9.2's cannot connect on a console, *Coming from 0.9.2*).
+  0.9.4's connect fix has run on a New 3DS in two test copies: a .3dsx found the release on
+  GitHub, downloaded its .3dsx and replaced itself with the right checksum, and a .cia
+  installed as the game's title downloaded the release's .cia, which the system's
+  installer put over the running game; its next start was the new version. **Restart
+  now** has not run on a console yet. It is also checked on the PC (`tssm_updatetest`,
+  `tssm_update3dstest`, against saved copies of the real releases) and in Azahar: a .3dsx
+  found the release on GitHub, downloaded its .3dsx through GitHub's redirects with every
+  certificate check on and put it in place with the right checksum; a cancel left the
+  file as it was; a test .cia (its own title ID) installed a newer copy of itself through
+  AM; a wrong checksum and a remade .cia with another banner were refused. The restart
+  through the HOME Menu, the dates against the console's clock, and a sleep or HOME during
+  a download wait for a console. Each step writes a `tssm: update:` line to
   `last_run.log`. mbedtls is devkitPro's 2.28.8, the last package of a branch Mbed TLS no
   longer fixes.
 - **The animated banner** (made from your own game files, above) has not been tried on a

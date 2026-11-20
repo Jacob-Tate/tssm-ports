@@ -24,6 +24,26 @@
 #include <string.h>
 #include "xRand.h"
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: CarUpdate adds its acceleration (the 0.6 push, the 0.2 gravity, the grip and the
+// damping) once a step with no time factor, and UpdateVirtualBunTop moves the bun once a frame
+// the same way. zEntPlayerCarUpdate makes one step of a frame up to 1.5/60 s, so above 60 fps
+// every one of those went twice as often a second at 120 as on either console (which never run
+// the car above 60): 1.6 times the speed off the line, twice the fall. The share scales them to
+// the frame; it is 1 at 60 fps and below, where both are bit-identical to the original.
+static F32 sStepShare = 1.0f;
+
+void zCarSetStepShare(F32 share)
+{
+    sStepShare = share;
+}
+
+F32 zCarGetStepShare()
+{
+    return sStepShare;
+}
+#endif
+
 #define ANIM_COUNT 78
 extern U32 g_hash_caranim[ANIM_COUNT];
 const char* g_strz_caranim[ANIM_COUNT];
@@ -675,7 +695,11 @@ void zCar::CarUpdate(F32 dt, F32 steer, bool accelOn, bool brakeOn, bool boostOn
     xQuat idealQuat;
     xQuat slerped;
 
+#ifdef PLATFORM_PC
+    newVelocity = velocity + acceleration * sStepShare;
+#else
     newVelocity = velocity + acceleration;
+#endif
     GetCenter(&oldPos);
     newPos = oldPos + newVelocity * dt;
 
@@ -1490,8 +1514,23 @@ void zCar::UpdateVirtualBunTop(F32 dt)
         delta += mat.right * (-0.015f * dt * steeringPosition);
     }
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the bun's damping and move, once a frame, scaled to the frame as
+    // zParPTank.cpp's bubbles are (sStepShare is 1 at 60 fps and below).
+    if (sStepShare != 1.0f)
+    {
+        animVirtualBunTopVel = animVirtualBunTopVel * xpow(0.8f, sStepShare) + delta;
+        animVirtualBunTopPos += animVirtualBunTopVel * sStepShare;
+    }
+    else
+    {
+        animVirtualBunTopVel = animVirtualBunTopVel * 0.8f + delta;
+        animVirtualBunTopPos += animVirtualBunTopVel;
+    }
+#else
     animVirtualBunTopVel = animVirtualBunTopVel * 0.8f + delta;
     animVirtualBunTopPos += animVirtualBunTopVel;
+#endif
 
     xVec3 newDelta = animVirtualBunTopPos - idealBunPos;
     // Retail makes both xVec3Dot calls before the subtraction.
@@ -1507,7 +1546,11 @@ void zCar::UpdateVirtualBunTop(F32 dt)
         animVirtualBunTopVerticalVel = velocity.y;
     }
 
+#ifdef PLATFORM_PC
+    animVirtualBunTopVerticalVel -= 0.15f * sStepShare;
+#else
     animVirtualBunTopVerticalVel -= 0.15f;
+#endif
     animVirtualBunTopHeight += animVirtualBunTopVerticalVel * dt;
 
     if (animVirtualBunTopHeight < mat.pos.y)

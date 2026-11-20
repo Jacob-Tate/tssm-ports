@@ -390,6 +390,8 @@ void iCaptureInit()
     const char* testCrash = getenv("TSSM_TEST_CRASH");
     const char* testCamLog = getenv("TSSM_TEST_CAMLOG");
     const char* testSend = getenv("TSSM_TEST_SEND");
+    const char* testMouse = getenv("TSSM_TEST_MOUSE");
+    const char* testUILog = getenv("TSSM_TEST_UILOG");
 
     // TSSM_TEST_AUDIO_RESTART (iAudioSDLTest.h) counts its frames here too.
     iAudioSDLTestInit();
@@ -398,7 +400,9 @@ void iCaptureInit()
                        (testPlace != NULL && testPlace[0] != '\0') ||
                        (testCrash != NULL && atoi(testCrash) > 1) ||
                        (testCamLog != NULL && atoi(testCamLog) > 0) ||
-                       (testSend != NULL && testSend[0] != '\0') || iAudioSDLTestOn();
+                       (testSend != NULL && testSend[0] != '\0') ||
+                       (testMouse != NULL && testMouse[0] != '\0') ||
+                       (testUILog != NULL && atoi(testUILog) > 0) || iAudioSDLTestOn();
 
     if (sRangeCount == 0 && sExitAfter == 0 && !sScripted && !tests && !iSpikeOn())
     {

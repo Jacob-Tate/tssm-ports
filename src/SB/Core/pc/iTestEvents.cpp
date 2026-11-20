@@ -4,13 +4,25 @@
 #include "iTestEvents.h"
 
 #include "iWindow.h"
+#include "iExtras.h"
+#include "iLightVolume.h"
+#include "iMenuMouse.h"
+#include "iMouseLook.h"
+#include "xAnim.h"
 #include "xEnt.h"
 #include "xMath3.h"
 #include "xScreenWarp.h"
 #include "zCamera.h"
+#include "zCam.h"
+#include "zCar.h"
+#include "zEntSimpleObj.h"
 #include "zGlobals.h"
 #include "zPlayer.h"
 #include "zRewards.h"
+#include "zScene.h"
+#include "zSpotlight.h"
+
+extern F32 gRealTimeElapsed;
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +92,172 @@ namespace
     // TSSM_TEST_CAMLOG=n: every n frames, log where the game's camera is and whether a level
     // fly-through (zCameraFly) is playing, for tools/regress.py's fly-through check.
     S32 sCamLogEvery;
+
+    // TSSM_TEST_CARLOG=first-last: from first to last, log the Patty Wagon every frame (the
+    // frame's time, the car's step share, position and velocity), for the frame-rate checks of
+    // the car (docs/EXTRAS.md).
+    S32 sCarLogFirst;
+    S32 sCarLogLast;
+
+    // TSSM_TEST_SPOTLOG=n: every n frames, log the scene's spotlights (which are on, which are
+    // drawn, whether the camera is inside a beam), for the spotlight checks (docs/EXTRAS.md).
+    S32 sSpotLogEvery;
+
+    // TSSM_TEST_CROWDLOG=n: every n frames, log the scene's crowd objects (the Xbox's skinned
+    // crowd models, iExtrasCrowdModel) and how many of them animated since the last line: the
+    // crowd check of [extras] crowds where the camera is not still enough to compare frames
+    // (BB01, from the Patty Wagon).
+    S32 sCrowdLogEvery;
+    S32 sCrowdLogLast;
+    const S32 kMaxCrowd = 64;
+    F32 sCrowdTime[kMaxCrowd];
+
+    // TSSM_TEST_MOUSE: a mouse of the test's own (iMouseLook.h).
+    enum MouseKind
+    {
+        MOUSE_MOVE,
+        MOUSE_AT,
+        MOUSE_CLICK,
+        MOUSE_RCLICK,
+        MOUSE_WHEEL,
+        MOUSE_ESC
+    };
+
+    struct MouseEvent
+    {
+        S32 first;
+        S32 last;
+        MouseKind kind;
+        F32 x;
+        F32 y;
+    };
+
+    const S32 kMaxMouse = 128;
+
+    MouseEvent sMouse[kMaxMouse];
+    S32 sMouseCount;
+
+    // TSSM_TEST_UILOG=n: every n frames, log the menu widgets (iMenuMouseLog).
+    S32 sUILogEvery;
+
+    // TSSM_TEST_LOOKLOG=1: with each TSSM_TEST_CAMLOG line, the on-foot camera's angles and
+    // whether the mouse is steering it.
+    bool sLookLog;
+
+    void ParseMouse(const char* list)
+    {
+        static char buf[4096];
+        strncpy(buf, list, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = '\0';
+
+        for (char* entry = strtok(buf, ","); entry != NULL; entry = strtok(NULL, ","))
+        {
+            MouseEvent e;
+            e.x = 0.0f;
+            e.y = 0.0f;
+            int frames = 1;
+            char word[16] = "";
+            bool ok = sMouseCount < kMaxMouse;
+
+            if (sscanf(entry, "%d:%15[a-z]", &e.first, word) != 2 || e.first < 1)
+            {
+                ok = false;
+            }
+            else if (strcmp(word, "move") == 0)
+            {
+                e.kind = MOUSE_MOVE;
+                ok = ok && sscanf(entry, "%*d:move:%f:%f/%d", &e.x, &e.y, &frames) >= 2;
+            }
+            else if (strcmp(word, "at") == 0)
+            {
+                e.kind = MOUSE_AT;
+                ok = ok && sscanf(entry, "%*d:at:%f:%f", &e.x, &e.y) == 2;
+            }
+            else if (strcmp(word, "click") == 0)
+            {
+                e.kind = MOUSE_CLICK;
+            }
+            else if (strcmp(word, "rclick") == 0)
+            {
+                e.kind = MOUSE_RCLICK;
+            }
+            else if (strcmp(word, "wheel") == 0)
+            {
+                e.kind = MOUSE_WHEEL;
+                ok = ok && sscanf(entry, "%*d:wheel:%f", &e.x) == 1;
+            }
+            else if (strcmp(word, "esc") == 0)
+            {
+                // The Escape key itself going down, for the pointer: what it
+                // is bound to (Start) is TSSM_INPUT's to press.
+                e.kind = MOUSE_ESC;
+            }
+            else
+            {
+                ok = false;
+            }
+
+            if (!ok)
+            {
+                printf("tssm: test: TSSM_TEST_MOUSE: '%s' is not frame:move:dx:dy[/frames], "
+                       "frame:at:x:y, frame:click, frame:rclick, frame:wheel:n or frame:esc (or there are "
+                       "more than %d); ignored\n",
+                       entry, (int)kMaxMouse);
+                continue;
+            }
+
+            e.last = e.first + (frames > 1 ? frames - 1 : 0);
+            sMouse[sMouseCount++] = e;
+        }
+
+        // The test's mouse from the first frame on, whatever is plugged in.
+        iMouseLookTestMove(0.0f, 0.0f);
+        fflush(stdout);
+    }
+
+    void MouseFrame(S32 frame)
+    {
+        for (S32 i = 0; i < sMouseCount; i++)
+        {
+            const MouseEvent& e = sMouse[i];
+            if (frame < e.first || frame > e.last)
+            {
+                continue;
+            }
+
+            switch (e.kind)
+            {
+            case MOUSE_MOVE:
+                iMouseLookTestMove(e.x, e.y);
+                break;
+            case MOUSE_AT:
+            {
+                F32 wx;
+                F32 wy;
+                iMenuMouseToWindow(e.x, e.y, &wx, &wy);
+                iMouseLookTestPointer(wx, wy);
+                printf("tssm: test: frame %d: pointer to %.0f %.0f\n", (int)frame, (double)e.x,
+                       (double)e.y);
+                break;
+            }
+            case MOUSE_CLICK:
+                iMouseLookTestPress(1);
+                printf("tssm: test: frame %d: click\n", (int)frame);
+                break;
+            case MOUSE_RCLICK:
+                iMouseLookTestPress(2);
+                printf("tssm: test: frame %d: right click\n", (int)frame);
+                break;
+            case MOUSE_WHEEL:
+                iMouseLookTestWheel(e.x > 0.0f ? 1 : -1);
+                break;
+            case MOUSE_ESC:
+                iMouseLookTestEscape();
+                printf("tssm: test: frame %d: Escape\n", (int)frame);
+                break;
+            }
+        }
+    }
 
     struct TypeName
     {
@@ -208,6 +386,146 @@ namespace
                (int)frame, was.x, was.y, was.z, e.pos.x, e.pos.y, e.pos.z, e.yaw);
         fflush(stdout);
     }
+
+    // One line: how many of the scene's spotlights are on (flag 1), how many of those are in
+    // view and drawn (flag 0x100 clear), how many of those have a flare that shows with
+    // spotlights = xbox (add_flare's alpha above 0: the lamp faces the camera, zSpotlight.cpp),
+    // how many light volumes have the camera inside, how far
+    // the camera is from the nearest beam it is beside (outside the cone's side, in units; below
+    // 0 inside it), and the IDs of the lights that are on ("+" after one the camera is inside).
+    void LogSpotlights(S32 frame)
+    {
+        zScene& s = *globals.sceneCur;
+        const S32 count = s.baseCount[eBaseTypeSpotlight];
+        zSpotlight* lights = (zSpotlight*)s.baseList[eBaseTypeSpotlight];
+        const xMat4x3& camMat = zCamGetMatrix();
+        const xVec3 cam = camMat.pos;
+        S32 on = 0;
+        S32 drawn = 0;
+        S32 flares = 0;
+        S32 inside = 0;
+        F32 nearest = 1e9f;
+        char ids[512];
+        size_t len = 0;
+        ids[0] = '\0';
+        for (S32 i = 0; i < count; i++)
+        {
+            const zSpotlight& l = lights[i];
+            if (!(l.flags & 0x1))
+            {
+                continue;
+            }
+            on++;
+            const bool in = l.light_volume != NULL && l.light_volume->active() &&
+                            l.light_volume->inside;
+            if (!(l.flags & 0x100))
+            {
+                drawn++;
+                // add_flare's alpha, before it is stored into a byte.
+                F32 mag = l.mat.at.dot(camMat.at);
+                F32 alpha = l.asset->flare.glow_min;
+                if (mag < 0.0f)
+                {
+                    mag *= mag;
+                    mag *= mag;
+                    alpha = 0.5f + ((l.asset->flare.glow_max - l.asset->flare.glow_min) * mag +
+                                    l.asset->flare.glow_min);
+                }
+                if (alpha >= 1.0f && l.asset->flare.size_max > 0.0f)
+                {
+                    flares++;
+                }
+            }
+            if (in)
+            {
+                inside++;
+            }
+            // The camera against the beam: its distance along the axis, and from the axis less
+            // the cone's radius there.
+            const xVec3 d = cam - l.mat.pos;
+            const F32 along = d.dot(l.mat.at);
+            if (along >= 0.0f && along <= l.asset->max_dist)
+            {
+                const xVec3 off = d - l.mat.at * along;
+                const F32 out = off.length() - (l.asset->radius + along * l.slope);
+                if (out < nearest)
+                {
+                    nearest = out;
+                }
+            }
+            if (len + 12 < sizeof(ids))
+            {
+                len += (size_t)snprintf(ids + len, sizeof(ids) - len, " %08X%s", (unsigned)l.id,
+                                        in ? "+" : "");
+            }
+        }
+        char near[48] = "";
+        if (nearest < 1e9f)
+        {
+            snprintf(near, sizeof(near), ", nearest beam %.2f", nearest);
+        }
+        printf("tssm: test: frame %d: spotlights %d on of %d, %d drawn, %d flares, camera inside "
+               "%d%s;%s\n",
+               (int)frame, (int)on, (int)count, (int)drawn, (int)flares, (int)inside, near,
+               on > 0 ? ids : " none");
+
+        // The Xbox light volumes' remembered cone colours (iLightVolumeForgetCones), when the
+        // count changes: no more than the level's cone shapes.
+        static S32 sCones = -1;
+        const S32 cones = iLightVolumeConeCount();
+        if (cones != sCones)
+        {
+            sCones = cones;
+            printf("tssm: test: frame %d: light volumes: %d cone colours kept\n", (int)frame,
+                   (int)cones);
+        }
+        fflush(stdout);
+    }
+
+    // One line: the crowd objects (simple objects with one of the Xbox's skinned crowd models and
+    // an animation), the speed of their idle cycle, and how many of them have moved on in it
+    // since the line before.
+    void LogCrowd(S32 frame)
+    {
+        zScene& s = *globals.sceneCur;
+        const S32 count = s.baseCount[eBaseTypeStatic];
+        zEntSimpleObj* simps = (zEntSimpleObj*)s.baseList[eBaseTypeStatic];
+        S32 crowd = 0;
+        S32 moved = 0;
+        F32 speed = 0.0f;
+        for (S32 i = 0; i < count; i++)
+        {
+            const zEntSimpleObj& e = simps[i];
+            if (e.asset == NULL || !iExtrasCrowdModel(e.asset->modelInfoID) || e.model == NULL ||
+                e.model->Anim == NULL || e.model->Anim->Single == NULL)
+            {
+                continue;
+            }
+            const xAnimSingle& single = *e.model->Anim->Single;
+            if (crowd < kMaxCrowd)
+            {
+                if (sCrowdLogLast > 0 && single.Time != sCrowdTime[crowd])
+                {
+                    moved++;
+                }
+                sCrowdTime[crowd] = single.Time;
+            }
+            speed = single.CurrentSpeed;
+            crowd++;
+        }
+        if (sCrowdLogLast > 0)
+        {
+            printf("tssm: test: frame %d: crowd %d objects, speed %.2f, %d moved since frame %d\n",
+                   (int)frame, (int)crowd, speed, (int)moved, (int)sCrowdLogLast);
+        }
+        else
+        {
+            printf("tssm: test: frame %d: crowd %d objects, speed %.2f\n", (int)frame, (int)crowd,
+                   speed);
+        }
+        fflush(stdout);
+        sCrowdLogLast = frame;
+    }
 } // namespace
 
 void iTestEventsFrame(S32 frame)
@@ -270,6 +588,62 @@ void iTestEventsFrame(S32 frame)
             printf("tssm: test: holding the player still from frame %d to %d\n", (int)sHoldFirst,
                    (int)sHoldLast);
         }
+        const char* carLog = getenv("TSSM_TEST_CARLOG");
+        if (carLog != NULL && sscanf(carLog, "%d-%d", &sCarLogFirst, &sCarLogLast) != 2)
+        {
+            sCarLogFirst = sCarLogLast = 0;
+        }
+        const char* spotLog = getenv("TSSM_TEST_SPOTLOG");
+        if (spotLog != NULL && atoi(spotLog) > 0)
+        {
+            sSpotLogEvery = atoi(spotLog);
+        }
+        const char* crowdLog = getenv("TSSM_TEST_CROWDLOG");
+        if (crowdLog != NULL && atoi(crowdLog) > 0)
+        {
+            sCrowdLogEvery = atoi(crowdLog);
+        }
+        const char* mouse = getenv("TSSM_TEST_MOUSE");
+        if (mouse != NULL && mouse[0] != '\0')
+        {
+            ParseMouse(mouse);
+        }
+        const char* lookLog = getenv("TSSM_TEST_LOOKLOG");
+        sLookLog = lookLog != NULL && atoi(lookLog) != 0;
+        const char* uiLog = getenv("TSSM_TEST_UILOG");
+        if (uiLog != NULL && atoi(uiLog) > 0)
+        {
+            sUILogEvery = atoi(uiLog);
+        }
+    }
+
+    MouseFrame(frame);
+
+    if (sUILogEvery > 0 && frame % sUILogEvery == 0)
+    {
+        iMenuMouseLog(frame);
+    }
+
+    if (sCarLogLast > 0 && frame >= sCarLogFirst && frame <= sCarLogLast)
+    {
+        // The car as zEntPlayerCarUpdate left it this frame; gRealTimeElapsed is the frame's
+        // measured time (zGameLoop), before any slowdown.
+        const zCar* car = zEntPlayerCarGetCar();
+        const xVec3 pos = car->mat.pos;
+        printf("tssm: test: frame %d: car dt %.6f share %.4f at (%.4f, %.4f, %.4f) vel (%.4f, "
+               "%.4f, %.4f)\n",
+               (int)frame, gRealTimeElapsed, zCarGetStepShare(), pos.x, pos.y, pos.z,
+               car->velocity.x, car->velocity.y, car->velocity.z);
+    }
+
+    if (sSpotLogEvery > 0 && frame % sSpotLogEvery == 0 && globals.sceneCur != NULL)
+    {
+        LogSpotlights(frame);
+    }
+
+    if (sCrowdLogEvery > 0 && frame % sCrowdLogEvery == 0 && globals.sceneCur != NULL)
+    {
+        LogCrowd(frame);
     }
 
     if (sCrashFrame != 0 && frame == sCrashFrame)
@@ -334,6 +708,19 @@ void iTestEventsFrame(S32 frame)
         const xVec3& pos = globals.oldSkoolCamera.mat.pos;
         printf("tssm: test: frame %d: camera at (%g, %g, %g), fly-through %s\n", (int)frame,
                (double)pos.x, (double)pos.y, (double)pos.z, zcam_fly != 0 ? "on" : "off");
+        if (sLookLog)
+        {
+            // For the mouse look checks: where the on-foot camera sits around the player
+            // (its orbit angle), how it is aimed, and who is steering it.
+            const xCamera& cam = globals.oldSkoolCamera;
+            printf("tssm: test: frame %d: look orbit %.4f yaw %.4f pitch %.4f at (%.3f, %.3f, "
+                   "%.3f) right (%.3f, %.3f, %.3f) mouse %s\n",
+                   (int)frame, (double)cam.pcur, (double)cam.yaw_cur, (double)cam.pitch_cur,
+                   (double)cam.mat.at.x, (double)cam.mat.at.y, (double)cam.mat.at.z,
+                   (double)cam.mat.right.x, (double)cam.mat.right.y, (double)cam.mat.right.z,
+                   iMouseLookSteering() ? "steering" : "off");
+            fflush(stdout);
+        }
     }
 
     for (S32 i = 0; i < sWarpCount; i++)

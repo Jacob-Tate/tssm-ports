@@ -18,6 +18,11 @@ call :ps distort_PS distort_PS.hlsl || goto fail
 call :ps glow_bright_PS glow_bright_PS.hlsl || goto fail
 call :ps glow_blur_PS glow_blur_PS.hlsl || goto fail
 
+rem The Xbox water's surface (iXboxWater.h). Direct3D only: no SPIR-V is built
+rem for it, and the Vulkan renderer uses the GameCube water.
+call :d3dvs water_VS water_VS.hlsl || goto fail
+call :d3dps water_PS water_PS.hlsl || goto fail
+
 popd
 echo All shaders compiled.
 exit /b 0
@@ -25,6 +30,18 @@ exit /b 0
 :fail
 popd
 exit /b 1
+
+rem call :d3dvs NAME SOURCE -- vs_2_0 here, vs_4_0 in ..\shaders11, no SPIR-V
+:d3dvs
+"%FXC%" /nologo /T vs_2_0 /I "%LIBRWSHADERS%" /Vn %1 /Fh %1.h %2 || exit /b 1
+"%FXC%" /nologo /T vs_4_0 /DSM4 /I "%LIBRWSHADERS%" /Vn %1 /Fh ..\shaders11\%1.h %2 || exit /b 1
+exit /b 0
+
+rem call :d3dps NAME SOURCE -- ps_2_0 here, ps_4_0 in ..\shaders11, no SPIR-V
+:d3dps
+"%FXC%" /nologo /T ps_2_0 /I "%LIBRWSHADERS%" /Vn %1 /Fh %1.h %2 || exit /b 1
+"%FXC%" /nologo /T ps_4_0 /DSM4 /I "%LIBRWSHADERS%" /Vn %1 /Fh ..\shaders11\%1.h %2 || exit /b 1
+exit /b 0
 
 rem call :ps NAME SOURCE -- ps_2_0 here, ps_4_0 in ..\shaders11, SPIR-V in ..\shadersvk
 rem

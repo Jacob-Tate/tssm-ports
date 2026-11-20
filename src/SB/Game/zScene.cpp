@@ -150,6 +150,13 @@
 #include "xShadowSimple.h"
 #include "zSymbol.h"
 
+#ifdef PLATFORM_PC
+#include "iWaterBody.h"
+#include "iXboxWater.h"
+#include "iExtras.h"
+#include "iExtrasGC.h"
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -281,6 +288,13 @@ namespace
         { "game_object:RingControl", eBaseTypeRingControl, sizeof(zRingControl), false, zRingControl::Load },
         { "logic:Function Generator", eBaseTypeFunctionGenerator, sizeof(xFunctionGenerator), false, xFunctionGenerator_Init },
         { "logic:reference", eBaseTypeReference, sizeof(zReference), false, zReferenceInit }
+#ifdef PLATFORM_PC
+        // PC: the Xbox files' water bodies, which the GameCube build has no object for
+        // (iXboxWater.h; without the Xbox water, iWaterBody.h). As a dynamic type it comes after
+        // sInitTable's types in the scene's list, so it gets SceneBegin after the dispatchers. The
+        // comma is here so the GameCube table is as it was.
+        , { "effect:water_body", eBaseTypeWaterBody, sizeof(zWaterBody), false, zWaterBody::load }
+#endif
     };
     // clang-format on
 } // namespace
@@ -895,6 +909,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
 
     zSceneLoadPackFile(theSceneID, 1, false, NULL);
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the Xbox release's features are decided for the level here, with its
+    // package read and before any of its objects is made (iExtras.h).
+    iExtrasSceneEnter(theSceneID);
+#endif
+
     pdone += 2.0f;
     zGameScreenTransitionUpdate(pdone, "...initializing scene - sound\n");
 
@@ -977,6 +997,23 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     globals.sceneCur->base2Name = zSceneGetName;
 
     g_xSceneCur = globals.sceneCur;
+
+#ifdef PLATFORM_PC
+    // PC: whether the Xbox water takes this scene's water bodies, decided from the files before
+    // the pipe tables are read and the objects are made from their assets (iXboxWater.h).
+    xWaterScenePrepare();
+
+    // Without it, the GameCube look for the Xbox files' water bodies: some of their assets are
+    // changed here too (iWaterBody.h).
+    if (!iXboxWaterWillRun())
+    {
+        iWaterBodyScenePrepare();
+    }
+
+    // With GameCube files, the Xbox extras those files hold but leave unused get the assets
+    // they need here (iExtrasGC.h).
+    iExtrasGCScenePrepare(theSceneID);
+#endif
 
     xModelPipeNumTables = xSTAssetCountByType('PIPT');
 
@@ -1195,6 +1232,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     xFXHighDynamicRangeSetBackgroundDefault(s->parameters->hdrGlow, s->parameters->hdrDarken, true);
     xClimateInit(&gClimate);
 
+#ifdef PLATFORM_PC
+    // PC: the Xbox water's bodies forgotten and its body objects checked (iXboxWater.h), where
+    // the Xbox clears its bodies (0x742CB).
+    xWaterSceneInit();
+#endif
+
     for (i = 0; i < s->baseCount[eBaseTypePlatform]; i++)
     {
         // Retail always resets the first platform's destructible, never indexing by i.
@@ -1224,6 +1267,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     globals.sceneCur->enableDrawing = TRUE;
 
     iSndSuspendCD(0);
+
+#ifdef PLATFORM_PC
+    // ... and the links of their objects, before the first reset and SceneBegin.
+    iExtrasGCSceneObjects(theSceneID);
+    iExtrasSceneReady(theSceneID, globals.minVSyncCnt);
+#endif
 }
 
 void zSceneExit(S32 beginReload)
@@ -1324,6 +1373,9 @@ void zSceneExit(S32 beginReload)
     zSplashSceneExit();
     zSmokeSceneExit();
     xLightVolume::scene_exit();
+#ifdef PLATFORM_PC
+    xWaterSceneExit();
+#endif
     zFire::scene_exit();
     zExplosion::scene_exit();
     xTransient::scene_exit();
@@ -2010,6 +2062,9 @@ void zSceneReset()
     zSceneResetLightKits();
     zReactiveReset();
     zSpotlight::reset_all();
+#ifdef PLATFORM_PC
+    zWaterBody::reset_all();
+#endif
     zDustReset();
     xLightVolume::reset_all();
     zLightningReset();
@@ -3087,6 +3142,9 @@ void zSceneUpdate(F32 elapsedSec)
 
     if (!isPaused)
     {
+#ifdef PLATFORM_PC
+        xWaterUpdate(elapsedSec);
+#endif
         xFXHighDynamicRangeUpdate(elapsedSec);
         zReactiveUpdate(elapsedSec);
         zSpotlight::update_all(elapsedSec);
@@ -3098,6 +3156,9 @@ void zSceneUpdate(F32 elapsedSec)
         xFXStreakUpdate(elapsedSec);
         xFXShineUpdate(elapsedSec);
         xFXFireworksUpdate(elapsedSec);
+#ifdef PLATFORM_PC
+        zWaterBody::update_all();
+#endif
         zActionLineUpdate(elapsedSec);
         zLightningUpdate(elapsedSec);
         xClimateUpdate(&gClimate, elapsedSec);
@@ -3279,6 +3340,9 @@ void zSceneRenderPreFX()
         }
 
         xLightVolume::render_all();
+#ifdef PLATFORM_PC
+        xWaterRender(globals.screen->icam);
+#endif
         xDecal::render_all();
 
         zRenderState(SDRS_AlphaModels);
@@ -3972,12 +4036,17 @@ bool zSceneLoadPackFile(U32 id, S32 options, bool noLocalized, const char* filen
     if (!versionNumber && (options & 3))
     {
 #ifdef PLATFORM_PC
-        // PLATFORM_PC: a HIP or HOP the game cannot do without (only the localized pack, 3, is
-        // optional). Retail carries on and crashes in zTransient::scene_enter; a disc always
-        // has the file, a copied file set may not.
-        if ((options & 3) != 3)
+        // PLATFORM_PC: a HIP the game cannot do without stops the run with the file's name.
+        // Retail carries on and crashes in zTransient::scene_enter; a disc always has the
+        // file, a copied file set may not. A level's HOP (2) may be absent, as in retail: a
+        // mod's level can be one HIP (iFile.h). The localized pack (3) is optional.
+        if ((options & 3) == 1)
         {
             iFileMissingPackage(id, options, filename);
+        }
+        else if ((options & 3) == 2)
+        {
+            iFileOptionalPackage(id, options, filename);
         }
 #endif
         return false;

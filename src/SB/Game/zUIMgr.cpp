@@ -20,6 +20,11 @@ namespace
     zUI* uiElements[1024];
     U32 uiElementCount;
     U8 uiHDREnabled;
+#ifdef PLATFORM_PC
+    // PC: what the menus asked zUIMgrEnableHDR for. uiHDREnabled follows it while the Xbox
+    // glow is drawn (zUIMgrRender).
+    U8 uiHDRRequested;
+#endif
     U8 uiAnyActive = 1;
     F32 buttonTimer;
     U32 buttonsPressedQueue;
@@ -74,7 +79,12 @@ inline void zUIMgrFinishHDR(zUIMgrHDRContext& context)
 {
     if (context.renderedHDR)
     {
+#ifdef PLATFORM_PC
+        // PC: the Xbox's menu glow with [extras] glow = xbox, as it is otherwise.
+        xFXHighDynamicRangeRenderMenu(RwCameraGetCurrentCamera());
+#else
         xFXHighDynamicRangeRender(RwCameraGetCurrentCamera());
+#endif
     }
 
     xRenderFixIMEnd();
@@ -265,6 +275,13 @@ void zUIMgrRender()
         return;
     }
 
+#ifdef PLATFORM_PC
+    // PC: the Xbox draws the glow of the elements that brighten while the title or pause menu
+    // has asked for it (zSceneSetup clears the flag at every level start); the GameCube never
+    // does.
+    uiHDREnabled = uiHDRRequested && xFXHighDynamicRangeMenuGlow();
+#endif
+
     if (uiHDREnabled)
     {
         zUIMgrSetHDR(context);
@@ -305,6 +322,11 @@ void zUIMgrExit(zScene* s)
 void zUIMgrEnableHDR(bool enabled)
 {
     // Empty in the GC build: nothing turns on uiHDREnabled.
+#ifdef PLATFORM_PC
+    // PC: the Xbox's (DEFAULT.XBE 0x12f180) stores the flag; the title's "MNU3 PRESS START DISP"
+    // and the pause menu's "PAUSE STATE DISP" send it on both discs.
+    uiHDRRequested = enabled;
+#endif
 }
 
 // No GC symbol: auto-inlined into zLoadingScreen::Init (the linker strips the out-of-line

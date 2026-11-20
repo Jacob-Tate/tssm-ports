@@ -339,6 +339,9 @@ static void ApplyConfig()
     // Where saves go, before xSaveGameInit resolves the root; empty is the
     // per-user data folder (isavegame.cpp).
     iSGSetSaveRoot(iConfigGetString("game.save_folder", ""));
+
+    // The save screens' warning, before the first package loads (iSaveText.h).
+    iSaveTextApplyConfig();
     iBootSetCameraSensitivity(iConfigGetFloat("input.camera_sensitivity", 1.0f));
 
     const char* deadzone = iConfigGetString("input.deadzone", "auto");
@@ -358,9 +361,9 @@ static void ApplyConfig()
         iPadStickSetDeadzone(percent);
     }
 
-    // The Xbox screen passes. TSSM's Xbox release has a glow of its own; the
-    // passes are imported from treedome but not yet wired to TSSM's effects,
-    // so they start off and nothing turns them on.
+    // The BfBB Xbox screen passes, imported from treedome. TSSM's Xbox release
+    // has a glow of its own (iXboxGlow.h, [extras] glow), so these start off
+    // and nothing turns them on.
     iGlowSetEnabled(FALSE);
     iDistortSetEnabled(FALSE);
     iSnapshotSetEnabled(FALSE);
@@ -478,9 +481,13 @@ static void CheckAssets()
         char message[1536];
         snprintf(message, sizeof(message),
                  "The game's files were not found.\n\nLooked for:\n%s\n\n%s\n\n"
-                 "It has to name the folder that DIRECTLY contains boot.HIP, font.HIP and "
-                 "FMV\\ -- not a folder above that one, and not a disc image. No assets ship "
-                 "with the port; they come from your own copy of the Xbox release.",
+                 "The Xbox and the GameCube release both work. It has to name one of these "
+                 "folders, not a disc image:\n\n"
+                 "Xbox: the folder that directly contains boot.HIP, font.HIP and FMV\\, "
+                 "extracted from your Xbox disc image (XISO) with an XISO extractor.\n\n"
+                 "GameCube: after Dolphin's Extract Entire Disc (right-click the game), its "
+                 "files\\ folder, or the folder holding files\\ and sys\\.\n\n"
+                 "No assets ship with the port; they come from your own copy of the game.",
                  missing, where);
 
         printf("tssm: FATAL -- the game's files were not found.\n");
@@ -494,28 +501,62 @@ static void CheckAssets()
 
     // TSSM's packs name their platform in the PLAT chunk: "BX" on the Xbox,
     // "GC" and "PS2" elsewhere (heavyironmodding.org). The port reads the Xbox
-    // release; a GameCube set opens and then fails far from the cause (every
-    // asset is byte-swapped against what this build reads), so it is stopped
-    // here with the reason.
+    // release, and the GameCube one through the conversion each GameCube
+    // package gets when it is opened (iMod.h). A PS2 set opens and then fails
+    // far from the cause, so it is stopped here with the reason.
     //
     // TSSM's PLAT (HIP revision 3) has no long platform name after the id --
     // the second string is the region -- so the name is spelled out here.
-    const char* plat = iFileAssetPlatform(NULL);
-    if (plat != NULL && strcmp(plat, "BX") != 0 && strcmp(plat, "XB") != 0)
+    const char* region = NULL;
+    const char* plat = iFileAssetPlatform(&region);
+    const bool xbox = plat != NULL && (strcmp(plat, "BX") == 0 || strcmp(plat, "XB") == 0);
+    const bool gamecube = plat != NULL && strcmp(plat, "GC") == 0;
+    if (plat != NULL && !xbox && !gamecube)
     {
-        const char* who = strcmp(plat, "GC") == 0    ? "GameCube" :
-                          strcmp(plat, "PS2") == 0   ? "PlayStation 2" :
-                                                       plat;
+        const char* who = strcmp(plat, "PS2") == 0 ? "PlayStation 2" : plat;
         char message[1024];
         snprintf(message, sizeof(message),
-                 "These are %s assets, and the port reads the Xbox release's.\n\n"
-                 "Extract the Xbox disc instead, and point [assets] path at the folder "
-                 "holding boot.HIP.",
+                 "These are %s assets, and the port reads the Xbox and GameCube releases'.\n\n"
+                 "Extract the Xbox or GameCube disc instead, and point [assets] path at the "
+                 "folder holding boot.HIP.",
                  who);
-        printf("tssm: FATAL -- these are %s assets; the port reads the Xbox release's.\n", who);
+        printf("tssm: FATAL -- these are %s assets; the port reads the Xbox and GameCube "
+               "releases'.\n",
+               who);
         fflush(stdout);
         iHostErrorBox(TSSM_GAME_TITLE, message);
         exit(1);
+    }
+
+    // Which release the game files are, for the log. A GameCube set's disc
+    // header, when it is a Dolphin extraction (sys/ next to files/), names the
+    // disc: GGVE78 is the USA release the port was measured on.
+    if (plat != NULL)
+    {
+        char disc[16] = "";
+        if (gamecube)
+        {
+            char path[600];
+            snprintf(path, sizeof(path), "%s/../sys/boot.bin", iFileAssetRoot());
+            FILE* fp = fopen(path, "rb");
+            if (fp != NULL)
+            {
+                char id[6];
+                if (fread(id, 1, sizeof(id), fp) == sizeof(id))
+                {
+                    snprintf(disc, sizeof(disc), ", disc %.6s", id);
+                }
+                fclose(fp);
+            }
+        }
+        printf("tssm: game files: the %s release%s%s%s%s\n", gamecube ? "GameCube" : "Xbox",
+               region != NULL ? " (" : "", region != NULL ? region : "", region != NULL ? ")" : "",
+               disc);
+        if (disc[0] != '\0' && strstr(disc, "GGVE78") == NULL)
+        {
+            printf("tssm:   (only the USA disc, GGVE78, has been tested)\n");
+        }
+        fflush(stdout);
     }
 }
 
@@ -752,7 +793,7 @@ static void ClaimSaveFolder()
     {
         char message[1024];
         snprintf(message, sizeof(message),
-                 "The SpongeBob SquarePants Movie is already running, with the saves in\n%s\n\n"
+                 TSSM_GAME_TITLE " is already running, with the saves in\n%s\n\n"
                  "Only one copy can run at a time: both would take every controller press, "
                  "and their saves would overwrite each other.\n\n%s",
                  iSaveStoreRoot(),

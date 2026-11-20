@@ -2,12 +2,15 @@
 // (3ds/i3DSPackage.h) on the PC: a .cia's header and TMD (the title the
 // install checks against this one), a .3dsx's header (where its SMDH is), and
 // the title version a TSSM_3DS_VERSION becomes (tools/3ds/cia_version.py
-// writes the same number). Made-up files of the real layouts, and, when given,
-// real ones:
+// writes the same number); and what a connect() call's answer means
+// (i3DSConnectState, 3ds/i3DS.h). Made-up files of the real layouts, and,
+// when given, real ones:
 //   tssm_update3dstest [<a .cia> <its title ID, hex> <its version, a.b.c>] [<a .3dsx>]
 
+#include "3ds/i3DS.h"
 #include "3ds/i3DSPackage.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -242,6 +245,7 @@ namespace
 
         // A download's title version against the version in its file name.
         Check(i3DSCiaVersionIs(146, "0.9.2"), "146 is 0.9.2");
+        Check(i3DSCiaVersionIs(148, "0.9.4"), "148 is 0.9.4");
         Check(i3DSCiaVersionIs(144, "0.9"), "144 is 0.9");
         Check(i3DSCiaVersionIs(129, "0.8.1"), "129 is 0.8.1");
         Check(!i3DSCiaVersionIs(1, "0.9.1"), "makerom's 0.0.1 is not 0.9.1");
@@ -250,6 +254,48 @@ namespace
         Check(!i3DSCiaVersionIs(147, "0.9.2"), "a newer title version is refused");
         Check(!i3DSCiaVersionIs(144, "0.9.0.1"), "four numbers are no title version");
         Check(!i3DSCiaVersionIs(0, ""), "an empty name's version is refused");
+    }
+
+    // What one connect() call said, read the way the updater's and 3dslink's
+    // connects read the second one (i3DSConnectState).
+    void TestConnectState()
+    {
+        struct Case
+        {
+            int rc;
+            int err;
+            int state;
+            const char* what;
+        };
+        static const Case kCases[] = {
+            { 0, 0, k3DSConnectUp, "connect() 0: up" },
+            { -1, EISCONN, k3DSConnectUp, "EISCONN (a console's second connect): up" },
+            { -1, EINPROGRESS, k3DSConnectWaiting, "EINPROGRESS: waiting" },
+            { -1, EALREADY, k3DSConnectWaiting, "EALREADY: waiting" },
+            { -1, EAGAIN, k3DSConnectWaiting, "EAGAIN: waiting" },
+            { -1, EWOULDBLOCK, k3DSConnectWaiting, "EWOULDBLOCK: waiting" },
+            { -1, -26, k3DSConnectWaiting, "the SOC service's -26 (EINPROGRESS): waiting, not failed" },
+            { -1, -7, k3DSConnectWaiting, "the SOC service's -7 (EALREADY): waiting" },
+            { -1, -6, k3DSConnectWaiting, "the SOC service's -6 (EAGAIN): waiting" },
+            { -1, -30, k3DSConnectUp, "the SOC service's -30 (EISCONN): up" },
+            { -1, ECONNREFUSED, k3DSConnectFailed, "ECONNREFUSED: failed" },
+            { -1, EHOSTUNREACH, k3DSConnectFailed, "EHOSTUNREACH: failed" },
+            { -1, ENETUNREACH, k3DSConnectFailed, "ENETUNREACH: failed" },
+            { -1, ETIMEDOUT, k3DSConnectFailed, "ETIMEDOUT: failed" },
+            { -1, -14, k3DSConnectFailed, "the SOC service's -14 (ECONNREFUSED): failed" },
+            { -1, ENODEV, k3DSConnectFailed, "ENODEV (libctru: the SOC request failed): failed" },
+            { -1, 0, k3DSConnectFailed, "-1 without an errno: failed" },
+        };
+        for (const Case& c : kCases)
+        {
+            Check(i3DSConnectState(c.rc, c.err) == c.state, c.what);
+        }
+        // The console's connect to GitHub in 0.9.2: EINPROGRESS, poll counts
+        // the socket writable, SO_ERROR says -26 (not asked any more), and
+        // the second connect() says EISCONN.
+        Check(i3DSConnectState(-1, EINPROGRESS) == k3DSConnectWaiting &&
+                  i3DSConnectState(-1, EISCONN) == k3DSConnectUp,
+              "EINPROGRESS, then EISCONN: up");
     }
 
     bool ReadFile(const char* path, std::vector<uint8_t>* head, uint64_t* size)
@@ -314,6 +360,7 @@ int main(int argc, char** argv)
     TestCia();
     Test3dsx();
     TestVersions();
+    TestConnectState();
     int a = 1;
     if (argc >= a + 3 && strstr(argv[a], ".cia") != NULL)
     {

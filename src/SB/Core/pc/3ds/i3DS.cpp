@@ -599,12 +599,40 @@ namespace
             close(sock);
             return -1;
         }
-        connect(sock, (struct sockaddr*)&sa, sizeof(sa));
-        struct pollfd pfd = { sock, POLLOUT, 0 };
-        int err = -1;
-        socklen_t len = sizeof(err);
-        if (poll(&pfd, 1, ms) != 1 || getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) != 0 ||
-            err != 0)
+        // Up once a second connect() says so after poll counts the socket
+        // writable (i3DSConnectState: the console's SO_ERROR cannot tell).
+        // Polls of 100 ms at most: the console's poll can sit out its whole
+        // timeout before it counts a socket writable (libctru issue #412).
+        // A poll that never counts it gets one last connect() at the end.
+        const u64 start = svcGetSystemTick();
+        int rc = connect(sock, (struct sockaddr*)&sa, sizeof(sa));
+        int state = i3DSConnectState(rc, rc == 0 ? 0 : errno);
+        while (state == k3DSConnectWaiting)
+        {
+            const int spent = (int)((svcGetSystemTick() - start) / (SYSCLOCK_ARM11 / 1000));
+            if (spent >= ms)
+            {
+                rc = connect(sock, (struct sockaddr*)&sa, sizeof(sa));
+                state = i3DSConnectState(rc, rc == 0 ? 0 : errno);
+                break;
+            }
+            struct pollfd pfd = { sock, POLLOUT, 0 };
+            const int ready = poll(&pfd, 1, ms - spent < 100 ? ms - spent : 100);
+            if (ready < 0)
+            {
+                break;
+            }
+            if (ready == 1)
+            {
+                rc = connect(sock, (struct sockaddr*)&sa, sizeof(sa));
+                state = i3DSConnectState(rc, rc == 0 ? 0 : errno);
+                if (state == k3DSConnectWaiting)
+                {
+                    svcSleepThread(5000000ll);
+                }
+            }
+        }
+        if (state != k3DSConnectUp)
         {
             close(sock);
             return -1;

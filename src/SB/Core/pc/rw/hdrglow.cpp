@@ -288,3 +288,8 @@ void iHDRGlowSetEnabled(S32 enabled)
 {
     sEnabled = enabled ? TRUE : FALSE;
 }
+
+S32 iHDRGlowEnabled()
+{
+    return sEnabled;
+}

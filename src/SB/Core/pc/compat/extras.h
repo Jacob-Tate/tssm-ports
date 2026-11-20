@@ -2,14 +2,16 @@
 #define TSSM_PC_COMPAT_EXTRAS_H
 
 // MSL's <extras.h>: stricmp, strnicmp and strupr. The first two come from
-// compat/string.h. strupr is MSL's in-place uppercase; the Microsoft CRT has it
-// as _strupr and POSIX has nothing, so it is defined here.
+// compat/string.h. strupr is MSL's in-place uppercase. The Microsoft CRT and
+// MinGW's <string.h> both declare it (MinGW's is an extern declaration, so a
+// static one here is an error under GCC); POSIX has nothing, so it is defined
+// here for POSIX only.
 #include <string.h>
 #include <ctype.h>
 
 // newlib (the Switch's and the 3DS's C library) has its own, declared in
 // <string.h>.
-#if (!defined(_WIN32) || defined(__MINGW32__)) && !defined(__SWITCH__) && !defined(__3DS__)
+#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__3DS__)
 static inline char* strupr(char* str)
 {
     for (char* p = str; *p != '\0'; p++)

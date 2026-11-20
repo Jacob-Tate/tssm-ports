@@ -539,6 +539,49 @@ S32 iHostClaimInstance(const char* key, U32* holder)
     return 1;
 }
 
+bool iHostInstanceHeld(const char* key, U32* holder)
+{
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+
+    char dir[512];
+    if (!iHostTempDir(dir, sizeof(dir)))
+    {
+        return false;
+    }
+    char path[700];
+    snprintf(path, sizeof(path), "%s/%s.lock", dir, key != NULL ? key : "tssm");
+
+    // Opened, never created; locked and let go at once when nobody holds it.
+    int fd = open(path, O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    char text[32] = "";
+    ssize_t n = pread(fd, text, sizeof(text) - 1, 0);
+    const U32 id = n > 0 ? (text[n] = '\0', (U32)strtoul(text, NULL, 10)) : 0;
+
+    bool held = false;
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0)
+    {
+        flock(fd, LOCK_UN);
+    }
+    else if (errno == EWOULDBLOCK && id != (U32)getpid())
+    {
+        held = true;
+        if (holder != NULL)
+        {
+            *holder = id;
+        }
+    }
+    close(fd);
+    return held;
+}
+
 // No portable way to find and raise another process's window here.
 S32 iHostRaiseProcessWindow(U32)
 {

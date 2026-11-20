@@ -16,6 +16,10 @@
 #include "iAnimSKB.h"
 #include "zMain.h"
 
+#ifdef PLATFORM_PC
+#include "iExtras.h"
+#endif
+
 static U32 sMgrCount;
 static zSimpleMgr* sMgrList;
 static U32 sSimpleCustomCount;
@@ -486,6 +490,21 @@ static void zEntSimpleObj_Render(xEnt* ent)
     xModelRender(ent->model);
 }
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: [extras] crowds = gamecube (iExtras.h). The Xbox files give the fish crowds of
+// BB02 and BB01 skinned models and an animation list; the GameCube files give them rigid models
+// and none. zEntReset has just started the list's idle cycle at its start; at speed 0 the crowd
+// keeps that first pose. Dropping the list instead leaves BB01's skinned crowd in a heap.
+static void zEntSimpleObj_HoldCrowd(zEntSimpleObj* ent)
+{
+    if (ent->atbl != NULL && ent->model != NULL && ent->model->Anim != NULL &&
+        iExtrasCrowdHeld(ent->asset->modelInfoID))
+    {
+        ent->model->Anim->Single->CurrentSpeed = 0.0f;
+    }
+}
+#endif
+
 void zEntTrackPhysics_Init(void* ent, void* asset)
 {
     zEntSimpleObj_Init((zEntSimpleObj*)ent, (xEntAsset*)asset, true, true);
@@ -605,6 +624,9 @@ void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool physparams, b
     ent->animTime = 0.0f;
 
     zEntReset(ent);
+#ifdef PLATFORM_PC
+    zEntSimpleObj_HoldCrowd(ent);
+#endif
     xEntOpacityInit(&ent->opacity, ent);
 
     if (candestroy)
@@ -841,6 +863,9 @@ void zEntSimpleObj_Reset(zEntSimpleObj* ent, xScene* scene)
 
     ent->pflags = 0;
     zEntReset(ent);
+#ifdef PLATFORM_PC
+    zEntSimpleObj_HoldCrowd(ent);
+#endif
 
     if (ent->sasset->flags & 0x8)
     {

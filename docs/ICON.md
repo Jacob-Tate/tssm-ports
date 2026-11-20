@@ -1,10 +1,13 @@
 # The app icon
 
-The repository carries no art. Like the game's own files, a picture used as
-the app icon stays on the machine that builds: it is never committed, and
-neither is anything made from it. Without one, every build keeps its default
-icon (Windows: none, the system's; Android: the sponge block in
-`android/app/src/main/res`).
+The repository carries no art but its own default icon, a plain sponge block
+drawn for the port. Like the game's own files, a picture of yours used as the
+app icon stays on the machine that builds: it is never committed, and neither
+is anything made from it. Without one, every build has the default: the sponge
+block (PC: `dist/pc/default_icon.ico` and `default_icon-64.png`, which
+`tools/make_icons.ps1` made from `dist/switch/default_icon.jpg`, the same icon
+the released Windows zips carry; Android: `android/app/src/main/res`; Switch:
+`dist/switch/default_icon.jpg`).
 
 ## Making the icons
 
@@ -36,16 +39,26 @@ adaptive background layer, the Switch JPEG, the Play icon). The default,
 
 ## Using them
 
-**Windows.** `cmake -DTSSM_ICON_DIR=<folder>` (or `TSSM_ICON_DIR` set in the
-environment for `build-debug.bat` / `build-release.bat`). `tssm.exe` then
-carries `tssm.ico` as its first icon resource: Explorer shows it, and SDL
-registers its window class with it, so the game's and the launcher's windows
-have it in the title bar, taskbar and Alt+Tab, at the size the DPI wants.
-The `.ico` is copied into the build directory and the resource script is
-written there. An empty `TSSM_ICON_DIR` (the default) leaves the executable
-without an icon resource, as before. The setting stays in the build
-directory's CMake cache: unsetting the environment variable does not remove
-it; `cmake -DTSSM_ICON_DIR=` (or a new build directory) does.
+**Windows (and every PC build).** `cmake -DTSSM_ICON_DIR=<folder>` (or
+`TSSM_ICON_DIR` set in the environment for `build-debug.bat` /
+`build-release.bat`); empty (the default), the build uses `dist/pc`. The icon
+goes to two places:
+
+- `tssm.exe` carries the `.ico` as its first icon resource, which Explorer
+  shows. The `.ico` is copied into the build directory and the resource
+  script is written there.
+- Every window: the launcher's and the game's (each renderer's, the OpenGL one
+  once librw has made it) get the icon from `iWindowSetIcon` (`iWindow.h`):
+  `SDL_SetWindowIcon` with the 64-pixel PNG (`icon-64.png`, or
+  `default_icon-64.png`), compiled into the program as
+  `tssm_window_icon.inc`, and on Windows the executable's own icon sent to the
+  window at the two sizes the title bar and the taskbar ask for, which is
+  sharper than one picture scaled. A window does not rely on the icon SDL
+  registers its window class with.
+
+The setting stays in the build directory's CMake cache: unsetting the
+environment variable does not remove it; `cmake -DTSSM_ICON_DIR=` (or a new
+build directory) does, and the build goes back to the default.
 
 **Android.** `gradlew assembleDebug -Ptssm.icon=<folder>` adds
 `<folder>/android/res` to the debug and release resources, which override
@@ -81,7 +94,7 @@ it again. devkitPro's MSYS2 CMake reads the folder as an MSYS path
 `.gitignore` ignores the generator's file names and an in-tree `local-assets/`
 or `icons/` folder. `tools/check_icon_art.py` fails when an image other than
 the repository's own defaults (listed, with their exact content, in the
-script) is staged: by extension or by its first bytes whatever its name,
+script; `dist/pc`'s two files among them) is staged: by extension or by its first bytes whatever its name,
 anything named like the generator's output, and anything byte-identical to a
 file in `TSSM_ICON_DIR` or `--art-dir`.
 

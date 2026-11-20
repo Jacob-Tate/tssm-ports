@@ -15,4 +15,9 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth);
 // building the PNG, and writing the file.
 void iFrameGrabLastTimes(F32* readMs, F32* encodeMs, F32* writeMs);
 
+// Writes any raster librw can read back (a texture, a camera texture) to
+// `path` as an RGB PNG at its full size. FALSE when it cannot be read or the
+// file cannot be written. For the Xbox water's target dumps (iXboxWater.h).
+S32 iFrameGrabWriteRaster(const char* path, struct RwRaster* raster);
+
 #endif

@@ -662,7 +662,7 @@ namespace
         const char* label;
         // Labels for an enum's words, or for the word a number may be instead
         // ("auto"); NULL entries end it.
-        Word words[8];
+        Word words[12];
         // Applies at the next start rather than at once.
         bool restart;
     };
@@ -707,8 +707,31 @@ namespace
         { "camera_sensitivity", "Camera speed", {}, false },
         { "camera_invert_x", "Invert camera left/right", {}, false },
         { "camera_invert_y", "Invert camera up/down", {}, false },
-        { "mouse_camera", "Mouse turns the camera", {}, false },
-        { "mouse_sensitivity", "Mouse camera speed", {}, false },
+        { "mouse_look", "Mouse look", {}, false },
+        { "mouse_sensitivity_x", "Mouse speed left/right", {}, false },
+        { "mouse_sensitivity_y",
+          "Mouse speed up/down",
+          { { "same", "Same as left/right" } },
+          false },
+        { "mouse_invert_x", "Invert mouse left/right", {}, false },
+        { "mouse_invert_y", "Invert mouse up/down", {}, false },
+        { "mouse_raw", "Raw mouse input", {}, false },
+        { "mouse_smoothing", "Mouse smoothing", {}, false },
+        { "mouse_release_key",
+          "Key that frees the mouse pointer",
+          { { "f2", "F2" },
+            { "f3", "F3" },
+            { "f4", "F4" },
+            { "f5", "F5" },
+            { "f6", "F6" },
+            { "f7", "F7" },
+            { "f9", "F9" },
+            { "f10", "F10" },
+            { "f12", "F12" },
+            { "tilde", "Tilde" },
+            { "none", "No key" } },
+          false },
+        { "mouse_menus", "Mouse pointer in menus", {}, false },
         { "rumble", "Rumble strength", {}, false },
         { "touch_controls",
           "Touch controls",
@@ -779,7 +802,7 @@ namespace
         {
             return sw;
         }
-        for (S32 i = 0; i < 8 && s.words[i].value != NULL; i++)
+        for (S32 i = 0; i < 12 && s.words[i].value != NULL; i++)
         {
             if (SDL_strcasecmp(s.words[i].value, value) == 0)
             {
@@ -818,6 +841,10 @@ namespace
             strcmp(s.name, "rumble") == 0)
         {
             format = "%d%%";
+        }
+        else if (strcmp(s.name, "mouse_smoothing") == 0)
+        {
+            format = "%d ms";
         }
         else if (!isInt)
         {
@@ -951,6 +978,12 @@ namespace
                     snprintf(middle, sizeof(middle), "%d",
                              strcmp(s.name, "trigger_threshold") == 0 ? 30 :
                                                                          (int)def->min + 15);
+                    if (strcmp(s.name, "mouse_sensitivity_y") == 0)
+                    {
+                        // Starts from what it was following.
+                        snprintf(middle, sizeof(middle), "%s",
+                                 iPadControlsGetSetting("mouse_sensitivity_x"));
+                    }
                     SetSetting(s.name, automatic ? word : middle, true);
                     value = iPadControlsGetSetting(s.name);
                 }
@@ -1029,6 +1062,28 @@ namespace
                             live.layout != NULL ? live.layout : "?",
                             live.icons != NULL ? live.icons : "the disc's own");
 #endif
+    }
+
+    // Whether this platform's Settings list has the row.
+    bool SettingShown(const char* name)
+    {
+#if TSSM_GUI_CONSOLE
+        // Keyboard and mouse rows; config.ini still has them for a USB
+        // keyboard.
+        if (strcmp(name, "keyboard") == 0 || strncmp(name, "mouse_", 6) == 0)
+        {
+            return false;
+        }
+#endif
+#ifdef __3DS__
+        // No rumble, and the touch screen is this menu's.
+        if (strcmp(name, "rumble") == 0 || strcmp(name, "touch_controls") == 0)
+        {
+            return false;
+        }
+#endif
+        (void)name;
+        return true;
     }
 } // namespace
 
@@ -1158,6 +1213,10 @@ void iGui::DrawControls()
         float labels = 0.0f;
         for (size_t i = 0; i < sizeof(kSettings) / sizeof(kSettings[0]); i++)
         {
+            if (!SettingShown(kSettings[i].name))
+            {
+                continue;
+            }
             const float w = ImGui::CalcTextSize(kSettings[i].label).x;
             labels = w > labels ? w : labels;
         }
@@ -1166,25 +1225,10 @@ void iGui::DrawControls()
         ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
         for (size_t i = 0; i < sizeof(kSettings) / sizeof(kSettings[0]); i++)
         {
-#if TSSM_GUI_CONSOLE
-            // Keyboard and mouse rows; config.ini still has them for a USB
-            // keyboard.
-            if (strcmp(kSettings[i].name, "keyboard") == 0 ||
-                strcmp(kSettings[i].name, "mouse_camera") == 0 ||
-                strcmp(kSettings[i].name, "mouse_sensitivity") == 0)
+            if (SettingShown(kSettings[i].name))
             {
-                continue;
+                DrawSetting(kSettings[i]);
             }
-#endif
-#ifdef __3DS__
-            // No rumble, and the touch screen is this menu's.
-            if (strcmp(kSettings[i].name, "rumble") == 0 ||
-                strcmp(kSettings[i].name, "touch_controls") == 0)
-            {
-                continue;
-            }
-#endif
-            DrawSetting(kSettings[i]);
         }
         ImGui::EndTable();
     }

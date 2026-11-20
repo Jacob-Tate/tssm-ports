@@ -247,6 +247,21 @@ void iWindowSetFrameRateCeiling(S32 fps)
     }
 }
 
+// The GameCube's hold ([extras] frame_lock, iExtras.h) is not kept here: the
+// console holds only its own cap, 30 frames a second unless the player raises
+// it, as in 0.9.2: at 60 the GameCube's 30 fps levels run at 60 too. Holding
+// them would also change how the Patty Wagon steps (iExtrasHeldCarSteps),
+// which no console has run yet.
+void iWindowSetFrameLock(S32 count)
+{
+    (void)count;
+}
+
+S32 iWindowGetFrameLock()
+{
+    return 0;
+}
+
 S32 iWindowGetFrameRate()
 {
     return sFrameRate;

@@ -72,6 +72,8 @@ preview.png
 *.cgfx
 *.icn
 *.smdh
+# The repository's own default icon (tools/check_icon_art.py lists it).
+!/dist/pc/default_icon.ico
 
 # Local assistant and editor-tool folders and notes: never part of the project
 .claude/

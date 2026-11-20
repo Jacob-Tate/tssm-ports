@@ -4,6 +4,7 @@
 // table's hooks, the copies' memory, and the log. New code.
 
 #include "iLowHeap.h"
+#include "iSaveText.h"
 #include "xpkrsvc.h"
 
 #include <stdio.h>
@@ -17,9 +18,11 @@ extern void (*gAssetWidenFree)(void*);
 
 #ifndef TSSM_PTR64
 
-void iAssetTypesInstall(PKRAssetType*)
+void iAssetTypesInstall(PKRAssetType* handlers)
 {
     // 32-bit: every slot is pointer-sized already; the assets are read as they are.
+    // The save screens' warning is a setting on every host (iSaveText.h).
+    iSaveTextInstall(handlers);
 }
 
 #else
@@ -281,6 +284,9 @@ static void ReportAtExit()
 
 void iAssetTypesInstall(PKRAssetType* handlers)
 {
+    // The save screens' warning is a setting on every host (iSaveText.h).
+    iSaveTextInstall(handlers);
+
     const char* env = getenv("TSSM_WIDEN");
     if (env != NULL && strcmp(env, "0") == 0)
     {

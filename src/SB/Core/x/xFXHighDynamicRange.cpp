@@ -13,8 +13,11 @@
 #include <dolphin/mtx.h>
 
 #ifdef PLATFORM_PC
+#include "iExtras.h"
 #include "iHDRGlow.h"
 #include "iScreen.h"
+#include "iXboxGlow.h"
+#include "zScene.h"
 #endif
 
 U8 HDR_brightening;
@@ -36,6 +39,22 @@ namespace
 
     bool enabled = true;
 } // namespace
+
+#ifdef PLATFORM_PC
+namespace
+{
+    bool xbox_glow();
+
+    // PLATFORM_PC: whether the pass runs. On the GameCube zMenuSetup switches it off for the main
+    // menu (xFXHighDynamicRangeEnable(false)). The Xbox's never does: its `enabled` (0x2c8cf8) is
+    // only ever set to 1 (0x1345d2, 0x134f60), so its main menu glows. With the Xbox glow, so
+    // does this.
+    bool pass_enabled()
+    {
+        return enabled || xbox_glow();
+    }
+} // namespace
+#endif
 
 S32 hdr_dump_efb;
 GXBlendFactor hdr_src = GX_BL_SRCALPHA;
@@ -83,7 +102,11 @@ void xFXHighDynamicRangeReset()
 
 void xFXHighDynamicRangeStartRender()
 {
+#ifdef PLATFORM_PC
+    if (!pass_enabled())
+#else
     if (!enabled)
+#endif
     {
         return;
     }
@@ -125,8 +148,13 @@ void xFXHighDynamicRangeStartRender()
 
 void xFXHighDynamicRangeRender(RwCamera* camera)
 {
+#ifdef PLATFORM_PC
+    if (!pass_enabled() || globals.inLoadingScreen ||
+        (!zMenuRunning() && zGameGetOstrich() != eGameOstrich_InScene))
+#else
     if (!enabled || globals.inLoadingScreen ||
         (!zMenuRunning() && zGameGetOstrich() != eGameOstrich_InScene))
+#endif
     {
         return;
     }
@@ -137,8 +165,19 @@ void xFXHighDynamicRangeRender(RwCamera* camera)
     // PLATFORM_PC: the body below is GX -- copies out of the EFB, a bright pass drawn in the
     // EFB's top-left corner through five TEV stages, and the result added back over the frame --
     // which a host does not have. iHDRGlowRender draws the same passes with render targets.
-    iHDRGlowRender(camera, tweak::overbrighten, tweak::downsamples, hdr_down_src, hdr_down_dst,
-                   hdr_src, hdr_dst);
+    // With [extras] glow = xbox, the Xbox release's chain instead, at the scene's strength
+    // (iXboxGlow.h).
+    if (iExtrasInForce(iEXTRAS_GLOW) == iEXTRAS_XBOX)
+    {
+        iXboxGlowRender(camera, background_glow.value,
+                        iExtrasGlowStrength(globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0),
+                        kXboxGlowScene);
+    }
+    else
+    {
+        iHDRGlowRender(camera, tweak::overbrighten, tweak::downsamples, hdr_down_src,
+                       hdr_down_dst, hdr_src, hdr_dst);
+    }
     hdr_dump_efb = 0;
 #else
     U16 curSizeX = FB_XRES / 2;
@@ -353,18 +392,117 @@ void xFXHighDynamicRangeRender(RwCamera* camera)
 #endif
 }
 
+#ifdef PLATFORM_PC
+namespace
+{
+    // Whether the Xbox glow is drawn: [extras] glow = xbox and video.hdr_glow on.
+    bool xbox_glow()
+    {
+        return iExtrasInForce(iEXTRAS_GLOW) == iEXTRAS_XBOX && iHDRGlowEnabled();
+    }
+
+    // The alpha test xFXHighDynamicRangeBrightenPtank replaced (an RwAlphaTestFunction; its
+    // reference is what BrightenPtank returns), for RestorePtank.
+    S32 ptank_saved_func;
+
+    // An alpha test as RenderWare's GameCube driver takes it (rw/engine.cpp): one comparison.
+    void set_alpha_test(S32 func, S32 ref)
+    {
+        GXCompare comp = GX_ALWAYS;
+        if (func == rwALPHATESTFUNCTIONGREATEREQUAL)
+        {
+            comp = GX_GEQUAL;
+        }
+        else if (func == rwALPHATESTFUNCTIONLESS)
+        {
+            comp = GX_LESS;
+        }
+        RwGameCubeSetAlphaCompare(comp, CLAMP(ref, 0, 255), GX_AOP_AND, GX_ALWAYS, 0);
+    }
+} // namespace
+#endif
+
 U32 xFXHighDynamicRangeBrightenPtank(RpAtomic* ptank, bool bright)
 {
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: empty on the GameCube, so every particle tank writes the glow mask
+    // (xPTankPoolRender opens alpha writes for all of them). With the Xbox glow, the Xbox's
+    // body (DEFAULT.XBE 0x134a50): a tank that brightens (flag 8: fire, explosions) writes the
+    // mask through an alpha test of alpha > (glow + 1) / 2, and every other tank is drawn with
+    // alpha writes off and no alpha test.
+    if (xbox_glow())
+    {
+        void* func;
+        void* ref;
+        RwRenderStateGet(rwRENDERSTATEALPHATESTFUNCTION, &func);
+        RwRenderStateGet(rwRENDERSTATEALPHATESTFUNCTIONREF, &ref);
+        ptank_saved_func = (S32)(SPtr)func;
+
+        if (bright)
+        {
+            iDrawSetFBMSK(0, 0xFFFFFFFF, true);
+            // > n is >= n + 1 for a byte.
+            set_alpha_test(rwALPHATESTFUNCTIONGREATEREQUAL, (background_glow.value + 1) / 2 + 1);
+        }
+        else
+        {
+            iDrawSetFBMSK(0xFF000000, 0xFFFFFFFF, true);
+            set_alpha_test(rwALPHATESTFUNCTIONALWAYS, 0);
+        }
+        return (U32)(SPtr)ref;
+    }
+#endif
     return 0;
 }
 
 void xFXHighDynamicRangeRestorePtank(RpAtomic* ptank, U32 oldtest)
 {
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the Xbox's (0x134ba0) opens alpha writes again, as the pool left them; the
+    // alpha test goes back to what BrightenPtank found.
+    if (xbox_glow())
+    {
+        iDrawSetFBMSK(0, 0xFFFFFFFF, true);
+        set_alpha_test(ptank_saved_func, (S32)oldtest);
+    }
+#endif
 }
 
 void xFXHighDynamicRangeTunePalette(RwRaster* raster, F32 base_alpha, bool additive)
 {
 }
+
+#ifdef PLATFORM_PC
+bool xFXHighDynamicRangeMenuGlow()
+{
+    return xbox_glow();
+}
+
+void xFXHighDynamicRangeRenderMenu(RwCamera* camera)
+{
+    if (!xbox_glow())
+    {
+        xFXHighDynamicRangeRender(camera);
+        return;
+    }
+
+    if (!pass_enabled() || globals.inLoadingScreen ||
+        (!zMenuRunning() && zGameGetOstrich() != eGameOstrich_InScene))
+    {
+        return;
+    }
+
+    // At a strength of 0 (the one picked, iXboxGlow.h) the chain would add nothing.
+    const F32 strength = iXboxGlowMenuStrength();
+    if (strength <= 0.0f)
+    {
+        return;
+    }
+
+    zRenderState(SDRS_Fill);
+    iXboxGlowRender(camera, background_glow.value, strength, kXboxGlowMenu);
+}
+#endif
 
 void xFXHighDynamicRangeUpdate(F32 dt)
 {

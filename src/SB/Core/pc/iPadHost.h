@@ -65,6 +65,14 @@ void iPadHostExit();
 // calls PADRead: one read per frame feeds every port.
 void iPadHostPoll();
 
+// The launcher's share of iPadHostPoll, once a pass of its own loop: the
+// controllers that arrive or leave are opened and closed, and which one is
+// controller 1 is settled, so the Controls tab can name them and take a
+// button press for a binding before the game runs. Nothing is read for the
+// game, and the keyboard and mouse are left alone. iPadHostInit first, and
+// iPadHostExit when the launcher closes.
+void iPadHostPollDevices();
+
 const iPadHostState* iPadHostGet(S32 port);
 
 // 0 stops the motor, 1 runs it. The GameCube's motor has no intermediate

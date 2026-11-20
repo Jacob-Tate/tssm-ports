@@ -36,6 +36,14 @@ namespace
     const F32 kNone = 0.0f;
 }
 
+// The [extras] default: the Xbox release's version everywhere but the 3DS, where
+// each one waits until it has been timed on the console (docs/EXTRAS.md).
+#ifdef __3DS__
+#define TSSM_EXTRAS_DEFAULT "gamecube"
+#else
+#define TSSM_EXTRAS_DEFAULT "xbox"
+#endif
+
 const iConfigSetting kConfigSettings[] = {
     // TSSM-ADAPTED: treedome's table less the settings of BfBB features this
     // port did not import (toon, hipoly, world lighting, day/night, fonts,
@@ -44,8 +52,9 @@ const iConfigSetting kConfigSettings[] = {
     // nothing reads would be written into every config.ini as if it did
     // something. src/SB/Core/pc/PORTING.md lists what was removed.
     { "assets", "path", "",
-      "Folder containing boot.HIP, font.HIP and FMV/. Empty: the folder the game\n"
-      "; starts in. TSSM_ASSETS overrides this.",
+      "Folder containing boot.HIP, font.HIP and FMV/, from the Xbox or GameCube\n"
+      "; disc (for a Dolphin extraction, its files/ folder or the one above it).\n"
+      "; Empty: the folder the game starts in. TSSM_ASSETS overrides this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "assets", "mod", "",
       "Mod folder with the same layout as the asset folder. Its files replace the\n"
@@ -71,6 +80,12 @@ const iConfigSetting kConfigSettings[] = {
       "Folder for saves. Empty: the per-user data folder. TSSM_SAVE_DIR overrides\n"
       "; this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
+    // TSSM: the save screens' "Please don't turn off your Xbox console" (iSaveText.h).
+    { "game", "save_text", "auto",
+      "What the save screens ask you not to do: auto (this platform's own words),\n"
+      "; xbox or gamecube (that disc's own line, whichever disc's files you play),\n"
+      "; ps2, generic (no console named), pc, android, switch or 3ds.",
+      ICONFIG_ENUM, "auto|xbox|ps2|gamecube|generic|pc|android|switch|3ds", kNone, kNone },
     { "video", "mode", "borderless",
 #ifdef __SWITCH__
       "Not used on the Switch: the picture always fills the screen.",
@@ -153,8 +168,8 @@ const iConfigSetting kConfigSettings[] = {
     // TSSM: the console's screen passes, drawn by the port (src/SB/Core/pc/iHDRGlow.h,
     // iScreenWarp.h).
     { "video", "hdr_glow", "on",
-      "The glow around bright and glowing things, as on the GameCube. Off: no\n"
-      "; glow.",
+      "The glow around bright and glowing things: on (the glow [extras] glow picks,\n"
+      "; the Xbox's or the GameCube's) or off (no glow).",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "video", "screen_warp", "on",
       "The ripple of the picture around shockwaves, explosions and heat, as on the\n"
@@ -172,6 +187,37 @@ const iConfigSetting kConfigSettings[] = {
       "How deep the 3D is at the slider's top, 0 to 100.",
       ICONFIG_INT, NULL, 0.0f, 100.0f },
 #endif
+    // TSSM: features of the Xbox release, each beside the GameCube release's own
+    // (src/SB/Core/pc/iExtras.h, docs/EXTRAS.md).
+    { "extras", "glow", TSSM_EXTRAS_DEFAULT,
+      "The glow around bright things: xbox (the Xbox release's wide, soft glow,\n"
+      "; stronger in some levels) or gamecube (the GameCube release's tighter,\n"
+      "; fainter glow). video.hdr_glow = off turns either off.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "spotlights", TSSM_EXTRAS_DEFAULT,
+      "Spotlights: xbox (as the Xbox release: the moving spotlights of No Cheese!,\n"
+      "; Bubble Blowing Baby Hunt and Turn the Tables on Plankton are on, and every\n"
+      "; spotlight lights what it shines on and has a lamp flare) or gamecube (as\n"
+      "; the GameCube release: those lights are off, and a spotlight is its cone\n"
+      "; only). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "crowds", TSSM_EXTRAS_DEFAULT,
+      "The fish crowds in No Cheese! and Sandwich Driving 101: xbox (they move) or\n"
+      "; gamecube (they stand still, as on the GameCube). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "water", TSSM_EXTRAS_DEFAULT,
+      "Water in the levels whose Xbox files have a water body (SC02's tanks and\n"
+      "; B301's sea): xbox (the Xbox release's water: reflections, refraction and\n"
+      "; moving ripples) or gamecube (the GameCube release's water). Without the\n"
+      "; Xbox files, on Direct3D 9's fixed path or on Vulkan, gamecube is used.\n"
+      "; Applies when a level loads. An older file's [video] water is read as this.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "frame_lock", TSSM_EXTRAS_DEFAULT,
+      "The driving levels, Bubble Blowing Baby Hunt and Google-Eyes and Smelly\n"
+      "; Knick Knacks: xbox (at the frame-rate cap, like every other level) or\n"
+      "; gamecube (held at 30 frames a second, as on the GameCube). In both, the\n"
+      "; Patty Wagon drives as it does at 60 frames a second, as on the Xbox.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
     { "input", "controller", "auto",
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
       ICONFIG_INT, "auto", 1.0f, 4.0f },
@@ -251,22 +297,59 @@ const iConfigSetting kConfigSettings[] = {
 #ifdef __3DS__
       "Turn the camera the other way left and right.",
 #else
-      "Turn the camera the other way left and right (stick and mouse).",
+      "Turn the camera the other way left and right (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_x).",
 #endif
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "camera_invert_y", "off",
 #ifdef __3DS__
       "Turn the camera the other way up and down.",
 #else
-      "Turn the camera the other way up and down (stick and mouse).",
+      "Turn the camera the other way up and down (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_y).",
 #endif
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_camera", "on",
-      "Turn the camera with the mouse while the game window has focus.",
+    { "input", "mouse_look", "on",
+      "Mouse look: moving the mouse turns the camera, which stays where it is\n"
+      "; pointed. The game holds the mouse while you play and lets it go when\n"
+      "; Escape is pressed, in menus, in the settings window, when the window\n"
+      "; loses focus and on mouse_release_key. It takes it back when play goes\n"
+      "; on after a menu, or on a click in the window. (Was mouse_camera.)",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_sensitivity", "1.0",
-      "Mouse camera speed. 1.0 is the default.",
+    { "input", "mouse_sensitivity_x", "1.0",
+      "Mouse look speed left and right. 1.0 is the default. (Was\n"
+      "; mouse_sensitivity.)",
       ICONFIG_FLOAT, NULL, 0.05f, 20.0f },
+    { "input", "mouse_sensitivity_y", "same",
+      "Mouse look speed up and down: same (as left and right) or a number.",
+      ICONFIG_FLOAT, "same", 0.05f, 20.0f },
+    { "input", "mouse_invert_x", "off",
+      "Mouse look left and right the other way. Off: mouse right looks right.\n"
+      "; (A file from before this setting starts it from camera_invert_x.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_invert_y", "off",
+      "Mouse look up and down the other way. Off: mouse forward looks up.\n"
+      "; (A file from before this setting starts it from camera_invert_y.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_raw", "on",
+      "Read the mouse's own movement, without the desktop's pointer speed and\n"
+      "; acceleration. Off: with them.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_smoothing", "0",
+      "Smooths mouse look over this many milliseconds. 0 is none: the camera\n"
+      "; turns in the frame the mouse moved.",
+      ICONFIG_INT, NULL, 0.0f, 200.0f },
+    { "input", "mouse_release_key", "f2",
+      "The key that frees the mouse pointer while you play (to drag the window,\n"
+      "; say) and takes it back: f2 to f7, f9, f10, f12, tilde, or none. Escape\n"
+      "; always frees it as well.",
+      ICONFIG_ENUM, "f2|f3|f4|f5|f6|f7|f9|f10|f12|tilde|none", kNone, kNone },
+    { "input", "mouse_menus", "on",
+      "The mouse pointer in the game's own menus: pointing at an item highlights\n"
+      "; it, a click accepts it, a right click goes back, the wheel moves through\n"
+      "; a list. Off: the mouse is still let go in menus, and its buttons are the\n"
+      "; ones they are bound to.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "rumble", "100",
       "Rumble strength in percent; 0 turns it off. The game's own vibration\n"
       "; option still applies.",
