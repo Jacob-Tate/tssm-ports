@@ -180,7 +180,7 @@ if(TSSM_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(TSSM_INPUT_BACKEND STREQUAL "sdl")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp
-                    ${PC_DIR}/iPadTokens.cpp ${PC_DIR}/iPadTouch.cpp
+                    ${PC_DIR}/iPadTokens.cpp ${PC_DIR}/iPadTouch.cpp ${PC_DIR}/iMouseLook.cpp
                     ${PC_DIR}/iPadPrompts.cpp ${PC_DIR}/iPadTest.cpp ${PC_DIR}/iPadControls.cpp)
   set(INPUT_LIBS tssm_sdl)
   set(TSSM_NEEDS_SDL ON)
@@ -601,7 +601,7 @@ target_sources(tssm_rw PRIVATE ${PC_DIR}/iXboxWaterGrid.cpp)
 # TSSM Dehydrated release").
 set(TSSM_PC_TITLE "The SpongeBob SquarePants Movie Video Game" CACHE STRING
   "The program's name: window titles, the launcher, the overlay, message boxes, tssm.exe's version information")
-set(TSSM_PC_VERSION "0.9.3" CACHE STRING
+set(TSSM_PC_VERSION "0.9.4" CACHE STRING
   "The version in tssm.exe's version information: up to four numbers, such as 0.9.1")
 set(TSSM_VERSION_LINE "" CACHE STRING
   "The About tab's version line; empty: the branch and git describe")
@@ -820,9 +820,12 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iSaveCLI.cpp
   ${PC_DIR}/iSaveFormat.cpp
   ${PC_DIR}/iSaveStore.cpp
-  # The load screen's "no saves" message, made to name the slot (game only:
-  # it rewrites a loaded TEXT asset).
+  # The load screen's "no saves" message, made to name the slot, and the save
+  # screens' warning as a setting ([game] save_text): game only, it rewrites
+  # loaded TEXT assets. The table of lines and words is on its own, for
+  # tssm_savetexttest.
   ${PC_DIR}/iSaveText.cpp
+  ${PC_DIR}/iSaveTextTable.cpp
   ${PC_DIR}/iSaveZip.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
@@ -968,9 +971,10 @@ list(LENGTH TSSM_GC_UNITS _n_gc)
 message(STATUS "tssm: ${_n_game} game units from configure.py (+ ${_n_gc} gc units, replaced by src/SB/Core/pc)")
 
 add_library(tssm_game STATIC ${TSSM_GAME_SOURCES}
-  # Port-only, but it calls game code, so it is compiled as a game unit: the
-  # debug events of unattended runs (iTestEvents.h).
-  ${PC_DIR}/iTestEvents.cpp)
+  # Port-only, but they call game code, so they are compiled as game units: the
+  # debug events of unattended runs (iTestEvents.h), the mouse's camera orbit
+  # (iCameraOrbit.h) and its pointer in the game's menus (iMenuMouse.h).
+  ${PC_DIR}/iTestEvents.cpp ${PC_DIR}/iCameraOrbit.cpp ${PC_DIR}/iMenuMouse.cpp)
 target_link_libraries(tssm_game PUBLIC tssm_platform tssm_rw)
 # The platform layer calls back into this library too: iCapture.cpp calls
 # iTestEventsFrame and iTestSendFrame, which are game units. lld and link.exe
@@ -1138,31 +1142,57 @@ END
 endif()
 
 # --- the app icon ----------------------------------------------------------------
-# The repository carries no icon art. TSSM_ICON_DIR names a folder that
-# tools/make_icons.ps1 made from a picture, outside the repository
-# (docs/ICON.md). On Windows, tssm.exe then carries its tssm.ico. SDL registers
-# its window class with the executable's first icon, so the game's window and
-# the launcher's use it too (title bar, taskbar, Alt+Tab), at the size the
-# display's DPI asks for. Left empty, nothing changes: no icon resource.
+# By default the sponge block drawn for the port, the release builds' icon:
+# dist/pc/default_icon.ico and default_icon-64.png, which tools/make_icons.ps1
+# made from dist/switch/default_icon.jpg (docs/ICON.md). TSSM_ICON_DIR names a
+# folder of your own that tools/make_icons.ps1 made from a picture, outside
+# the repository, and wins. The icon goes to two places:
+#  * Windows: tssm.exe carries the .ico as its first icon resource, which
+#    Explorer shows, and iWindowSetIcon sends each window its sizes for the
+#    title bar, the taskbar and Alt+Tab.
+#  * Every SDL window, on every platform: the 64-pixel PNG is compiled in
+#    (tssm_window_icon.inc) and set with SDL_SetWindowIcon, on the launcher's
+#    window and the game's.
 set(TSSM_ICON_DIR "" CACHE PATH
-  "Folder made by tools/make_icons.ps1 (docs/ICON.md); empty keeps the default icon")
-if(TSSM_ICON_DIR AND WIN32 AND NOT ANDROID)
-  if(NOT EXISTS "${TSSM_ICON_DIR}/tssm.ico")
+  "Folder made by tools/make_icons.ps1 (docs/ICON.md); empty uses the sponge block in dist/pc")
+if(TSSM_ICON_DIR)
+  if(WIN32 AND NOT ANDROID AND NOT EXISTS "${TSSM_ICON_DIR}/tssm.ico")
     message(FATAL_ERROR "TSSM_ICON_DIR is ${TSSM_ICON_DIR}, which has no tssm.ico. "
       "Make the folder with tools/make_icons.ps1 (docs/ICON.md).")
   endif()
+  set(TSSM_ICON_ICO "${TSSM_ICON_DIR}/tssm.ico")
+  set(TSSM_ICON_PNG "${TSSM_ICON_DIR}/icon-64.png")
+  message(STATUS "App icon: ${TSSM_ICON_DIR}")
+else()
+  set(TSSM_ICON_ICO "${CMAKE_CURRENT_SOURCE_DIR}/dist/pc/default_icon.ico")
+  set(TSSM_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/dist/pc/default_icon-64.png")
+  message(STATUS "App icon: the default (dist/pc)")
+endif()
+set(TSSM_ICON_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_icon")
+if(WIN32 AND NOT ANDROID)
   enable_language(RC)
   # Copied into the build directory (a changed icon reconfigures), and the
   # resource script is written there too: neither enters the source tree.
-  set(TSSM_ICON_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_icon")
-  configure_file("${TSSM_ICON_DIR}/tssm.ico" "${TSSM_ICON_BUILD}/tssm.ico" COPYONLY)
+  configure_file("${TSSM_ICON_ICO}" "${TSSM_ICON_BUILD}/tssm.ico" COPYONLY)
   file(GENERATE OUTPUT "${TSSM_ICON_BUILD}/tssm_icon.rc"
     CONTENT "1 ICON \"${TSSM_ICON_BUILD}/tssm.ico\"\n")
   target_sources(tssm PRIVATE "${TSSM_ICON_BUILD}/tssm_icon.rc")
   set_source_files_properties("${TSSM_ICON_BUILD}/tssm_icon.rc" PROPERTIES
     GENERATED ON OBJECT_DEPENDS "${TSSM_ICON_BUILD}/tssm.ico")
-  message(STATUS "App icon: ${TSSM_ICON_DIR}/tssm.ico")
 endif()
+# The window icon's PNG as bytes. A folder of your own without icon-64.png
+# gives the windows none of their own (on Windows they still get the .ico).
+set(_tssm_icon_bytes "")
+if(EXISTS "${TSSM_ICON_PNG}")
+  file(READ "${TSSM_ICON_PNG}" _tssm_icon_hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _tssm_icon_bytes "${_tssm_icon_hex}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TSSM_ICON_PNG}")
+endif()
+file(GENERATE OUTPUT "${TSSM_ICON_BUILD}/tssm_window_icon.inc" CONTENT
+  "// Generated by CMakeLists.txt (\"the app icon\") from ${TSSM_ICON_PNG}.\n\
+static const unsigned char kWindowIconPng[] = { ${_tssm_icon_bytes} 0 };\n\
+static const unsigned kWindowIconPngSize = (unsigned)sizeof(kWindowIconPng) - 1;\n")
+target_include_directories(tssm_rw PRIVATE "${TSSM_ICON_BUILD}")
 
 # --- tests ----------------------------------------------------------------------
 option(TSSM_BUILD_TESTS "Build the platform layer's unit tests" ON)
@@ -1264,6 +1294,21 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   target_include_directories(tssm_watertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME tssm_watertest COMMAND tssm_watertest)
+endif()
+
+# --- tssm_savetexttest ---------------------------------------------------------------
+# The save screens' warning as a setting ([game] save_text, iSaveText.h): every
+# line of both discs with every choice, and what is never rewritten; no game.
+# With the Xbox and GameCube folders (TSSM_TEST_ASSETS, TSSM_TEST_GC_ASSETS)
+# every TEXT asset of both discs is checked against the table too.
+#   build-*/tssm_savetexttest [<Xbox files> [<GameCube files>]]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_savetexttest ${PC_DIR}/tests/savetexttest.cpp ${PC_DIR}/iSaveTextTable.cpp)
+  target_include_directories(tssm_savetexttest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  enable_testing()
+  add_test(NAME tssm_savetexttest COMMAND tssm_savetexttest "${TSSM_TEST_ASSETS}"
+    "${TSSM_TEST_GC_ASSETS}")
 endif()
 
 # --- tssm_gcswaptest -------------------------------------------------------------

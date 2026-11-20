@@ -202,6 +202,11 @@ bool iHostRunDetached(const char* exe, const char* workingDir);
 // held; only a process that is still alive (hung included) does.
 S32 iHostClaimInstance(const char* key, U32* holder);
 
+// Whether another running process holds `key` (iHostClaimInstance), without
+// claiming it: `holder` (if not NULL) gets that process's id, or 0. False when
+// nobody holds it, when this process does, or when the host cannot say.
+bool iHostInstanceHeld(const char* key, U32* holder);
+
 // Brings process `pid`'s main window to the front. 1: brought forward. 2: found,
 // but it is not responding. 0: none found, or the host cannot look.
 S32 iHostRaiseProcessWindow(U32 pid);

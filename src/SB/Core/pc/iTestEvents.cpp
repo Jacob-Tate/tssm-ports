@@ -5,6 +5,8 @@
 
 #include "iExtras.h"
 #include "iLightVolume.h"
+#include "iMenuMouse.h"
+#include "iMouseLook.h"
 #include "xAnim.h"
 #include "xEnt.h"
 #include "xMath3.h"
@@ -92,6 +94,153 @@ namespace
     S32 sCrowdLogLast;
     const S32 kMaxCrowd = 64;
     F32 sCrowdTime[kMaxCrowd];
+
+    // TSSM_TEST_MOUSE: a mouse of the test's own (iMouseLook.h).
+    enum MouseKind
+    {
+        MOUSE_MOVE,
+        MOUSE_AT,
+        MOUSE_CLICK,
+        MOUSE_RCLICK,
+        MOUSE_WHEEL,
+        MOUSE_ESC
+    };
+
+    struct MouseEvent
+    {
+        S32 first;
+        S32 last;
+        MouseKind kind;
+        F32 x;
+        F32 y;
+    };
+
+    const S32 kMaxMouse = 128;
+
+    MouseEvent sMouse[kMaxMouse];
+    S32 sMouseCount;
+
+    // TSSM_TEST_UILOG=n: every n frames, log the menu widgets (iMenuMouseLog).
+    S32 sUILogEvery;
+
+    // TSSM_TEST_LOOKLOG=1: with each TSSM_TEST_CAMLOG line, the on-foot camera's angles and
+    // whether the mouse is steering it.
+    bool sLookLog;
+
+    void ParseMouse(const char* list)
+    {
+        static char buf[4096];
+        strncpy(buf, list, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = '\0';
+
+        for (char* entry = strtok(buf, ","); entry != NULL; entry = strtok(NULL, ","))
+        {
+            MouseEvent e;
+            e.x = 0.0f;
+            e.y = 0.0f;
+            int frames = 1;
+            char word[16] = "";
+            bool ok = sMouseCount < kMaxMouse;
+
+            if (sscanf(entry, "%d:%15[a-z]", &e.first, word) != 2 || e.first < 1)
+            {
+                ok = false;
+            }
+            else if (strcmp(word, "move") == 0)
+            {
+                e.kind = MOUSE_MOVE;
+                ok = ok && sscanf(entry, "%*d:move:%f:%f/%d", &e.x, &e.y, &frames) >= 2;
+            }
+            else if (strcmp(word, "at") == 0)
+            {
+                e.kind = MOUSE_AT;
+                ok = ok && sscanf(entry, "%*d:at:%f:%f", &e.x, &e.y) == 2;
+            }
+            else if (strcmp(word, "click") == 0)
+            {
+                e.kind = MOUSE_CLICK;
+            }
+            else if (strcmp(word, "rclick") == 0)
+            {
+                e.kind = MOUSE_RCLICK;
+            }
+            else if (strcmp(word, "wheel") == 0)
+            {
+                e.kind = MOUSE_WHEEL;
+                ok = ok && sscanf(entry, "%*d:wheel:%f", &e.x) == 1;
+            }
+            else if (strcmp(word, "esc") == 0)
+            {
+                // The Escape key itself going down, for the pointer: what it
+                // is bound to (Start) is TSSM_INPUT's to press.
+                e.kind = MOUSE_ESC;
+            }
+            else
+            {
+                ok = false;
+            }
+
+            if (!ok)
+            {
+                printf("tssm: test: TSSM_TEST_MOUSE: '%s' is not frame:move:dx:dy[/frames], "
+                       "frame:at:x:y, frame:click, frame:rclick, frame:wheel:n or frame:esc (or there are "
+                       "more than %d); ignored\n",
+                       entry, (int)kMaxMouse);
+                continue;
+            }
+
+            e.last = e.first + (frames > 1 ? frames - 1 : 0);
+            sMouse[sMouseCount++] = e;
+        }
+
+        // The test's mouse from the first frame on, whatever is plugged in.
+        iMouseLookTestMove(0.0f, 0.0f);
+        fflush(stdout);
+    }
+
+    void MouseFrame(S32 frame)
+    {
+        for (S32 i = 0; i < sMouseCount; i++)
+        {
+            const MouseEvent& e = sMouse[i];
+            if (frame < e.first || frame > e.last)
+            {
+                continue;
+            }
+
+            switch (e.kind)
+            {
+            case MOUSE_MOVE:
+                iMouseLookTestMove(e.x, e.y);
+                break;
+            case MOUSE_AT:
+            {
+                F32 wx;
+                F32 wy;
+                iMenuMouseToWindow(e.x, e.y, &wx, &wy);
+                iMouseLookTestPointer(wx, wy);
+                printf("tssm: test: frame %d: pointer to %.0f %.0f\n", (int)frame, (double)e.x,
+                       (double)e.y);
+                break;
+            }
+            case MOUSE_CLICK:
+                iMouseLookTestPress(1);
+                printf("tssm: test: frame %d: click\n", (int)frame);
+                break;
+            case MOUSE_RCLICK:
+                iMouseLookTestPress(2);
+                printf("tssm: test: frame %d: right click\n", (int)frame);
+                break;
+            case MOUSE_WHEEL:
+                iMouseLookTestWheel(e.x > 0.0f ? 1 : -1);
+                break;
+            case MOUSE_ESC:
+                iMouseLookTestEscape();
+                printf("tssm: test: frame %d: Escape\n", (int)frame);
+                break;
+            }
+        }
+    }
 
     struct TypeName
     {
@@ -413,6 +562,25 @@ void iTestEventsFrame(S32 frame)
         {
             sCrowdLogEvery = atoi(crowdLog);
         }
+        const char* mouse = getenv("TSSM_TEST_MOUSE");
+        if (mouse != NULL && mouse[0] != '\0')
+        {
+            ParseMouse(mouse);
+        }
+        const char* lookLog = getenv("TSSM_TEST_LOOKLOG");
+        sLookLog = lookLog != NULL && atoi(lookLog) != 0;
+        const char* uiLog = getenv("TSSM_TEST_UILOG");
+        if (uiLog != NULL && atoi(uiLog) > 0)
+        {
+            sUILogEvery = atoi(uiLog);
+        }
+    }
+
+    MouseFrame(frame);
+
+    if (sUILogEvery > 0 && frame % sUILogEvery == 0)
+    {
+        iMenuMouseLog(frame);
     }
 
     if (sCarLogLast > 0 && frame >= sCarLogFirst && frame <= sCarLogLast)
@@ -479,6 +647,19 @@ void iTestEventsFrame(S32 frame)
         const xVec3& pos = globals.oldSkoolCamera.mat.pos;
         printf("tssm: test: frame %d: camera at (%g, %g, %g), fly-through %s\n", (int)frame,
                (double)pos.x, (double)pos.y, (double)pos.z, zcam_fly != 0 ? "on" : "off");
+        if (sLookLog)
+        {
+            // For the mouse look checks: where the on-foot camera sits around the player
+            // (its orbit angle), how it is aimed, and who is steering it.
+            const xCamera& cam = globals.oldSkoolCamera;
+            printf("tssm: test: frame %d: look orbit %.4f yaw %.4f pitch %.4f at (%.3f, %.3f, "
+                   "%.3f) right (%.3f, %.3f, %.3f) mouse %s\n",
+                   (int)frame, (double)cam.pcur, (double)cam.yaw_cur, (double)cam.pitch_cur,
+                   (double)cam.mat.at.x, (double)cam.mat.at.y, (double)cam.mat.at.z,
+                   (double)cam.mat.right.x, (double)cam.mat.right.y, (double)cam.mat.right.z,
+                   iMouseLookSteering() ? "steering" : "off");
+            fflush(stdout);
+        }
     }
 
     for (S32 i = 0; i < sWarpCount; i++)

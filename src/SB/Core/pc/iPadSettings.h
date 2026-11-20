@@ -57,8 +57,18 @@ struct iPadSettings
     S32 camera_invert_x;
     S32 camera_invert_y;
 
-    S32 mouse_camera;
-    F32 mouse_sensitivity;
+    // The mouse (iMouseLook.h). Sensitivity 1 is 0.2 degrees a count; smoothing
+    // is a time constant in seconds, 0 for none; the release key is a key's
+    // name in the [keyboard] grammar, or empty.
+    S32 mouse_look;
+    F32 mouse_sensitivity_x;
+    F32 mouse_sensitivity_y;
+    S32 mouse_invert_x;
+    S32 mouse_invert_y;
+    S32 mouse_raw;
+    F32 mouse_smoothing;
+    char mouse_release_key[16];
+    S32 mouse_menus;
 
     // 0..1, applied to every rumble.
     F32 rumble;

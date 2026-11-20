@@ -18,8 +18,9 @@ the repository's Releases page (this port under that neutral name, with the
 port's own simple icon), or build it yourself from this source as below. Either
 way you bring your own copy of the game's files, Xbox or GameCube ("The game's
 files", below). A build of your own is called *The SpongeBob SquarePants Movie
-Video Game* and can carry an icon made from a picture of your choice
-(`docs/ICON.md`).
+Video Game*. Both carry the port's sponge-block icon (`dist/pc`) on the
+program, its windows and the taskbar; a build of your own can carry one made
+from a picture of your choice instead (`docs/ICON.md`).
 
 ## Building on Windows
 
@@ -55,9 +56,9 @@ By hand:
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
 | `TSSM_PC_TITLE` | `The SpongeBob SquarePants Movie Video Game` | the program's name: the launcher's and the game's window titles, the launcher's heading, the settings window's title and About tab, message boxes, the first line of `config.ini`, and the name in `tssm.exe`'s version information (Explorer's Properties, Task Manager). No double quotes, backslashes or `%` |
-| `TSSM_PC_VERSION` | `0.9.3` | the version in `tssm.exe`'s version information: up to four numbers |
+| `TSSM_PC_VERSION` | `0.9.4` | the version in `tssm.exe`'s version information: up to four numbers |
 | `TSSM_VERSION_LINE` | empty | the About tab's version line; empty: the branch and `git describe` |
-| `TSSM_ICON_DIR` | empty | a folder made by `tools/make_icons.ps1`: `tssm.exe`'s icon (`docs/ICON.md`); empty: no icon of its own |
+| `TSSM_ICON_DIR` | empty | a folder made by `tools/make_icons.ps1`: the icon of `tssm.exe` and of its windows (`docs/ICON.md`); empty: the port's sponge block, `dist/pc` |
 
 CMake caches these, so a build directory keeps what it was configured with until
 it is configured again with `-D...`.
@@ -207,12 +208,14 @@ icon and, like every build, none of the game's files (players bring their
 own, as above). They are ordinary Release builds of this branch with clang++ on
 the MSVC ABI (as `build-release.bat`), set up like this:
 
-- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.3` and
-  `TSSM_VERSION_LINE=0.9.3`: the name and version in every place the options
+- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.4` and
+  `TSSM_VERSION_LINE=0.9.4`: the name and version in every place the options
   table above lists;
-- `TSSM_ICON_DIR`: `tools/make_icons.ps1` run on the drawn sponge block,
-  `dist/switch/default_icon.jpg` on the `switch` branch (the Switch's and the
-  Android app's default icon);
+- the default icon: `dist/pc/default_icon.ico` and `default_icon-64.png`,
+  `tools/make_icons.ps1`'s output for the drawn sponge block
+  (`dist/switch/default_icon.jpg` on the `switch` branch, the Switch's and the
+  Android app's default icon), byte for byte what 0.9.2 and 0.9.3 were given
+  through `TSSM_ICON_DIR`; no `TSSM_ICON_DIR` is needed any more;
 - FFmpeg n9.0.2 from `tools/build_ffmpeg_msvc.sh`: five DLLs with the decoders
   the game's movies and mods' sounds need, LGPL 2.1 or later;
 - the static C and C++ runtime (`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`;
@@ -236,13 +239,11 @@ extracted into the work folder:
     rem %R%\src: this branch with its submodules (Building on Windows)
     set MSYS2_PATH_TYPE=inherit
     C:\msys64\usr\bin\bash -l -c "sh /c/tssm-rel/pc/src/tools/build_ffmpeg_msvc.sh /c/tssm-rel/pc/FFmpeg-n9.0.2 /c/tssm-rel/pc/ff-x64 /c/tssm-rel/pc/ffmpeg-x64"
-    git -C %R%\src show origin/switch:dist/switch/default_icon.jpg > %R%\default_icon.jpg
-    powershell -ExecutionPolicy Bypass -File %R%\src\tools\make_icons.ps1 -Image %R%\default_icon.jpg -OutDir %R%\icon
     cmake -S %R%\src -B %R%\build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release ^
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ^
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DTSSM_BUILD_TESTS=OFF ^
-          -DCMAKE_PREFIX_PATH=%R%/ffmpeg-x64 -DTSSM_ICON_DIR=%R%/icon ^
-          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.3 -DTSSM_VERSION_LINE=0.9.3 ^
+          -DCMAKE_PREFIX_PATH=%R%/ffmpeg-x64 ^
+          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.4 -DTSSM_VERSION_LINE=0.9.4 ^
           -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%R%/bin-x64
     cmake --build %R%\build-x64 --target tssm
 
@@ -313,12 +314,14 @@ Every save that is replaced is kept as a backup (`--restore-save`).
 
 The settings table is `iConfigTable.cpp` (`[assets] path, mod, mods,
 mods_folder`, `[game] boot,
-intro_movies, save_folder`, `[video] mode, width, height, ui, framerate,
+intro_movies, save_folder, save_text` (the save screens' words, `iSaveText.h`,
+`docs/GUI.md`), `[video] mode, width, height, ui, framerate,
 vsync, msaa, fov, backend, pipeline, hdr_glow, screen_warp`, `[extras] glow, spotlights, crowds,
 water, frame_lock` (the Xbox release's features, `docs/EXTRAS.md`), `[input] controller, preset, layout,
 button_icons, keyboard, stick_curve, deadzone, trigger_threshold,
-camera_sensitivity, camera_invert_x, camera_invert_y, mouse_camera,
-mouse_sensitivity, rumble, touch_controls, test`, `[audio] master_volume,
+camera_sensitivity, camera_invert_x, camera_invert_y, mouse_look,
+mouse_sensitivity_x, mouse_sensitivity_y, mouse_invert_x, mouse_invert_y, mouse_raw,
+mouse_smoothing, mouse_release_key, mouse_menus, rumble, touch_controls, test`, `[audio] master_volume,
 music_volume, sfx_volume, movie_volume`, `[gui] launcher, key, pad_combo,
 scale`, and the `[pad]`/`[keyboard]` bindings). The controls, and how each
 button was established, are in `docs/CONTROLS.md`. In the game, F1 (or
@@ -352,6 +355,10 @@ The port runs the GameCube game's own code, and a behaviour of the original is
 kept even where it looks like a bug. Changes made on purpose are listed here and
 in `PORTING.md` (known divergences).
 
+- **The mouse turns the camera directly** (mouse look, `docs/CONTROLS.md`). While the mouse
+  is what turns it, the on-foot camera stays where it is pointed: it does not ease back and
+  does not swing behind the player, as the original's does after the stick is let go. A
+  controller, or the camera keys, get the original camera exactly.
 - **The SpongeBall keeps its full speed on a slow device.** On a device that
   cannot keep about 45 frames a second (or with the frame rate cap below that),
   the SpongeBall now rolls as fast as at 60. The original slows the ball at
@@ -416,7 +423,10 @@ writes those presented frames as `frame_NNNNN.png` into `TSSM_CAPTURE_DIR`, and
 (e.g. `400:start,1000:a`; real controllers are ignored while it is set);
 `TSSM_TEST_WARP=<frame:type,...>` emits screen warps at the player,
 `TSSM_TEST_PLACE=<frame:x:y:z[:yaw],...>` puts the player down at a spot and
-`TSSM_TEST_CAMLOG=<n>` logs the camera every n frames, `TSSM_TEST_SPOTLOG=<n>` the
+`TSSM_TEST_CAMLOG=<n>` logs the camera every n frames (with `TSSM_TEST_LOOKLOG=1` also its
+angles and whether the mouse steers it), `TSSM_TEST_MOUSE=<frame:move:dx:dy[/frames],frame:at:x:y,frame:click,frame:esc,...>`
+plays a mouse of the test's own (mouse look, and the pointer in the game's menus), `TSSM_TEST_UILOG=<n>`
+logs the menu widgets a pointer could mean, `TSSM_TEST_SPOTLOG=<n>` the
 scene's spotlights and `TSSM_TEST_CROWDLOG=<n>` its crowd (`iTestEvents.h`), and `TSSM_HDR_VIEW=mask|glow|base` shows the glow pass's input
 or output, or (the Xbox glow) the frame without it (`docs/RENDERING.md`, which covers the console's screen effects on
 PC). Keep captures of game frames out of the repository.

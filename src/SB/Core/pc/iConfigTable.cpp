@@ -80,6 +80,12 @@ const iConfigSetting kConfigSettings[] = {
       "Folder for saves. Empty: the per-user data folder. TSSM_SAVE_DIR overrides\n"
       "; this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
+    // TSSM: the save screens' "Please don't turn off your Xbox console" (iSaveText.h).
+    { "game", "save_text", "auto",
+      "What the save screens ask you not to do: auto (this platform's own words),\n"
+      "; xbox or gamecube (that disc's own line, whichever disc's files you play),\n"
+      "; ps2, generic (no console named), pc, android, switch or 3ds.",
+      ICONFIG_ENUM, "auto|xbox|ps2|gamecube|generic|pc|android|switch|3ds", kNone, kNone },
     { "video", "mode", "borderless",
       "Window mode: borderless, fullscreen (exclusive) or windowed. Alt+Enter\n"
       "; switches between windowed and borderless.",
@@ -204,17 +210,54 @@ const iConfigSetting kConfigSettings[] = {
       "Right-stick camera speed. 1.0 is the original speed.",
       ICONFIG_FLOAT, NULL, 0.1f, 5.0f },
     { "input", "camera_invert_x", "off",
-      "Turn the camera the other way left and right (stick and mouse).",
+      "Turn the camera the other way left and right (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_x).",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "camera_invert_y", "off",
-      "Turn the camera the other way up and down (stick and mouse).",
+      "Turn the camera the other way up and down (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_y).",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_camera", "on",
-      "Turn the camera with the mouse while the game window has focus.",
+    { "input", "mouse_look", "on",
+      "Mouse look: moving the mouse turns the camera, which stays where it is\n"
+      "; pointed. The game holds the mouse while you play and lets it go when\n"
+      "; Escape is pressed, in menus, in the settings window, when the window\n"
+      "; loses focus and on mouse_release_key. It takes it back when play goes\n"
+      "; on after a menu, or on a click in the window. (Was mouse_camera.)",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_sensitivity", "1.0",
-      "Mouse camera speed. 1.0 is the default.",
+    { "input", "mouse_sensitivity_x", "1.0",
+      "Mouse look speed left and right. 1.0 is the default. (Was\n"
+      "; mouse_sensitivity.)",
       ICONFIG_FLOAT, NULL, 0.05f, 20.0f },
+    { "input", "mouse_sensitivity_y", "same",
+      "Mouse look speed up and down: same (as left and right) or a number.",
+      ICONFIG_FLOAT, "same", 0.05f, 20.0f },
+    { "input", "mouse_invert_x", "off",
+      "Mouse look left and right the other way. Off: mouse right looks right.\n"
+      "; (A file from before this setting starts it from camera_invert_x.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_invert_y", "off",
+      "Mouse look up and down the other way. Off: mouse forward looks up.\n"
+      "; (A file from before this setting starts it from camera_invert_y.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_raw", "on",
+      "Read the mouse's own movement, without the desktop's pointer speed and\n"
+      "; acceleration. Off: with them.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_smoothing", "0",
+      "Smooths mouse look over this many milliseconds. 0 is none: the camera\n"
+      "; turns in the frame the mouse moved.",
+      ICONFIG_INT, NULL, 0.0f, 200.0f },
+    { "input", "mouse_release_key", "f2",
+      "The key that frees the mouse pointer while you play (to drag the window,\n"
+      "; say) and takes it back: f2 to f7, f9, f10, f12, tilde, or none. Escape\n"
+      "; always frees it as well.",
+      ICONFIG_ENUM, "f2|f3|f4|f5|f6|f7|f9|f10|f12|tilde|none", kNone, kNone },
+    { "input", "mouse_menus", "on",
+      "The mouse pointer in the game's own menus: pointing at an item highlights\n"
+      "; it, a click accepts it, a right click goes back, the wheel moves through\n"
+      "; a list. Off: the mouse is still let go in menus, and its buttons are the\n"
+      "; ones they are bound to.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "rumble", "100",
       "Rumble strength in percent; 0 turns it off. The game's own vibration\n"
       "; option still applies.",

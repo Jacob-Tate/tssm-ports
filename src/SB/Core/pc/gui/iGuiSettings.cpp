@@ -23,6 +23,7 @@
 #include "iExtras.h"
 #include "iHDRGlow.h"
 #include "iHost.h"
+#include "iSaveText.h"
 #include "iScreen.h"
 #include "iScreenWarp.h"
 #include "iWindow.h"
@@ -90,7 +91,7 @@ namespace
     // --- controls bound to a setting ------------------------------------------
 
     bool ChoiceCombo(const char* id, const char* key, const Choice* choices, S32 count,
-                     const char* def)
+                     const char* def, ImGuiComboFlags comboFlags = 0)
     {
         const char* current = iConfigGetString(key, def);
         S32 selected = -1;
@@ -104,7 +105,7 @@ namespace
 
         bool changed = false;
         ControlWidth();
-        if (ImGui::BeginCombo(id, selected >= 0 ? choices[selected].label : current))
+        if (ImGui::BeginCombo(id, selected >= 0 ? choices[selected].label : current, comboFlags))
         {
             for (S32 i = 0; i < count; i++)
             {
@@ -1004,24 +1005,64 @@ void iGui::SettingsGame()
 
     // The camera, sticks, triggers, mouse and touch settings belong to the
     // input layer, which applies them live (iPadControlsSetSetting): they are
-    // on the Controls tab.
-    if (!InLauncher())
-    {
-        Row("Controls");
-        ImGui::TextDisabled("Camera speed, sticks, triggers, mouse and touch: the Controls tab.");
-    }
-    else
-    {
-        static const Choice kTouch[] = { { "auto", "Automatic (Android)" },
-                                         { "on", "On" },
-                                         { "off", "Off" } };
-        Row("Touch controls");
-        ChoiceCombo("##touch", "input.touch_controls", kTouch, 3, "auto");
-    }
+    // on the Controls tab, in the launcher too.
+    Row("Controls");
+    ImGui::TextDisabled("Camera speed, sticks, triggers, mouse and touch: the Controls tab.");
 
     Row("Save folder");
     FolderRow("saves", "game.save_folder", "(default: the per-user data folder)", "Default");
     RestartTag("game.save_folder");
+
+    // The save screens' "Please don't turn off your Xbox console" (iSaveText.h).
+    // Live: a line already loaded changes at once.
+    {
+        Choice choices[ISAVETEXT_COUNT];
+        char autoLabel[96];
+        snprintf(autoLabel, sizeof(autoLabel), "Automatic (%s)",
+                 iSaveTextChoiceLabel(iSaveTextPlatform()));
+        for (S32 i = 0; i < ISAVETEXT_COUNT; i++)
+        {
+            choices[i].value = iSaveTextChoiceName((iSaveTextChoice)i);
+            choices[i].label = i == ISAVETEXT_AUTO ? autoLabel : iSaveTextChoiceLabel((iSaveTextChoice)i);
+        }
+
+        // More than a combo's usual 8 rows: all of them at once.
+        Row("Save screen text");
+        if (ChoiceCombo("##savetext", "game.save_text", choices, ISAVETEXT_COUNT, "auto",
+                        ImGuiComboFlags_HeightLarge))
+        {
+            iSaveTextApplyConfig();
+        }
+
+        bool ok = true;
+        const char* value = iConfigGetString("game.save_text", "auto");
+        const iSaveTextChoice choice = iSaveTextParse(value, &ok);
+        if (!ok)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f),
+                               "config.ini has \"%s\" here, which is not one of these: Automatic "
+                               "is used.",
+                               value);
+        }
+        const iSaveTextChoice resolved = iSaveTextResolve(choice);
+        if (resolved == ISAVETEXT_XBOX || resolved == ISAVETEXT_GAMECUBE)
+        {
+            Note("While saving: \"%s\" On the %s disc's files, its own lines exactly; on the "
+                 "other disc's, these words in their place.",
+                 iSaveTextSentence(resolved),
+                 resolved == ISAVETEXT_XBOX ? "Xbox" : "GameCube");
+        }
+        else if (resolved == ISAVETEXT_PS2)
+        {
+            Note("While saving: \"Do not remove the memory card (8MB) (for PlayStation 2), or "
+                 "reset/switch off the console.\" The PS2 release's usual warning, until its own "
+                 "words are read from a PS2 disc.");
+        }
+        else
+        {
+            Note("While saving: \"%s\"", iSaveTextSentence(resolved));
+        }
+    }
 
     ImGui::EndTable();
 }
@@ -1131,6 +1172,13 @@ void iGui::SettingsInterface()
 
 void iGui::DrawSettings()
 {
+    // In the launcher the game's files come first: without them there is no
+    // Play, and on a first run they are the one thing to do.
+    if (InLauncher())
+    {
+        SettingsGameFiles();
+        ImGui::Spacing();
+    }
     SettingsDisplay();
     ImGui::Spacing();
     SettingsExtras();
@@ -1138,8 +1186,11 @@ void iGui::DrawSettings()
     SettingsAudio();
     ImGui::Spacing();
     SettingsGame();
-    ImGui::Spacing();
-    SettingsGameFiles();
+    if (!InLauncher())
+    {
+        ImGui::Spacing();
+        SettingsGameFiles();
+    }
     ImGui::Spacing();
     SettingsInterface();
 }

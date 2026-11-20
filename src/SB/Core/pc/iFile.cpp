@@ -948,6 +948,161 @@ void iFileMissingPackage(U32 sid, S32 options, const char* filename)
     exit(1);
 }
 
+// The number of world assets (JSP and BSP) in a package's table of contents,
+// read through the port's own files (a mod's copy when a mod replaces it); -1
+// when the package cannot be opened, -2 when it opens but has no table of
+// contents (empty, cut short before its DICT, or not a package). Only the
+// front of the file is read: the PACK chunk and the DICT with every AHDR.
+static S32 PackageWorldAssets(const char* name)
+{
+    tag_xFile file = {};
+    if (iFileOpen(name, 0, &file) != 0)
+    {
+        return -1;
+    }
+
+    // iFileRead never comes up short -- past the end it gives zeros, as the
+    // DVD gave padding -- so the walk stops at the file's length instead.
+    const U32 length = file.ps.length > 0 ? (U32)file.ps.length : 0;
+    U32 at = 0;
+    S32 count = -2;
+    U8 head[8];
+    std::vector<U8> body;
+    while (at + 8 <= length)
+    {
+        iFileRead(&file, head, 8);
+        at += 8;
+        const U32 size = ((U32)head[4] << 24) | ((U32)head[5] << 16) | ((U32)head[6] << 8) | head[7];
+        if (memcmp(head, "HIPA", 4) == 0)
+        {
+            continue;
+        }
+        // A chunk past the end, or a table of contents larger than this, is
+        // not a package's.
+        if (size > length - at || size > (16u << 20))
+        {
+            break;
+        }
+        body.resize(size);
+        if (size > 0)
+        {
+            iFileRead(&file, &body[0], size);
+        }
+        at += size;
+        if (memcmp(head, "DICT", 4) != 0)
+        {
+            continue;
+        }
+
+        // DICT holds ATOC, which holds AINF and one AHDR per asset: id, then
+        // the type, big-endian chunk sizes on every console.
+        count = 0;
+        for (U32 o = 0; o + 8 <= size;)
+        {
+            const U32 n = ((U32)body[o + 4] << 24) | ((U32)body[o + 5] << 16) |
+                          ((U32)body[o + 6] << 8) | body[o + 7];
+            if (memcmp(&body[o], "ATOC", 4) == 0)
+            {
+                o += 8;
+                continue;
+            }
+            if (memcmp(&body[o], "AHDR", 4) == 0 && n >= 8 && o + 16 <= size &&
+                (memcmp(&body[o + 12], "JSP ", 4) == 0 || memcmp(&body[o + 12], "BSP ", 4) == 0))
+            {
+                count++;
+            }
+            // A chunk that runs past the table is not a package's, and one
+            // large enough would bring the walk back to where it has been.
+            if (n > size - o - 8)
+            {
+                break;
+            }
+            o += 8 + n;
+        }
+        break;
+    }
+
+    iFileClose(&file);
+    return count;
+}
+
+void iFileOptionalPackage(U32 sid, S32 options, const char* filename)
+{
+    char tag[5];
+    for (S32 i = 0; i < 4; i++)
+    {
+        char c = (char)(sid >> (24 - 8 * i));
+        tag[i] = (c >= ' ' && c <= '~') ? c : '?';
+    }
+    tag[4] = '\0';
+
+    char subdir[64];
+    char root[64];
+    if (filename != NULL)
+    {
+        snprintf(subdir, sizeof(subdir), "%s", filename);
+        root[0] = '\0';
+    }
+    else
+    {
+        snprintf(subdir, sizeof(subdir), "%.2s/%s.HOP", tag, tag);
+        snprintf(root, sizeof(root), "%s.HOP", tag);
+    }
+
+    // There but not opened by the packer (cut short, say), which retail would
+    // only crash on later: the same message as a HIP's. A HOP that opens but
+    // holds no game data is not caught here, and crashes later as retail would.
+    if (iFileExists(subdir, 0) || (root[0] != '\0' && iFileExists(root, 0)))
+    {
+        iFileMissingPackage(sid, options, filename);
+        return;
+    }
+
+    // The HIP xSTPreLoadScene will open next, as it looks for it: a level made
+    // as one HIP carries its own world (JSP assets); every level of both discs
+    // keeps its world in the HOP and none in the HIP, and its HIP alone crashes
+    // the packer on the first asset that needs the HOP (ATBL_Read). A HIP
+    // without a world, or one that is not a package at all, needs the HOP that
+    // is not there: a copied file set that lost it, named as missing. No HIP at
+    // all is left to the HIP's own check.
+    char hip[64];
+    char hipRoot[64];
+    if (filename != NULL)
+    {
+        snprintf(hip, sizeof(hip), "%s", filename);
+        char* dot = strrchr(hip, '.');
+        if (dot != NULL && (size_t)(dot - hip) + 4 < sizeof(hip))
+        {
+            strcpy(dot, ".HIP");
+        }
+        hipRoot[0] = '\0';
+    }
+    else
+    {
+        snprintf(hip, sizeof(hip), "%.2s/%s.HIP", tag, tag);
+        snprintf(hipRoot, sizeof(hipRoot), "%s.HIP", tag);
+    }
+    S32 world = PackageWorldAssets(hip);
+    if (world == -1 && hipRoot[0] != '\0')
+    {
+        world = PackageWorldAssets(hipRoot);
+    }
+    if (world == 0 || world == -2)
+    {
+        printf("tssm: %s is not there, and the level's HIP %s\n", subdir,
+               world == 0 ? "has no world of its own" : "is not a package");
+        iFileMissingPackage(sid, options, filename);
+        return;
+    }
+
+    if (world > 0)
+    {
+        printf("tssm: %s is not there; the level loads from its HIP alone, as on the console\n",
+               subdir);
+        fflush(stdout);
+    }
+}
+
 // A file that is not there, said out loud.
 //
 // The game does not check, and cannot be made to: zMainLoadFontHIP ends in

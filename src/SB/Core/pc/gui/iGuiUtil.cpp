@@ -2,13 +2,19 @@
 // the check of the game's folder and the PNG writer. See iGuiInternal.h.
 
 #include "imgui.h"
+#include "imgui_impl_sdl3.h"
 
 #include <SDL3/SDL.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
 #include "iHost.h"
+#include "iSaveStore.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -223,6 +229,72 @@ bool iGui::InLauncher()
 void iGui::SetInLauncher(bool on)
 {
     sInLauncher = on;
+}
+
+void iGui::UseOpenGamepads()
+{
+    SDL_Gamepad* pads[8];
+    int count = 0;
+
+    int n = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&n);
+    if (ids != NULL)
+    {
+        for (int i = 0; i < n && count < 8; i++)
+        {
+            SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
+            if (pad != NULL)
+            {
+                pads[count++] = pad;
+            }
+        }
+        SDL_free(ids);
+    }
+
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, pads, count);
+}
+
+bool iGui::SaveFolderInUse(U32* holder)
+{
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+    if (!InLauncher())
+    {
+        // In the game, this copy is the one that holds it.
+        return false;
+    }
+
+    // What the game will set at startup (iSystem.cpp's ApplyConfig, through
+    // iSGSetSaveRoot), so the tab shows the folder the game will use.
+    static char sApplied[1024] = "\x01";
+    static Uint64 sAskedAt;
+    static bool sInUse;
+    static U32 sHolder;
+    const char* folder = iConfigGetString("game.save_folder", "");
+    const Uint64 now = SDL_GetTicks();
+    bool ask = sAskedAt == 0 || now - sAskedAt >= 1000;
+    if (strcmp(sApplied, folder) != 0)
+    {
+        snprintf(sApplied, sizeof(sApplied), "%s", folder);
+        iSaveStoreSetConfigRoot(folder);
+        ask = true;
+    }
+
+    // Once a second, not every frame: on Linux and macOS the question takes
+    // the folder's lock for a moment, which a copy starting at that moment
+    // would take for the folder being in use.
+    if (ask)
+    {
+        sAskedAt = now != 0 ? now : 1;
+        sInUse = iSaveStoreFolderHolder(&sHolder);
+    }
+    if (holder != NULL)
+    {
+        *holder = sInUse ? sHolder : 0;
+    }
+    return sInUse;
 }
 
 // --- look -----------------------------------------------------------------------------
@@ -616,6 +688,101 @@ namespace
         }
         return n;
     }
+
+    // Where a dialog starts, as the system's own dialog takes it. NULL for
+    // nowhere in particular.
+    //
+    // Windows' dialog is given a whole path with backslashes: handed
+    // config.ini's forward slashes, a relative path or a folder that is gone,
+    // it refuses, and SDL then falls back to the old "Browse For Folder"
+    // tree, which starts in the user's folder. SDL also takes what follows
+    // the last separator as a file's name, so a folder ends in one. A folder
+    // that is not there starts in the nearest one above it that is.
+    const char* StartAt(const char* start, bool folder, char* out, size_t size)
+    {
+        if (start == NULL || start[0] == '\0')
+        {
+            return NULL;
+        }
+
+#ifdef _WIN32
+        // A file's name by itself is only the name offered.
+        if (!folder && strpbrk(start, "/\\") == NULL)
+        {
+            return start;
+        }
+
+        wchar_t wide[1024];
+        wchar_t full[1024];
+        if (MultiByteToWideChar(CP_UTF8, 0, start, -1, wide, 1024) <= 0)
+        {
+            return NULL;
+        }
+        DWORD n = GetFullPathNameW(wide, 1024, full, NULL);
+        if (n == 0 || n >= 1000)
+        {
+            return NULL;
+        }
+
+        // The name is kept; its folder is what has to be there.
+        wchar_t name[260] = L"";
+        if (!folder)
+        {
+            wchar_t* slash = wcsrchr(full, L'\\');
+            if (slash == NULL)
+            {
+                return NULL;
+            }
+            wcsncpy(name, slash + 1, 259);
+            name[259] = L'\0';
+            *slash = L'\0';
+        }
+
+        for (;;)
+        {
+            size_t len = wcslen(full);
+            if (len > 0 && full[len - 1] == L'\\')
+            {
+                full[--len] = L'\0';
+            }
+            // A drive by itself ("E:") is asked about as its root.
+            wchar_t probe[1024];
+            wcscpy(probe, full);
+            if (len == 2 && full[1] == L':')
+            {
+                wcscat(probe, L"\\");
+            }
+            DWORD attr = GetFileAttributesW(probe);
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            {
+                break;
+            }
+            wchar_t* slash = wcsrchr(full, L'\\');
+            if (slash == NULL)
+            {
+                return NULL;
+            }
+            *slash = L'\0';
+        }
+
+        if (wcslen(full) + wcslen(name) + 2 > 1024)
+        {
+            return NULL;
+        }
+        wcscat(full, L"\\");
+        wcscat(full, name);
+        if (WideCharToMultiByte(CP_UTF8, 0, full, -1, out, (int)size, NULL, NULL) <= 0)
+        {
+            return NULL;
+        }
+        return out;
+#else
+        (void)folder;
+        (void)out;
+        (void)size;
+        return start;
+#endif
+    }
 } // namespace
 
 void iGui::PickFolder(const char* tag, const char* start)
@@ -625,10 +792,9 @@ void iGui::PickFolder(const char* tag, const char* start)
         return;
     }
 
-    // The picker wants a native path; config.ini's are written with slashes,
-    // which every system's dialog accepts.
-    SDL_ShowOpenFolderDialog(OnFolderPicked, NULL, sWindow,
-                             (start != NULL && start[0] != '\0') ? start : NULL, false);
+    char at[2048];
+    SDL_ShowOpenFolderDialog(OnFolderPicked, NULL, sWindow, StartAt(start, true, at, sizeof(at)),
+                             false);
 }
 
 void iGui::PickOpenFile(const char* tag, const char* start, const FileFilter* filters, int count)
@@ -639,8 +805,9 @@ void iGui::PickOpenFile(const char* tag, const char* start, const FileFilter* fi
     }
 
     const int n = Filters(filters, count);
+    char at[2048];
     SDL_ShowOpenFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
-                           (start != NULL && start[0] != '\0') ? start : NULL, false);
+                           StartAt(start, false, at, sizeof(at)), false);
 }
 
 void iGui::PickSaveFile(const char* tag, const char* start, const FileFilter* filters, int count)
@@ -651,8 +818,9 @@ void iGui::PickSaveFile(const char* tag, const char* start, const FileFilter* fi
     }
 
     const int n = Filters(filters, count);
+    char at[2048];
     SDL_ShowSaveFileDialog(OnFolderPicked, NULL, sWindow, n > 0 ? sFilters : NULL, n,
-                           (start != NULL && start[0] != '\0') ? start : NULL);
+                           StartAt(start, false, at, sizeof(at)));
 }
 
 bool iGui::ReadWholeFile(const char* path, std::vector<unsigned char>& out, char* why,

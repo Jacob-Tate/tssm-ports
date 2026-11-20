@@ -126,8 +126,12 @@ namespace
         const char* to;
     };
 
+    // The mouse's two settings from when it turned the camera through the
+    // right stick's value. They are mouse look's now (iMouseLook.h).
     const MovedKey kMovedKeys[] = {
         { "video.water", "extras.water" },
+        { "input.mouse_camera", "input.mouse_look" },
+        { "input.mouse_sensitivity", "input.mouse_sensitivity_x" },
     };
 
     // The new name of an old key, or NULL.
@@ -228,7 +232,7 @@ namespace
             ";   backspace, shift, ctrl, alt, up, down, left, right, f1 to f12,\n"
             ";   numpad0 to numpad9 -- and mouse1 to mouse5, wheelup, wheeldown",
             "; Keys play alongside a controller (input.keyboard). The mouse turns the\n"
-            "; camera (input.mouse_camera).\n"
+            "; camera (input.mouse_look).\n"
             ";\n");
     }
 
@@ -431,6 +435,34 @@ namespace
     // The section headers therefore repeat. The parser tracks the current
     // section as it goes and does not care, and one block under one banner is
     // easier to find than the same keys threaded back into place would be.
+    //
+    // A setting split off from another starts from what the file says for
+    // that one, so the player keeps what they had: the mouse's two invert
+    // settings were camera_invert_x and _y's ("stick and mouse") before the
+    // mouse had its own.
+    const char* startValue(const iConfigSetting& s)
+    {
+        static const char* const kFrom[][2] = {
+            { "input.mouse_invert_x", "input.camera_invert_x" },
+            { "input.mouse_invert_y", "input.camera_invert_y" },
+        };
+
+        char key[kMaxKey];
+        snprintf(key, sizeof(key), "%s.%s", s.section, s.name);
+        for (size_t i = 0; i < sizeof(kFrom) / sizeof(kFrom[0]); i++)
+        {
+            if (strcmp(key, kFrom[i][0]) == 0)
+            {
+                const Entry* e = findEntry(kFrom[i][1]);
+                if (e != NULL)
+                {
+                    return e->value;
+                }
+            }
+        }
+        return s.value;
+    }
+
     void appendMissingSettings(const char* path)
     {
         S32 missing = 0;
@@ -474,7 +506,8 @@ namespace
         fprintf(f, "\n");
         fprintf(f, "; ------------------------------------------------------------------\n");
         fprintf(f, "; Settings added by a newer build of the port. Every value below is\n");
-        fprintf(f, "; its default, so this block changes nothing.\n");
+        fprintf(f, "; its default (or what this file had for the setting it came from),\n");
+        fprintf(f, "; so this block changes nothing.\n");
 
         const char* section = NULL;
         for (size_t i = 0; i < (size_t)kConfigSettingCount; i++)
@@ -488,8 +521,24 @@ namespace
                 section = kConfigSettings[i].section;
                 fprintf(f, "\n[%s]\n", section);
             }
+            const char* value = startValue(kConfigSettings[i]);
             fprintf(f, "\n; %s\n", kConfigSettings[i].comment);
-            fprintf(f, "%s = %s\n", kConfigSettings[i].name, kConfigSettings[i].value);
+            fprintf(f, "%s = %s\n", kConfigSettings[i].name, value);
+
+            // This run reads what the file now says.
+            if (strcmp(value, kConfigSettings[i].value) != 0 && sCount < kMaxEntries)
+            {
+                Entry* e = &sEntries[sCount++];
+                snprintf(e->key, sizeof(e->key), "%s.%s", kConfigSettings[i].section,
+                         kConfigSettings[i].name);
+                lowerInPlace(e->key);
+                // `value` is another entry's: copied before anything moves.
+                char copy[kMaxValue];
+                snprintf(copy, sizeof(copy), "%s", value);
+                snprintf(e->value, sizeof(e->value), "%s", copy);
+                printf("tssm: %s: %s starts as %s, the setting it was part of\n", path, e->key,
+                       e->value);
+            }
         }
 
         // The keyboard bindings, one line each, carrying their grammar in the

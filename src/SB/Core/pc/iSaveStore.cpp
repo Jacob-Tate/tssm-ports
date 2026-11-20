@@ -1585,11 +1585,11 @@ bool iSaveStoreRecover(S32 target, S32 game, char* report, size_t reportsize)
 
 // --- one game at a time ------------------------------------------------------------------
 
-S32 iSaveStoreClaimFolder(U32* holder)
+// The folder as an absolute path, folded to one case (Windows paths are
+// case-blind; a host whose paths are not would at worst refuse two copies that
+// differ only in case), hashed into the key: FNV-1a.
+static void iSS_claimKey(char* key, size_t keysize)
 {
-    // The folder as an absolute path, folded to one case (Windows paths are
-    // case-blind; a host whose paths are not would at worst refuse two copies
-    // that differ only in case), hashed into the key: FNV-1a.
     char path[600];
     if (!iHostAbsolutePath(iSaveStoreRoot(), path, sizeof(path)))
     {
@@ -1608,7 +1608,19 @@ S32 iSaveStoreClaimFolder(U32* holder)
         hash = (hash ^ (U8)c) * 16777619u;
     }
 
+    snprintf(key, keysize, "tssm-saves-%08x", (unsigned)hash);
+}
+
+S32 iSaveStoreClaimFolder(U32* holder)
+{
     char key[64];
-    snprintf(key, sizeof(key), "tssm-saves-%08x", (unsigned)hash);
+    iSS_claimKey(key, sizeof(key));
     return iHostClaimInstance(key, holder);
+}
+
+bool iSaveStoreFolderHolder(U32* holder)
+{
+    char key[64];
+    iSS_claimKey(key, sizeof(key));
+    return iHostInstanceHeld(key, holder);
 }

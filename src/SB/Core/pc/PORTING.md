@@ -54,6 +54,23 @@ The game code is compiled as the same 35 units the GameCube build compiles
 `pc/iWad.cpp` (the same unity build, over the modules copied from gc), and
 `iTRC`, `iException`, `iScrFX` and `iARAMTmp` by their files here.
 
+### Bringing the mouse work into a console branch
+
+The Android, Switch and 3DS branches carry their own source lists and their own
+`iPadTouch.cpp`, so a merge of the mouse work conflicts there. What the
+resolved branch must have:
+
+- `CMakeLists.txt`: `iMouseLook.cpp` among the input sources (beside
+  `iPadTouch.cpp`), and `iCameraOrbit.cpp` and `iMenuMouse.cpp` in `tssm_game`
+  (beside `iTestEvents.cpp`). Without them the link fails.
+- `iPadTouch.cpp`: the calls name their source, `iCameraLookSet(iCAMERALOOK_TOUCH,
+  yaw, pitch)` and `iCameraLookSetActive(iCAMERALOOK_TOUCH, on)`; a drag right is
+  a positive yaw (the sign flipped: the view turns right); and the finger has
+  the camera from its first drag (`sCameraDragged`), not while the controls
+  are only showing.
+- A build with no SDL input uses `iPadHostNull.cpp`, whose mouse stand-ins are
+  complete.
+
 ## Origins
 
 ### treedome, renamed only (checked by `pcimport.py --check`)
@@ -64,7 +81,7 @@ The game code is compiled as the same 35 units the GameCube build compiles
 | host seam | `iStub.h` (`iHost.h` and its backends: adapted, below) |
 | window, render size | `iWindow.h`, `iWindowSDL.cpp`, `iWindowNull.cpp`, `iScreen.h`, `iScreen.cpp` |
 | config.ini | `iConfig.h`, `iConfigEdit.h`, `iConfigEdit.cpp`, `iConfigTable.h` |
-| input devices | `iPadStick.h`, `iPadStick.cpp`, `iCameraLook.h`, `iCameraLook.cpp`, `iTouchOverlay.h`, `iTouchOverlay.cpp` (the rest of treedome's input layer is adapted, below) |
+| input devices | `iPadStick.h`, `iPadStick.cpp`, `iTouchOverlay.h`, `iTouchOverlay.cpp` (the rest of treedome's input layer is adapted, below) |
 | audio device | `iSndReverb.h`, `iSndReverb.cpp` (the seam and its backends are adapted, below) |
 | movies | `iFMVAudio.h`, `iFMVAudioNull.cpp`, `iFMVDecoder.h`, `iFMVDecoderFFmpeg.cpp`, `iFMVDecoderNull.cpp`, `iRasterFill.h` |
 | screen passes, frame capture | `iGlow.h`, `iDistort.h`, `iSnapshot.h`, `iFrameGrab.h`, `iSaveThumb.h` (implementations in `rw/`) |
@@ -81,13 +98,17 @@ The game code is compiled as the same 35 units the GameCube build compiles
 | `rw/engine.cpp` | `RwGameCubeSetAlphaCompare` collapses a test written the same on both sides, which is how TSSM's alpha discard writes it |
 | `rw/texture.cpp` | mods: `gRwTextureReplaceHook`, called for each texture `RwTexDictionaryStreamRead` reads (after the raster conversion), which `iModTexture.cpp` sets so a mod's image can replace the raster. Marked `TSSM-ADAPTED`. OpenGL: a converted texture keeps the alpha kind (opaque, keyed, graded) of its top level, which librw's per-level `rasterFromImage` otherwise takes from the last level (`docs/RENDERING.md`) |
 | `iConfig.cpp` | the first line of a written config.ini names TSSM |
-| `iConfigTable.cpp` | the settings of BfBB features not imported are removed (toon, hipoly, world lighting, day/night, fonts, cheats, fixes, Xbox screen-pass switches, menus, soundtrack, load-screen and shadow tuning, button glyphs, `video.profile`, `video.draw_distance`, `video.per_pixel_lighting`); help texts name TSSM's folders; TSSM's `[input]` settings: `preset`, `layout`, `button_icons`, `keyboard`, `stick_curve`, `deadzone`, `trigger_threshold`, `camera_sensitivity`, `camera_invert_x/y`, `mouse_camera`, `mouse_sensitivity`, `rumble`, `touch_controls`, `test`; `[assets] mods` and `mods_folder` (the mods folder) are added |
+| `iConfigTable.cpp` | the settings of BfBB features not imported are removed (toon, hipoly, world lighting, day/night, fonts, cheats, fixes, Xbox screen-pass switches, menus, soundtrack, load-screen and shadow tuning, button glyphs, `video.profile`, `video.draw_distance`, `video.per_pixel_lighting`); help texts name TSSM's folders; TSSM's `[input]` settings: `preset`, `layout`, `button_icons`, `keyboard`, `stick_curve`, `deadzone`, `trigger_threshold`, `camera_sensitivity`, `camera_invert_x/y`, `mouse_look`, `mouse_sensitivity_x/y`, `mouse_invert_x/y`, `mouse_raw`, `mouse_smoothing`, `mouse_release_key`, `mouse_menus`, `rumble`, `touch_controls`, `test`; `[assets] mods` and `mods_folder` (the mods folder) are added |
 | `iPadBind.h`, `iPadBind.cpp`, `iPadBindTable.cpp` | TSSM's rows, named after the Xbox controller (`a b x y lt rt white black back start`, the d-pad, and the keyboard's `move_*`/`camera_*`/`walk` rows), each setting the bits the Xbox release sets; presets `xbox`, `playstation`, `switch`, `gamecube` (Z chords as on the console); a quiet parser and a formatter for a settings screen. docs/CONTROLS.md |
 | `iPadLayout.h`, `iPadLayout.cpp` | TSSM's move layout: `input.layout` xbox (the Xbox release's move buttons) or gamecube, as `XPAD_MOVE` in `xPad.h` reads it |
 | `iPadHost.h`, `iPadHostSDL.cpp`, `iPadHostNull.cpp` | raw sticks (the curve is `iPad.cpp`'s), analog triggers kept and clicking at `input.trigger_threshold`, the keyboard alongside a pad (`input.keyboard`), kinds `xbox`/`playstation`/`switch`/`gamecube`, rumble strength, the bindings and their generation for the prompts; the `TSSM_PAD` probe became `TSSM_INPUT_TEST` (`iPadTest.cpp`); the null backend also stands in for the SDL-only prompts and input test; while another copy of the game is the window in front, the pads read as connected and idle (`iHostOtherCopyInFront`), since SDL hands pad input to a window that is not in front |
-| `iPadKeyboard.h`, `iPadKeyboardSDL.cpp` | stick rows instead of fixed WASD/IJKL, mouse buttons and wheel as keys, the mouse camera (relative mode, as C-stick deflection), a test source |
+| `iPadKeyboard.h`, `iPadKeyboardSDL.cpp` | stick rows instead of fixed WASD/IJKL, mouse buttons and wheel as keys, the mouse read off an event watch (motion, presses, wheel) for `iMouseLook`, a test source |
+| `iCameraLook.h`, `iCameraLook.cpp` | treedome's two sources (touch, mouse); the turn is given as view-right and look-down, taken in one call (`iCameraLookTake`), and `iCameraLookTaken` says whether the on-foot camera asked for it, so the cameras that read only the C-stick can be given a stick push instead |
+| `iMouseLook.h`, `iMouseLook.cpp` | treedome's mouse look and the capture and pointer halves of its `iPadMouseSDL.cpp`: `[input] mouse_*` settings (speed per axis, inversion per axis, raw, smoothing, the release key), the mouse yields the camera to a controller or the camera keys in use and takes it back when it moves, the pointer is held only for a keyboard-and-mouse player and never in a menu, the stick push for the other cameras, a test's own mouse (`TSSM_TEST_MOUSE`) |
+| `iCameraOrbit.h`, `iCameraOrbit.cpp` | treedome's free orbit, which it keeps inside `zCamera.cpp`: a file of the port's here (compiled with the game units), so TSSM's `zCamera.cpp` carries three calls under `PLATFORM_PC`; the orbit also stands aside while the game has camera input off, a follow-camera turn is being played, or LT's centering runs |
+| `iMenuMouse.h`, `iMenuMouse.cpp` | treedome's menu pointer for TSSM's UI system (`zUI` widgets and their links instead of `_zUI`/`zUIFont`): the highlight is walked with the presses the widgets' links answer, a click is A, a right click B, hints (`{i:button_picture_0N}`) and the arrows a press lights up are buttons, a row that left and right adjust is clicked toward; no art of its own (the system's arrow and hand), and no hook in the game's UI code |
 | `iPadTokens.h`, `iPadTokens.cpp` | share/capture, paddles, touchpad and the GameCube trigger clicks; `mouse1`-`mouse5`, `wheelup`, `wheeldown`; labels per controller family |
-| `iPadTouch.h`, `iPadTouch.cpp` | TSSM's small buttons (Back, black); the drag also turns TSSM's camera through the C-stick (TSSM's `zCamera.cpp` has no `iCameraLook` hook) |
+| `iPadTouch.h`, `iPadTouch.cpp` | TSSM's small buttons (Back, black); the drag turns the on-foot camera through `iCameraLook` (the finger has the camera from the first drag, not while the controls are only showing), and becomes a C-stick push only while a camera that reads only the C-stick has the view |
 | `iConfig.cpp` | also: the `[pad]`/`[keyboard]` comments and row descriptions are TSSM's (`iPadBindDescribe`) |
 | `iFile.h`, `iFile.cpp` | TSSM's interface: `const` names in `iFileLoad`/`iFileSetPath`, `iFileFind`'s flags argument, `iFileExists`, `iFileGetSectorSize`, `xFileDriveType`; backslashes become slashes in `iFileFullPath` (gc does it); the PLAT check accepts TSSM's Xbox id `BX` and the GameCube's `GC` (each package on its own, `iFilePackagePlatform`, `iFilePackagePlatformOf`); a Dolphin extraction's `files/` folder is used when the asset folder is the one above it (`iFileAssetRoot`); the asset-override hook (BfBB's code menus) is gone. Mods (`iMod.h`): `iFileInit` starts the mod manager; a loose file from the mods folder is asked for after the single mod folder (same platform check; a file with a package's name that is not one, or a package whose table of contents does not hold together, `iModPkgCheck`, is refused); a package a mod replaces assets in is opened as a view (`tag_iFile::view`, read through `iModPkgRead`); `iFileLoad` applies INI overlays to the `.ini` files it loads |
 | `iTime.h`, `iTime.cpp` | TSSM's `iTimeGetGame`, `iFuncProfileFuncs`; the tick rate is also `OS_TIMER_CLOCK`, which `xFont.cpp` and `zGame.cpp` use inline |
@@ -197,12 +218,12 @@ records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
 | `iPadPrompts.h`, `iPadPrompts.cpp` | keeps the game's button prompts true: the six move prompts follow `input.layout` (TEXT rewritten in place), "Pull"/"Press" follows the device, and the `pad_button*` rasters are swapped for glyphs drawn for the device and binding in use (keyboard keycaps, PlayStation shapes, Switch and GameCube letters; the disc's own pictures, reshuffled, on its own pad: the Xbox font's on an Xbox pad, the GameCube font's on a GameCube pad, `kGameCubeInput`); `input.button_icons`; `iPadPromptsDiscRaster` gives a pad_button texture's other user its disc picture (TT01's spotlight flares are pad_button1, `zSpotlight.cpp`) |
 | `iPadTest.h`, `iPadTest.cpp` | the input test: `TSSM_INPUT_TEST=1` or `=overlay` (`input.test`) logs what the game reads from port 0 whenever it changes, and draws a controller (GL3/Vulkan) |
 | `iPadControls.h`, `iPadControls.cpp` | the binding API for a settings screen (rows, get/set/add/remove/reset, capture, labels, conflicts, `[input]` settings, live state, mouse capture) |
-| `tests/input_test.cpp`, `tests/input_test_xpad.cpp` | `tssm_input_test`: SDL virtual controllers (Xbox, DualSense, Switch Pro, GameCube adapter) and a stand-in keyboard and mouse through the game's own `xPadUpdate`; 132 checks |
+| `tests/input_test.cpp`, `tests/input_test_xpad.cpp` | `tssm_input_test`: SDL virtual controllers (Xbox, DualSense, Switch Pro, GameCube adapter) and a stand-in keyboard and mouse through the game's own `xPadUpdate`, and the launcher's turn before the game with a real mouse's events, Escape and the pointer; 179 checks |
 | `iLowHeap.h`, `iLowHeap.cpp` | RenderWare's heap on 64-bit hosts: a TLSF heap over a block reserved below 4 GB with `iHostReserveLow` (256 MB, `TSSM_RWHEAP_MB`), passed to `RwEngineInit` by `iSystem.cpp`, so RenderWare and librw pointers the game keeps in 32 bits survive as on the console (where RenderWare allocates from `iMemMgr`). 32-bit builds keep the C library's heap; `TSSM_RWHEAP=1` uses this one anyway |
 | `iSaveFormat.h`, `iSaveFormat.cpp` | the save formats as data (docs/SAVES.md): the payload's walk and checks, its CRC, canonical <-> host byte order, `.gci`/`.gcs` parse and build, raw card images, the card clock, the port's own banner and icon |
 | `iSaveStore.h`, `iSaveStore.cpp` | the save folder (root, slots, atomic writes flushed to the disk, backups, the one-process claim on it, the repair at startup of what a crash left: `iSaveStoreRecover`), import from GameCube files and cards (each save's level and progress reported, even on a look-only pass), export to `.gci`, zip and a Dolphin GCI folder; the interface the in-game Saves tab calls. `iSaveStoreAutoSaveSlot` (the slot the game autosaves to) is defined in `isavegame.cpp`, beside the game's save code |
 | `iSaveZip.h`, `iSaveZip.cpp` | stored-entry zips, for every save in one file |
-| `iSaveText.h`, `iSaveText.cpp` | the load screen's "no saves" message (`LD NOGAMES TXT`, the Xbox disc's "No game saves present on the Xbox Hard Disk") rewritten in place to name the empty memory card slot, and the one holding the saves |
+| `iSaveText.h`, `iSaveText.cpp`, `iSaveTextTable.cpp` | the load screen's "no saves" message (`LD NOGAMES TXT`, the Xbox disc's "No game saves present on the Xbox Hard Disk") rewritten in place to name the empty memory card slot, and the one holding the saves; and the save screens' warning as a setting (`[game] save_text`): every "Please don't turn off your Xbox console" / "Do not touch the Memory Card or the POWER Button" line of both discs, exactly, rewritten as it loads by a readXForm on the TEXT type (installed from `iAssetTypesInstall`, as treedome's text patch is) into a copy with only the warning changed; `tests/savetexttest.cpp` (`tssm_savetexttest`) |
 | `iSaveCLI.h`, `iSaveCLI.cpp` | `tssm --saves`, `--import-save`, `--export-save`, `--check-save`, `--restore-save`, `--delete-save`, run from `iSystemInit` |
 | `tests/save_selftest*.cpp`, `tests/save_selftest_prefix.h` | the `save_selftest` program: saves and loads through the game's own `xsavegame`/`xserializer`, round-trips `.gci`, card and zip (CMake target, `ctest`) |
 | `iMod.h`, `iMod.cpp` | mods: the mods folder (one folder per mod, `mod.ini`, `mods.ini` load order), the override index (loose files, assets by ID or name and package, textures, sounds, movies, INI overlays), conflicts, the log (`mods.log`), and the API for a mod manager (list, enable, reorder, save, rescan). `docs/MODDING.md` is the modder's guide. Also every GameCube package's view, mods or not (`iModOpenPackage(path, true)`): each asset converted to the Xbox layout (`iGCSwap.h`) with its texture name back, mods' replacements on top, the views of the last level loads kept (32 views, 64 MB at most); a package whose table of contents does not hold together is a failure, never read as it is |
@@ -221,7 +242,7 @@ records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
 | `gui/iGui.h`, `gui/iGui.cpp` | the Dear ImGui overlay: its context, F1 / Back+Start / three-finger toggle, the SDL event watch it listens through, `iGuiFilterPad` (no game input while open; buttons held at close stay hidden until released), the panel and audio-listener registrations other modules use. `docs/GUI.md` |
 | `gui/iGuiRender.h`, `gui/iGuiRender.cpp` | the overlay's renderer: ImGui's DX9, DX11 or OpenGL 3 backend for the running librw device, drawn after the virtual screen's stretch and before the flip by taking over `rw::engine->device.showRaster` (librw itself is unchanged); D3D9 default-pool objects released before any reset (also through `iDeviceResetSetReleaseHook`); the window capture for `TSSM_GUI_CAPTURE` |
 | `gui/iGuiLauncher.cpp` | the launcher: its own SDL window and SDL_Renderer before the game's, for the asset folder (SDL's native folder picker) and the startup-only settings |
-| `gui/iGuiSettings.cpp`, `gui/iGuiTabs.cpp`, `gui/iGuiUtil.cpp`, `gui/iGuiInternal.h` | the Settings tab (through `iConfig*`), the About tab and its third-party notices, and what the tabs share (the look, the system's folder and file dialogs, whole-file reads and writes through SDL) |
+| `gui/iGuiSettings.cpp`, `gui/iGuiTabs.cpp`, `gui/iGuiUtil.cpp`, `gui/iGuiInternal.h` | the Settings tab (through `iConfig*`), the list of tabs the overlay and the launcher both show, the About tab and its third-party notices, and what the tabs share (the look, the system's folder and file dialogs, whole-file reads and writes through SDL) |
 | `gui/iGuiControls.cpp` | the Controls tab on the input layer's binding API (`iPadControls.h`): every row's controller and keyboard binding (replace, add, remove, type, unbind, default), shared-input marks, the `[input]` settings drawn from the settings table |
 | `gui/iGuiSaves.cpp` | the Saves tab on the save store (`iSaveStore.h`): slots with level, progress, date, backups and the autosave slot; import through the system's file dialog (each save found sent to a slot of the player's choosing, replace only when asked, a question before the autosave slot); export of a slot as `.gci`, of every save as a zip or into a Dolphin GCI folder; backups and restore; delete |
 | `gui/iGuiMods.cpp` | the Mods tab on the mod system (`iMod.h`): load order with on/off, arrows and drag to reorder, rescan, the global switch, details, conflicts, the log; `[assets] mod` below |
@@ -263,6 +284,18 @@ Each says at its site what it does not do.
   (`UpdateVirtualBunTop`, once a frame) the same way. At a cap of 60 or below
   the share is exactly 1 and the car is the original, bit for bit.
   `docs/EXTRAS.md` has the measurements.
+
+- **The save screens name this platform by default** (`[game] save_text =
+  auto`, `iSaveText.h`): "Please don't close the game." on a PC where the Xbox
+  disc says "Please don't turn off your Xbox console". `xbox` and `gamecube`
+  give each disc's own line, word for word. Only those lines change.
+
+- **A level's missing HOP** is gone without a word, as in retail
+  (`zSceneLoadPackFile`, `iFileOptionalPackage`): a mod's level can be one HIP.
+  The port stops with the missing-file message where retail would crash
+  later: a HOP that is there but cannot be opened (cut short), or missing for
+  a level whose HIP has no world (JSP) of its own or is not a package. A HOP
+  that opens but holds no game data still crashes later, as in retail.
 
 - **The GameCube's 30 fps levels run at the cap by default**, as on the Xbox
   (`[extras] frame_lock = xbox`). `gamecube` holds them as the GameCube does

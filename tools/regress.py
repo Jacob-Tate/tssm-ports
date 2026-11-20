@@ -83,7 +83,8 @@ What it does, in order:
      Every run's config.ini sets the five [extras] keys (the Xbox release's
      features, src/SB/Core/pc/iExtras.h) to gamecube, except the one a run is
      about, so the references show the GameCube versions and a change to an
-     xbox version cannot move them.
+     xbox version cannot move them. It also sets [game] save_text = xbox, so
+     the autosave prompt keeps the Xbox disc's words the references show.
   6. runs every unit test of each width: save_selftest, tssm_input_test,
      tssm_modtest, tssm_sndtest (boot.HIP and MN/mnuc.HIP) and tssm_widentest.
   7. prints a pass/fail table, writes report.json and report.html (the frames
@@ -640,7 +641,11 @@ def run_game(width, exe, assets, run_dir, backend, timeout, wait, spec=RUN_BB02)
     os.makedirs(os.path.join(run_dir, "frames"), exist_ok=True)
     os.makedirs(os.path.join(run_dir, "save"), exist_ok=True)
     with open(os.path.join(run_dir, "config.ini"), "w", newline="\r\n") as f:
-        f.write("[video]\n%sbackend = %s\n[game]\nintro_movies = off\n" % (VIDEO, backend))
+        # save_text = xbox: the Xbox disc's own words on the autosave prompt
+        # (frame 1000), which is what the references show; the default (auto)
+        # puts the PC's there (src/SB/Core/pc/iSaveText.h).
+        f.write("[video]\n%sbackend = %s\n[game]\nintro_movies = off\nsave_text = xbox\n"
+                % (VIDEO, backend))
         # Every Xbox extra at gamecube unless the run is about one (EXTRAS).
         extras = dict((k, "gamecube") for k in EXTRAS)
         extras.update(spec.get("extras", {}))

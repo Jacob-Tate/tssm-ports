@@ -848,7 +848,7 @@ namespace
             {
                 // The stick pictures: the four keys, or the mouse.
                 g.style = STYLE_KEY;
-                if (slot.input == -2 && iPadSettingsGet().mouse_camera)
+                if (slot.input == -2 && iPadSettingsGet().mouse_look)
                 {
                     SetLabel(g, "MOUS");
                     return true;

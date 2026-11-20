@@ -241,6 +241,11 @@ bool iSaveStoreRecover(S32 target, S32 game, char* report, size_t reportsize);
 // until the process ends, a crash included.
 S32 iSaveStoreClaimFolder(U32* holder);
 
+// Whether another running copy has claimed the save folder, without claiming
+// it: the launcher asks before the game does (iHostInstanceHeld). `holder` as
+// above.
+bool iSaveStoreFolderHolder(U32* holder);
+
 // --- the game in progress ------------------------------------------------------------
 
 // The slot the running game autosaves to: the one it last saved to or loaded

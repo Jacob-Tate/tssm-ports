@@ -185,3 +185,8 @@ const char* iWindowBackendName()
 {
     return "null";
 }
+
+// No window, no icon.
+void iWindowSetIcon(SDL_Window*)
+{
+}

@@ -1,0 +1,53 @@
+diff --git a/src/d3d/d3ddevice.cpp b/src/d3d/d3ddevice.cpp
+index 2cda070..cb2d634 100644
+--- a/src/d3d/d3ddevice.cpp
++++ b/src/d3d/d3ddevice.cpp
+@@ -1695,11 +1695,14 @@ static void
+ restoreVideoMemory(void)
+ {
+ 	// Have to get these back before recreating rasters
+-	d3ddevice->GetRenderTarget(0, &d3d9Globals.defaultRenderTarget);
+-	d3d9Globals.defaultRenderTarget->Release();	// refcount increased by Get
++	//
++	// A device that refused its Reset hands back nothing, and leaves the
++	// pointer as it was: only what was got is released.
++	if(SUCCEEDED(d3ddevice->GetRenderTarget(0, &d3d9Globals.defaultRenderTarget)))
++		d3d9Globals.defaultRenderTarget->Release();	// refcount increased by Get
+ 	deviceCache.renderTargets[0] = d3d9Globals.defaultRenderTarget;
+-	d3ddevice->GetDepthStencilSurface(&d3d9Globals.defaultDepthSurf);
+-	d3d9Globals.defaultDepthSurf->Release();	// refcount increased by Get
++	if(SUCCEEDED(d3ddevice->GetDepthStencilSurface(&d3d9Globals.defaultDepthSurf)))
++		d3d9Globals.defaultDepthSurf->Release();	// refcount increased by Get
+ 	deviceCache.depthSurface = d3d9Globals.defaultDepthSurf;
+ 
+ 	// Before the rasters, because recreateVidmemRasters pairs a Z buffer with
+@@ -1714,6 +1717,19 @@ restoreVideoMemory(void)
+ 	restoreD3d9Device();
+ }
+ 
++// Reset at the size the present parameters have now, whatever the window's
++// is. Exclusive full screen is reset this way: its size is the display
++// mode's, and its window is some other size on the way back from being
++// minimised.
++bool32
++resetDevice(void)
++{
++	releaseVideoMemory();
++	HRESULT res = d3ddevice->Reset(&d3d9Globals.present);
++	restoreVideoMemory();
++	return SUCCEEDED(res);
++}
++
+ static void
+ beginUpdate(Camera *cam)
+ {
+@@ -1800,7 +1816,8 @@ beginUpdate(Camera *cam)
+ 	RECT r;
+ 	GetClientRect(d3d9Globals.window, &r);
+ 	BOOL icon = IsIconic(d3d9Globals.window);
+-	if(!icon &&
++	// Only a window's back buffer follows the window (see resetDevice).
++	if(!icon && d3d9Globals.present.Windowed &&
+ 	   (r.right != d3d9Globals.present.BackBufferWidth || r.bottom != d3d9Globals.present.BackBufferHeight)){
+ 
+ 		d3d9Globals.present.BackBufferWidth = r.right;

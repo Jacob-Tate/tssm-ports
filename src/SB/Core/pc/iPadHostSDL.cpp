@@ -21,6 +21,7 @@
 #include "iConfig.h"
 #include "iHost.h"
 #include "iPadBind.h"
+#include "iMouseLook.h"
 #include "iPadKeyboard.h"
 #include "iPadLayout.h"
 #include "iPadSettings.h"
@@ -465,10 +466,17 @@ void iPadHostInit()
     iPadKeyboardInit();
     iPadTouchInit();
 
+    // Once per process: the launcher starts the input layer before the game
+    // does (iPadHostPollDevices), and SDL's event watches outlive both.
+    static bool sWatching;
+    if (!sWatching)
+    {
+        sWatching = true;
 #ifdef __ANDROID__
-    SDL_AddEventWatch(WatchBackButton, NULL);
+        SDL_AddEventWatch(WatchBackButton, NULL);
 #endif
-    SDL_AddEventWatch(WatchBackground, NULL);
+        SDL_AddEventWatch(WatchBackground, NULL);
+    }
 
     // A controller that went dead on alt-tab would be a change in behaviour,
     // not a fix: the keyboard already stops when the window loses focus.
@@ -514,6 +522,11 @@ void iPadHostExit()
         SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
         sReady = false;
     }
+
+    // What the mouse did meanwhile (over the launcher, which brings the input
+    // layer up and down before the game does) is not the game's to read: not
+    // its movement, and not the click on Play either.
+    iPadKeyboardForgetMouse();
 }
 
 // Which slot each game port reads.
@@ -626,6 +639,48 @@ void iPadHostSetHotkey(iPadHostHotkeyFn fn)
     sHotkey = fn;
 }
 
+void iPadHostPollDevices()
+{
+    if (!sReady)
+    {
+        return;
+    }
+
+    SDL_PumpEvents();
+
+    SDL_Event e;
+    while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_JOYSTICK_AXIS_MOTION,
+                          SDL_EVENT_FINGER_DOWN - 1) > 0)
+    {
+        if (e.type == SDL_EVENT_GAMEPAD_ADDED)
+        {
+            OpenGamepad(e.gdevice.which);
+        }
+        else if (e.type == SDL_EVENT_GAMEPAD_REMOVED)
+        {
+            CloseGamepad(e.gdevice.which);
+        }
+        else if (e.type == SDL_EVENT_JOYSTICK_ADDED)
+        {
+            ReportIfUnmapped(e.jdevice.which);
+        }
+    }
+
+    // Which controller is controller 1 follows what is connected.
+    for (S32 i = 0; i < IPAD_MAX_CONTROLLERS; i++)
+    {
+        if (sGamepad[i] == NULL)
+        {
+            ClearState(&sSlot[i]);
+        }
+        else
+        {
+            sSlot[i].connected = true;
+        }
+    }
+    MapPortsToSlots();
+}
+
 void iPadHostPoll()
 {
     if (sReady)
@@ -691,11 +746,28 @@ void iPadHostPoll()
 
     // The keyboard and mouse on port 0.
     const bool padOnPort0 = sState[0].connected;
+    const bool padInUse =
+        padOnPort0 &&
+        (sState[0].buttons != 0 ||
+         sState[0].stick_x * sState[0].stick_x + sState[0].stick_y * sState[0].stick_y > 0.09f ||
+         sState[0].substick_x * sState[0].substick_x + sState[0].substick_y * sState[0].substick_y >
+             0.09f);
     const iPadKeyboardMode mode = iPadSettingsGet().keyboard;
+    bool mouseRead = false;
     if (mode == IPAD_KEYBOARD_ALWAYS || (mode == IPAD_KEYBOARD_FALLBACK && !padOnPort0))
     {
         iPadKeyboardPoll(&sState[0]);
+        mouseRead = true;
     }
+    else
+    {
+        // Not left to pile up and turn the camera in one frame when the
+        // controller goes.
+        iPadKeyboardForgetMouse();
+    }
+
+    // The mouse's movement: the camera's, unless a controller has it.
+    iMouseLookUpdate(&sState[0], mouseRead, padInUse, sScripted);
 
     // With no pad, port 0 is the keyboard's whether or not a key is down, so
     // the game does not stop on its "no controller" screen.
@@ -731,12 +803,18 @@ void iPadHostPoll()
     // A script plays port 0 alone: every real device is ignored.
     if (sScripted)
     {
+        // Only a test's own mouse turns the camera then (iMouseLook.h), and
+        // what it gave the right stick is kept.
+        const F32 cameraX = sState[0].camera_x;
+        const F32 cameraY = sState[0].camera_y;
         for (S32 p = 0; p < IPAD_MAX_CONTROLLERS; p++)
         {
             ClearState(&sState[p]);
         }
         sState[0].connected = true;
         sState[0].buttons = sScriptButtons;
+        sState[0].camera_x = cameraX;
+        sState[0].camera_y = cameraY;
         return;
     }
 

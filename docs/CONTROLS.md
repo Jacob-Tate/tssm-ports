@@ -29,7 +29,7 @@ These are the defaults, with `input.layout = xbox`, the default for every pad ex
 | **Start** | Start (Menu) | Options | + | Start | Esc, Enter |
 | **D-pad** | D-pad | D-pad | D-pad | D-pad | arrow keys |
 | **Left stick** | left stick | left stick | left stick | control stick | W A S D (Ctrl held: walk) |
-| **Right stick** | right stick | right stick | right stick | C-stick | mouse, I J K L |
+| **Right stick** | right stick | right stick | right stick | C-stick | I J K L (the mouse turns the camera itself: mouse look) |
 
 Notes on the table:
 
@@ -290,7 +290,9 @@ executable.
 - Back and black;
 - Start.
 
-A drag on the right half of the screen turns the camera.
+A drag on the right half of the screen turns the camera, the way the mouse does (below): it stays
+where it is pointed. Until the first drag, and again after a controller, the right stick or the
+camera keys are used, the camera is the game's own, which swings behind the player by itself.
 
 ## Keyboard and mouse
 
@@ -302,15 +304,85 @@ A drag on the right half of the screen turns the camera.
 
 With no controller at all, port 0 is the keyboard, and the game never shows its "no controller" screen.
 
-**The mouse turns the camera** (`input.mouse_camera`, on by default) while the game window has focus.
-The window holds the cursor (SDL relative mode) and releases it when focus goes.
+### Mouse look
 
-- The camera turns at a rate proportional to how far the C-stick is past 32 (`zCameraUpdate`).
-  So a mouse movement becomes a C-stick deflection past 32 in proportion to the distance: a slow drag
-  and a quick flick turn the camera as far as the hand moved.
-- Moving the mouse right looks right. Moving it down looks down.
-- `input.mouse_sensitivity` scales it. `input.camera_invert_x` and `input.camera_invert_y` flip the
-  mouse and the right stick together.
+**The mouse turns the camera directly** (`input.mouse_look`, on by default), not through the right
+stick. The code is adapted from treedome, the BfBB PC port (`iMouseLook`, `iCameraLook`, and its
+camera orbit as `iCameraOrbit`).
+
+- The camera turns as far as the hand moved and **stays where it is pointed**: it does not ease back
+  to the middle and does not swing round behind the player by itself.
+- Mouse right looks right, mouse forward looks up. `input.mouse_invert_x` and `input.mouse_invert_y`
+  turn either the other way.
+- `input.mouse_sensitivity_x` and `input.mouse_sensitivity_y` are the speed left/right and up/down
+  (`same`, the default for up/down, follows left/right). 1.0 is 0.2 degrees a count: 400 counts,
+  about 1.3 cm of an 800 dpi mouse, turn 80 degrees, and a full turn is about 5.7 cm. Lower it for a
+  slower camera.
+- `input.mouse_raw` (on) reads the mouse's own movement, without the desktop's pointer speed and
+  acceleration. `input.mouse_smoothing` (0, off) spreads each movement over that many milliseconds.
+- **A controller keeps the original camera.** The right stick (and the camera keys I J K L) go through
+  the game's own camera code, untouched. A controller in use, or the right stick or the camera keys
+  pushed, takes the camera back with everything the original does (the ease back, the swing behind
+  the player); the mouse takes it again when it next moves.
+- The mouse gets out of the way of the game: no turning during a cutscene or a fly-through, while
+  the game has camera input switched off, during a wall jump, or while LT's "center the camera" runs.
+- The cameras that are not the on-foot one (a boss fight's) read only the right stick, so there the
+  mouse is given to them as a stick push, as before. The Patty Wagon's camera takes no camera input
+  on any device (the original's).
+- The old names still work: `mouse_camera` is read as `mouse_look` and `mouse_sensitivity` as
+  `mouse_sensitivity_x`. `camera_invert_x` and `camera_invert_y` are the stick's and the camera keys'
+  only now; a config.ini from before the mouse had its own gets `mouse_invert_x` and
+  `mouse_invert_y` added with the values those two have, so an inverted mouse stays inverted.
+
+**Who has the pointer.** The game holds the mouse pointer (hidden, kept in the window) only while
+mouse look is on, the window has the keyboard, and you are playing with the keyboard and mouse:
+from the first key pressed or the first movement of the mouse, so nothing is held at start-up, or
+at all if only a controller is touched. That includes cutscenes and loading screens. It lets go:
+
+- **when Esc is pressed, always and at once**, whatever is on screen (play, a cutscene, a movie, a
+  loading screen) and whatever Esc is bound to. Esc is also the pause key by default, so in play it
+  pauses the game and frees the pointer together; where the original uses Start for something else
+  (skipping a movie) or ignores it (a talk box), Esc does that and frees the pointer as well. The
+  pointer is taken back when play goes on after the pause menu, or by a click in the game's window
+  (that click is not passed to the game), never while a menu or the overlay is up. With pause
+  moved to another key, Esc only frees the pointer;
+- in the game's menus, whether or not they have a pointer of their own (below);
+- while the settings overlay (F1) is open;
+- when the window loses focus;
+- on `input.mouse_release_key` (F2 by default), which frees it and takes it back: to drag the window
+  by its title bar, say;
+- while a controller is in use: the pointer is then free, and put away after 3 seconds without
+  moving, so the title bar is always in reach.
+
+The log says who has it whenever that changes (`tssm: mouse: held for mouse look`, `free (a menu's
+pointer)`, `free (a menu)`, `free (Escape)`, ...).
+
+### The mouse in the game's menus
+
+`input.mouse_menus` (on by default) gives the game's own menus a pointer: the title and main menu,
+the pause screen, options, the save and load screens, and whatever a mod builds with the game's menu
+widgets (`iMenuMouse.h`).
+
+- **Pointing at an item highlights it.** The highlight is walked there with the pad presses the
+  menu's own links answer, so every sound and side effect is the one the d-pad makes.
+- **A left click accepts** the highlighted item (it presses A).
+- **A right click goes back** (it presses B, whatever the right button is bound to).
+- **The wheel** steps through a list as up and down do.
+- **A hint is a button:** clicking "Options" or "Return to Game" at the bottom of a screen presses
+  the button its picture shows.
+- **Arrows are buttons:** the pause screen's level arrows are up and down.
+- **A value is clicked toward:** on a row that left and right change (vibration, a volume), click
+  the left half of its value to lower it and the right half to raise it.
+- A left click on nothing is still the button the left mouse button is bound to, as the hints on
+  screen show it.
+- The pointer is a hand over anything a click does something to, and is put away after 3 seconds
+  without moving.
+- A click that closes a menu ("Return to Game") is only that: the button the mouse button is bound to
+  stays out of play until it is let go.
+- With `input.mouse_menus` off the menus have no pointer of their own, but the mouse is still let go
+  in them, and its buttons are the ones they are bound to.
+- Keyboard and controller navigation are unchanged. With a controller in use there is no pointer and
+  the menus are the controller's alone.
 
 **Keys are positions, not characters.** "w" means the key above "s", so on an AZERTY keyboard WASD
 stays under the left hand as ZQSD.
@@ -318,6 +390,8 @@ stays under the left hand as ZQSD.
 **Reserved keys:**
 
 - Alt+Enter and F11 switch between windowed and full screen.
+- Esc frees the mouse pointer, as well as what it is bound to (pause, by default).
+- F2 frees the mouse pointer and takes it back (`input.mouse_release_key`).
 - F1 and Back + Start open the overlay, when the GUI is built in.
 
 ## Changing the controls
@@ -337,8 +411,15 @@ trigger_threshold = auto ; 30, or a percentage
 camera_sensitivity = 1.0
 camera_invert_x = off
 camera_invert_y = off
-mouse_camera = on
-mouse_sensitivity = 1.0
+mouse_look = on          ; the mouse turns the camera directly (was mouse_camera)
+mouse_sensitivity_x = 1.0 ; left and right (was mouse_sensitivity)
+mouse_sensitivity_y = same ; up and down: same, or a number
+mouse_invert_x = off
+mouse_invert_y = off
+mouse_raw = on           ; without the desktop's pointer speed and acceleration
+mouse_smoothing = 0      ; milliseconds; 0 is none
+mouse_release_key = f2   ; frees the pointer and takes it back; f2-f7, f9, f10, f12, tilde, none
+mouse_menus = on         ; the pointer in the game's own menus
 rumble = 100
 test = off               ; log, overlay
 ```
@@ -414,7 +495,7 @@ built on `src/SB/Core/pc/iPadControls.h`, which offers:
 - the rows an input is already used by;
 - the `[input]` settings, checked against their domain;
 - the live state of port 0;
-- releasing the mouse while the overlay is open.
+- releasing the mouse while the overlay is open (`iMouseLookAllow`).
 
 ## On-screen prompts
 
@@ -459,24 +540,35 @@ The line shows:
 
 `TSSM_INPUT_TEST=overlay` also draws the controller on screen as the game sees it (OpenGL and Vulkan).
 
-**`tssm_input_test`** is built beside `tssm.exe`. It needs no game data, no window and no device.
+**`tssm_input_test`** is built beside `tssm.exe`. It needs no game data, no screen and no device.
 
 - It drives SDL's own virtual controllers (an Xbox Series, a DualSense, a Switch Pro and a GameCube
   adapter): attached, pressed and unplugged through SDL's real gamepad code.
 - It also drives a stand-in keyboard and mouse.
-- It runs the game's own `xPadUpdate` and checks what the game sees, 127 checks in all:
+- It runs the game's own `xPadUpdate` and checks what the game sees, 179 checks in all:
   - every button on every preset;
   - press and release edges;
   - the trigger threshold;
   - the stick curves, sensitivity and inversion;
   - the keyboard alongside a pad;
-  - the mouse camera;
+  - mouse look: the turn handed to the on-foot camera in radians with the stick's value left alone,
+    its speeds and inversions, the stick push for a camera that reads only the stick, the camera
+    keys taking the camera back, and mouse look off;
   - the GameCube chords;
   - hot-plug;
   - rebinding through the API, with the refusals;
   - the move layout;
   - the prompt rewrites and glyph choices;
-  - the menu stick-to-D-pad repeat.
+  - the menu stick-to-D-pad repeat;
+  - the launcher before the game, with a real mouse's events on a window of SDL's dummy video
+    driver: the pointer is not held in the launcher, what the mouse did there (movement, the click
+    on Play, the wheel) does not reach the game, and the game then reads the mouse and holds the
+    pointer;
+  - Escape and the pointer, on the same window with a posted Escape key: it frees the pointer
+    (also between polls, and where it is not the pause key), a click in the window takes it back
+    and is not an attack, a menu that came up and went takes it back, Escape that closes a menu
+    leaves it held, a menu frees the pointer with `mouse_menus` off, and a click that closed a
+    menu is not a new press in play.
 
 ```
 build-*/tssm_input_test [scratch folder]

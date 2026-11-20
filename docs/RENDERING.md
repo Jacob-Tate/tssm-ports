@@ -677,6 +677,12 @@ patch yet. A second patch on top of the first does not get round it where it edi
 one's own lines: from then on the first neither applies nor reverse-applies, and every configure
 stops.
 
+- `d3d9_exclusive_reset.patch`: exclusive full screen on Direct3D 9 is reset at its display mode's
+  size (`resetDevice`, called from `rw/devicereset.cpp`) and never at the window's: switched back
+  to from another program, its window is for a moment no longer minimised and still the size of a
+  title bar, librw reset to that, the reset was refused, and librw then read a render target the
+  device had not handed back (a crash, or a picture that stopped). `restoreVideoMemory` also
+  releases only what it was given.
 - `xbox_destroy_raster.patch`: the Xbox raster's destructor was empty. The game's textures are Xbox
   rasters, converted to the running device's own when they load, and the Xbox raster is destroyed
   right after; its texels and palette stayed allocated, about 1.6 MB of the RenderWare heap per

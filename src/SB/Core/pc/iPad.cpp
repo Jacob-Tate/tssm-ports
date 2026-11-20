@@ -1,4 +1,5 @@
 #include "iPad.h"
+#include "iMenuMouse.h"
 #include "iPadHost.h"
 #include "iPadPrompts.h"
 #include "iPadSettings.h"
@@ -324,6 +325,14 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     // the console does it here with the Z-modifier trick, which the gamecube
     // preset's chords reproduce.
     *on = host->buttons;
+
+    // The mouse in the game's menus (iMenuMouse.h): its click, right click and
+    // wheel as the buttons a controller would press, in place of the ones
+    // the mouse buttons are bound to.
+    if (pad->port == 0)
+    {
+        *on = iMenuMouseUpdate((pad->flags & 0x10) != 0, *on);
+    }
 
     const iPadSettings& cfg = iPadSettingsGet();
 

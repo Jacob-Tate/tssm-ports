@@ -115,6 +115,18 @@ iGCPlatform iFilePackagePlatformOf(const char* name);
 // it, and stops the process. Called from zSceneLoadPackFile.
 void iFileMissingPackage(U32 sid, S32 options, const char* filename);
 
+// PC-only. A level's HOP (options 2) that did not load. Retail goes on without
+// it, and so does the port: a mod's level can be one HIP that carries
+// everything, its world included. Two cases still stop the run as
+// iFileMissingPackage does, both of which retail would only crash on later: a
+// HOP that is there but the packer could not open (one cut short, say), and a
+// HOP that is not there for a level whose HIP has no world (JSP or BSP asset)
+// of its own or is not a package at all -- a stock level of a copied file set
+// that lost its HOP. A HOP that opens but holds no game data (empty, or junk)
+// is not caught: it crashes later, as in retail. Called from
+// zSceneLoadPackFile, before the HIP is loaded.
+void iFileOptionalPackage(U32 sid, S32 options, const char* filename);
+
 
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);

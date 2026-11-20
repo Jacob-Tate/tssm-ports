@@ -21,9 +21,9 @@ game's own decompiled code runs unchanged in behaviour; a new platform layer
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.3
-  for Windows: `TSSM-Dehydrated-0.9.3-Windows.zip` (64-bit) and
-  `TSSM-Dehydrated-0.9.3-Windows-32bit.zip` (32-bit). It is this branch, built under that
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.4
+  for Windows: `TSSM-Dehydrated-0.9.4-Windows.zip` (64-bit) and
+  `TSSM-Dehydrated-0.9.4-Windows-32bit.zip` (32-bit). It is this branch, built under that
   neutral name with the port's own simple icon, and has no game data. It has no updater: a
   new version is a new zip.
 - **Build it yourself** from this source, as below. A build of your own is called *The

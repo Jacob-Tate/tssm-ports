@@ -1,6 +1,7 @@
 #include "iWindow.h"
 
 #include "iHangDump.h"
+#include "iMouseLook.h"
 #include "iPerf.h"
 #include "iScreen.h"
 #include "rw/backend.h"
@@ -32,6 +33,9 @@
 // Win32 window backend had to write by hand.
 
 #include <SDL3/SDL.h>
+
+// librw's PNG reader, for the window icon.
+#include "src/lodepng/lodepng.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,18 +77,15 @@ static iWindowDeferred sDeferred;
 #ifdef _WIN32
 // The window's own icons, which are NOT the same thing as the executable's.
 //
-// The shell finds the taskbar and alt-tab icon by reading the lowest-numbered
-// icon resource out of the .exe, so that one works whether or not anything here
-// is set. The title bar does not: it draws the small icon of the window, and a
-// window that was never sent WM_SETICON gets its class's, which for an SDL
-// window is the system default. That is the whole difference between "the
-// taskbar icon is right and the title bar's is generic" and both being right.
+// Explorer reads the executable's first icon resource. A window shows the
+// icons it was sent with WM_SETICON, and without them its class's, which SDL
+// loads from that same resource at one size. Sending them here, at the two
+// system metric sizes, picks the right image of the .ico (16 to 256 pixels)
+// for the title bar and for the taskbar instead of scaling one, and does not
+// depend on how SDL registered its class.
 //
-// Resource 1 is the icon in res/tssm.rc. LoadImage is asked for the two system
-// metric sizes rather than being left to guess, because the .ico carries 16,
-// 32, 48 and 64 pixel images and this is what picks the right one for each slot
-// instead of scaling a large one down.
-static void SetTitleBarIcon(HWND hwnd)
+// Resource 1 is the icon CMakeLists.txt compiles in ("the app icon").
+static void SetResourceIcons(HWND hwnd)
 {
     if (hwnd == NULL)
     {
@@ -111,6 +112,54 @@ static void SetTitleBarIcon(HWND hwnd)
     }
 }
 #endif
+
+// The window icon's picture, as CMakeLists.txt compiled it in ("the app
+// icon"): kWindowIconPng, kWindowIconPngSize bytes of PNG, empty when the
+// build was given none.
+#include "tssm_window_icon.inc"
+
+void iWindowSetIcon(SDL_Window* window)
+{
+    if (window == NULL)
+    {
+        return;
+    }
+
+    // Decoded once; SDL_SetWindowIcon takes a copy for each window.
+    static unsigned char* sPixels;
+    static unsigned sW;
+    static unsigned sH;
+    static bool sDecoded;
+    if (!sDecoded)
+    {
+        sDecoded = true;
+        if (kWindowIconPngSize > 0 &&
+            lodepng_decode32(&sPixels, &sW, &sH, kWindowIconPng, kWindowIconPngSize) != 0)
+        {
+            printf("tssm: the window icon's picture could not be read; the windows keep the "
+                   "system's\n");
+            fflush(stdout);
+            sPixels = NULL;
+        }
+    }
+
+    if (sPixels != NULL)
+    {
+        SDL_Surface* icon =
+            SDL_CreateSurfaceFrom((int)sW, (int)sH, SDL_PIXELFORMAT_RGBA32, sPixels, (int)sW * 4);
+        if (icon != NULL)
+        {
+            SDL_SetWindowIcon(window, icon);
+            SDL_DestroySurface(icon);
+        }
+    }
+
+#ifdef _WIN32
+    SetResourceIcons(
+        (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+                                     NULL));
+#endif
+}
 
 S32 iWindowOpen(const iWindowParams* params)
 {
@@ -281,10 +330,7 @@ S32 iWindowOpen(const iWindowParams* params)
         sHeight = got_h;
     }
 
-#ifdef _WIN32
-    SetTitleBarIcon((HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(sWindow),
-                                                 SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL));
-#endif
+    iWindowSetIcon(sWindow);
 
     sOpened = TRUE;
     return TRUE;
@@ -312,6 +358,9 @@ void iWindowDeferredCreated()
     {
         return;
     }
+
+    // librw made this window, so its icon is set here.
+    iWindowSetIcon(sWindow);
 
     // Borderless, applied now because there was nothing to apply it to before.
     //
@@ -483,6 +532,10 @@ void iWindowPump()
     while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FINGER_DOWN, SDL_EVENT_LAST) > 0)
     {
     }
+
+    // Escape frees the pointer here as well as at the pad's poll, which a
+    // loading screen or a movie may not reach for a while.
+    iMouseLookPump();
 
     iPerfPumpEnd();
 }

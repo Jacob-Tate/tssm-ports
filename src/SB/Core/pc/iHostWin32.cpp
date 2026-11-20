@@ -375,6 +375,43 @@ S32 iHostClaimInstance(const char* key, U32* holder)
     return 1;
 }
 
+bool iHostInstanceHeld(const char* key, U32* holder)
+{
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+
+    char name[160];
+    snprintf(name, sizeof(name), "Local\\%s", key != NULL ? key : "tssm");
+
+    // Opened, never created: a section nobody holds does not exist.
+    HANDLE h = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
+    if (h == NULL)
+    {
+        return false;
+    }
+
+    DWORD id = 0;
+    volatile DWORD* view = (volatile DWORD*)MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(DWORD));
+    if (view != NULL)
+    {
+        id = *view;
+        UnmapViewOfFile((const void*)view);
+    }
+    CloseHandle(h);
+
+    if (id == GetCurrentProcessId())
+    {
+        return false;
+    }
+    if (holder != NULL)
+    {
+        *holder = id;
+    }
+    return true;
+}
+
 namespace
 {
     struct RaiseSearch

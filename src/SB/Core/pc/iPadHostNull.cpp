@@ -1,3 +1,4 @@
+#include "iMouseLook.h"
 #include "iPadHost.h"
 #include "iPadPrompts.h"
 #include "iPadTest.h"
@@ -29,6 +30,10 @@ void iPadHostExit()
 }
 
 void iPadHostPoll()
+{
+}
+
+void iPadHostPollDevices()
 {
 }
 
@@ -105,6 +110,69 @@ void iPadHostSetHotkey(iPadHostHotkeyFn)
 
 void iPadPromptsUpdate(const iPadHostState*)
 {
+}
+
+// No mouse either (iMouseLook.h): no pointer in the menus, nothing steering.
+bool iMouseLookSetPointer(bool)
+{
+    return false;
+}
+
+bool iMouseLookPointer(F32*, F32*, bool*, U32*, U32*, S32*)
+{
+    return false;
+}
+
+void iMouseLookSetHand(bool)
+{
+}
+
+U32 iMouseLookBound(S32)
+{
+    return 0;
+}
+
+bool iMouseLookSteering()
+{
+    return false;
+}
+
+void iMouseLookTestMove(F32, F32)
+{
+}
+
+void iMouseLookTestPointer(F32, F32)
+{
+}
+
+void iMouseLookTestPress(U32)
+{
+}
+
+void iMouseLookTestWheel(S32)
+{
+}
+
+void iMouseLookTestEscape()
+{
+}
+
+void iMouseLookSpend(U32)
+{
+}
+
+U32 iMouseLookSpentOut(U32 on)
+{
+    return on;
+}
+
+void iMouseLookPump()
+{
+}
+
+bool iMouseLookHeld()
+{
+    return false;
 }
 
 void iPadPromptsShutdown()

@@ -249,4 +249,14 @@ void iWindowDeferredCreated();
 // Names the implementation that was linked in, for the startup log.
 const char* iWindowBackendName();
 
+// The program's icon on an SDL window: the game's (every backend; the GL3 one
+// once librw has made it) and the launcher's. The picture is the one the build
+// was given (CMakeLists.txt, "the app icon": the sponge block in dist/pc, or
+// TSSM_ICON_DIR's), set with SDL_SetWindowIcon; on Windows the executable's
+// own icon is then sent to the window at the sizes its title bar and the
+// taskbar ask for, which is sharper than one picture scaled. Nothing without
+// SDL windows.
+struct SDL_Window;
+void iWindowSetIcon(SDL_Window* window);
+
 #endif

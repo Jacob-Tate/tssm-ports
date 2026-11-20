@@ -231,11 +231,11 @@ void iPadTestStart()
     static const char* const kKeyboard[] = { "always", "fallback", "off" };
 
     printf("tssm: input test on (%s). preset %s, layout %s, stick curve %s, deadzone %s, "
-           "trigger click at %d%%, keyboard %s, mouse camera %s\n",
+           "trigger click at %d%%, keyboard %s, mouse look %s\n",
            s.test == IPAD_TEST_OVERLAY ? "log + overlay" : "log", iPadBindActivePreset(),
-           iPadLayoutName(iPadLayoutActive()), kCurve[s.curve],
-           s.deadzone < 0.0f ? "auto" : "set", (int)(s.trigger_threshold * 100.0f + 0.5f),
-           kKeyboard[s.keyboard], s.mouse_camera ? "on" : "off");
+           iPadLayoutName(iPadLayoutActive()), kCurve[s.curve], s.deadzone < 0.0f ? "auto" : "set",
+           (int)(s.trigger_threshold * 100.0f + 0.5f), kKeyboard[s.keyboard],
+           s.mouse_look ? "on" : "off");
     fflush(stdout);
 }
 

@@ -4036,12 +4036,17 @@ bool zSceneLoadPackFile(U32 id, S32 options, bool noLocalized, const char* filen
     if (!versionNumber && (options & 3))
     {
 #ifdef PLATFORM_PC
-        // PLATFORM_PC: a HIP or HOP the game cannot do without (only the localized pack, 3, is
-        // optional). Retail carries on and crashes in zTransient::scene_enter; a disc always
-        // has the file, a copied file set may not.
-        if ((options & 3) != 3)
+        // PLATFORM_PC: a HIP the game cannot do without stops the run with the file's name.
+        // Retail carries on and crashes in zTransient::scene_enter; a disc always has the
+        // file, a copied file set may not. A level's HOP (2) may be absent, as in retail: a
+        // mod's level can be one HIP (iFile.h). The localized pack (3) is optional.
+        if ((options & 3) == 1)
         {
             iFileMissingPackage(id, options, filename);
+        }
+        else if ((options & 3) == 2)
+        {
+            iFileOptionalPackage(id, options, filename);
         }
 #endif
         return false;

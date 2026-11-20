@@ -287,6 +287,9 @@ static void ApplyConfig()
     // Where saves go, before xSaveGameInit resolves the root; empty is the
     // per-user data folder (isavegame.cpp).
     iSGSetSaveRoot(iConfigGetString("game.save_folder", ""));
+
+    // The save screens' warning, before the first package loads (iSaveText.h).
+    iSaveTextApplyConfig();
     iBootSetCameraSensitivity(iConfigGetFloat("input.camera_sensitivity", 1.0f));
 
     const char* deadzone = iConfigGetString("input.deadzone", "auto");
