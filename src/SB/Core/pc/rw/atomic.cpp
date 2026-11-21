@@ -21,6 +21,9 @@
 #include "intersect.h"
 #include "stream.h" // brings in librw's rw.h, which must not be included twice
 
+// After librw's headers: types.h has a `null` they cannot be read under.
+#include "iLoadFrame.h"
+
 static inline rw::Atomic* asAtomic(RpAtomic* a)
 {
     return reinterpret_cast<rw::Atomic*>(a);
@@ -419,6 +422,16 @@ RpAtomic* RpAtomicStreamWrite(RpAtomic* atomic, RwStream* stream)
 
 RpAtomic* RpAtomicStreamRead(RwStream* stream)
 {
+    // A model, a world or a texture set is in: a chance for the loading
+    // screen's next frame, on every way out of here (iLoadFrame.h).
+    struct PumpOnExit
+    {
+        ~PumpOnExit()
+        {
+            iLoadFramePump(iLOADPUMP_ATOMIC);
+        }
+    } pumpOnExit;
+
     if (stream == NULL)
     {
         return NULL;

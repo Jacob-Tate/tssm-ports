@@ -3,6 +3,8 @@
 
 #include <types.h>
 
+#include "iGCPackage.h"
+
 #include <stddef.h>
 
 enum IFILE_READSECTOR_STATUS
@@ -98,10 +100,32 @@ const char* iFileMissingAssetPath();
 // read or carries no PLAT, which is not treated as an answer either way.
 const char* iFileAssetPlatform(const char** longName);
 
+// PC-only. Which console's packer wrote the package file at `path` (a path as
+// iFileOpen resolves it), from its own PLAT chunk (iGCPackage.h). Each package
+// is asked on its own, so Xbox and GameCube packages can be told apart in one
+// set. Kept for the path until the file's size or time changes.
+iGCPlatform iFilePackagePlatform(const char* path);
+
+// PC-only. The same, of the package iFileOpen would open for `name` (an asset
+// name as the game gives it): the mod's copy when a mod replaces it.
+iGCPlatform iFilePackagePlatformOf(const char* name);
+
 // PC-only. A scene package (xSTPreLoadScene's sid, flg_hiphop and file name, or
 // NULL) the game could not load: names the file and where it should be, shows
 // it, and stops the process. Called from zSceneLoadPackFile.
 void iFileMissingPackage(U32 sid, S32 options, const char* filename);
+
+// PC-only. A level's HOP (options 2) that did not load. Retail goes on without
+// it, and so does the port: a mod's level can be one HIP that carries
+// everything, its world included. Two cases still stop the run as
+// iFileMissingPackage does, both of which retail would only crash on later: a
+// HOP that is there but the packer could not open (one cut short, say), and a
+// HOP that is not there for a level whose HIP has no world (JSP or BSP asset)
+// of its own or is not a package at all -- a stock level of a copied file set
+// that lost its HOP. A HOP that opens but holds no game data (empty, or junk)
+// is not caught: it crashes later, as in retail. Called from
+// zSceneLoadPackFile, before the HIP is loaded.
+void iFileOptionalPackage(U32 sid, S32 options, const char* filename);
 
 
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);

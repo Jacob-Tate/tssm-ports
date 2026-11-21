@@ -1,5 +1,6 @@
 #include "iPadTouch.h"
 
+#include "iCameraLook.h"
 #include "iConfig.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -115,6 +116,9 @@ namespace
     // each frame, which evens it out and still turns it exactly as far as the
     // finger went.
     const F32 kCameraSmoothing = 0.08f;
+
+    // Radians the on-foot camera turns for a drag one screen height long.
+    const F32 kCameraTurnPerHeight = 3.0f;
 
     // Where everything is this poll, in window pixels.
     struct Layout
@@ -261,6 +265,12 @@ namespace
         // Went down during this poll's events, and lifted during them.
         bool landed;
         bool lifted;
+        // For a tap (iPadTouchTakeTap): where and when it landed, and whether
+        // it has been the only finger down and has stayed where it landed.
+        F32 downX;
+        F32 downY;
+        Uint64 downNS;
+        bool tapping;
     };
 
     const S32 kMaxFingers = 10;
@@ -314,8 +324,25 @@ namespace
     F32 sCameraOwedY;
     Uint64 sLastPollNS;
 
+    // A drag has the camera. Until the first one, and again once the right
+    // stick or the camera keys are used, the game's own camera has it.
+    bool sCameraDragged;
+
     U32 sHeld;
     bool sInUse;
+
+    // A tap: one finger, not on a button, down and up again quickly where it
+    // landed (as fractions of the window). Kept for the poll it lifted in.
+    const F32 kTapSeconds = 0.4f;
+    const F32 kTapSlop = 0.02f;
+    bool sTapped;
+    F32 sTapX;
+    F32 sTapY;
+
+    // A test's tap (iPadTouchTestTap), for the next poll.
+    bool sTestTap;
+    F32 sTestTapX;
+    F32 sTestTapY;
 
     void Queue(S32 kind, SDL_TouchID touch, SDL_FingerID id, F32 x, F32 y)
     {
@@ -516,6 +543,13 @@ namespace
         SDL_UnlockSpinlock(&sQueueLock);
 
         bool down = false;
+        sTapped = sTestTap;
+        if (sTestTap)
+        {
+            sTestTap = false;
+            sTapX = sTestTapX;
+            sTapY = sTestTapY;
+        }
 
         for (S32 i = 0; i < n; i++)
         {
@@ -558,13 +592,44 @@ namespace
                 f->y = f->lastY = py;
                 f->landed = true;
                 Assign(*L, f, px, py);
+
+                // A second finger: neither is a tap (nor is any of the three
+                // that open the settings window).
+                f->downX = px;
+                f->downY = py;
+                f->downNS = SDL_GetTicksNS();
+                f->tapping = f->control != CONTROL_BUTTON;
+                for (S32 k = 0; k < sFingerCount - 1; k++)
+                {
+                    if (!sFingers[k].lifted)
+                    {
+                        sFingers[k].tapping = false;
+                        f->tapping = false;
+                    }
+                }
             }
             else if (f != NULL)
             {
                 f->x = px;
                 f->y = py;
+
+                const F32 slop = kTapSlop * L->h;
+                const F32 dx = px - f->downX;
+                const F32 dy = py - f->downY;
+                if (dx * dx + dy * dy > slop * slop)
+                {
+                    f->tapping = false;
+                }
+
                 if (e.kind == EVENT_UP)
                 {
+                    if (f->tapping &&
+                        (F32)(SDL_GetTicksNS() - f->downNS) / 1e9f < kTapSeconds)
+                    {
+                        sTapped = true;
+                        sTapX = f->downX / L->w;
+                        sTapY = f->downY / L->h;
+                    }
                     Lift(f);
                 }
             }
@@ -760,8 +825,7 @@ namespace
         iTouchOverlaySubmit(shapes, n);
     }
 
-    // The drag camera's turn this poll, in the C-stick units iPadHostState's
-    // camera takes, smoothed over kCameraSmoothing.
+    // The drag camera's turn this poll, smoothed over kCameraSmoothing.
     void DragCamera(iPadHostState* s, F32 h)
     {
         Uint64 now = SDL_GetTicksNS();
@@ -796,19 +860,28 @@ namespace
         }
 
         // As a mouse moves it: a drag right turns the view right, a drag down
-        // looks down. TSSM's camera reads only the C-stick, so the drag becomes
-        // C-stick deflection the way the mouse does: past the game's 32 in
-        // proportion to the distance, a screen height being a full deflection.
-        F32 turnStick[2] = { -turnX, -turnY };
-        F32* outStick[2] = { &s->camera_x, &s->camera_y };
-        for (S32 i = 0; i < 2; i++)
+        // looks down (the engine's pitch is positive-down).
+        F32 perPixel = kCameraTurnPerHeight / h;
+        iCameraLookSet(iCAMERALOOK_TOUCH, turnX * perPixel, turnY * perPixel);
+
+        // The cameras that are not the on-foot one (a boss fight's, say) read
+        // only the C-stick, so while one of them has the view the drag becomes
+        // C-stick deflection, the way the mouse does (iMouseLook.h): past the
+        // game's 32 in proportion to the distance, a screen height being a
+        // full deflection.
+        if (!iCameraLookTaken())
         {
-            F32 v = turnStick[i] * 400.0f / h;
-            if (v != 0.0f)
+            F32 turnStick[2] = { -turnX, -turnY };
+            F32* outStick[2] = { &s->camera_x, &s->camera_y };
+            for (S32 i = 0; i < 2; i++)
             {
-                F32 mag = 33.0f + fabsf(v);
-                mag = mag > 110.0f ? 110.0f : mag;
-                *outStick[i] += v < 0.0f ? -mag : mag;
+                F32 v = turnStick[i] * 400.0f / h;
+                if (v != 0.0f)
+                {
+                    F32 mag = 33.0f + fabsf(v);
+                    mag = mag > 110.0f ? 110.0f : mag;
+                    *outStick[i] += v < 0.0f ? -mag : mag;
+                }
             }
         }
     }
@@ -905,6 +978,22 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
     Submit(L);
     Settle();
 
+    // The camera is the finger's once it has been dragged, the way it is the
+    // mouse's once that has moved (iMouseLook.h): controls that are only
+    // showing leave the retail camera, springs and all, as it is, and it comes
+    // back with a controller, the right stick (the one on the screen too) or
+    // the camera keys.
+    if (!sShowing || s->substick_x * s->substick_x + s->substick_y * s->substick_y > 0.09f ||
+        sStickX[STICK_RIGHT] != 0.0f || sStickY[STICK_RIGHT] != 0.0f)
+    {
+        sCameraDragged = false;
+    }
+    else if (sCameraDX != 0.0f || sCameraDY != 0.0f)
+    {
+        sCameraDragged = true;
+    }
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, sCameraDragged);
+
     if (!sShowing)
     {
         sCameraOwedX = 0.0f;
@@ -936,6 +1025,25 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
         s->substick_x = sStickX[STICK_RIGHT];
         s->substick_y = sStickY[STICK_RIGHT];
     }
+}
+
+bool iPadTouchTakeTap(F32* x, F32* y)
+{
+    if (!sEnabled || !sShowing || !sTapped || !iPadSettingsGet().touch_menus)
+    {
+        return false;
+    }
+    sTapped = false;
+    *x = sTapX;
+    *y = sTapY;
+    return true;
+}
+
+void iPadTouchTestTap(F32 x, F32 y)
+{
+    sTestTap = true;
+    sTestTapX = x;
+    sTestTapY = y;
 }
 
 char iPadTouchButtonLabel(const char* row)

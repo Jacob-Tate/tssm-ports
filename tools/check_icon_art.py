@@ -42,6 +42,11 @@ DEFAULTS = {
     "android/app/src/main/res/mipmap-xhdpi/ic_launcher.png": "1fd12d2a74307e6e9a20ecc6fe7616003366d96b",
     "android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png": "5bc215089d6afeef73bfb195a9a210db47132cac",
     "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": "8a555867776a1fe38a7a30127ff99cc5a7793bb9",
+    # The PC build's default icon: the same sponge block, made by
+    # tools/make_icons.ps1 from dist/switch/default_icon.jpg (the switch branch);
+    # byte for byte what the releases' tssm.exe carries.
+    "dist/pc/default_icon.ico": "2675ce9b25f41895f063b98328c64e14bb727a9a",
+    "dist/pc/default_icon-64.png": "8172b8c9f987fa8511f608e1c40f1cadfc09aa41",
 }
 
 IMAGE_EXTENSIONS = {
@@ -219,6 +224,10 @@ def main():
         name = path.rsplit("/", 1)[-1]
         ext = os.path.splitext(name)[1].lower()
         kind = image_magic(blob_heads.get(sha, b""))
+        # A default is a default, also when an art folder holds a copy of it
+        # (the release's icon folder is made from the same picture).
+        if DEFAULTS.get(path) == sha:
+            continue
         if sha in art:
             problems.append(f"{path}: identical to {art[sha]}")
         elif name.lower() in GENERATED_NAMES or "tssm-logo" in name.lower():

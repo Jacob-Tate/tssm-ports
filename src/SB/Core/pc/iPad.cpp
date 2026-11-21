@@ -1,4 +1,6 @@
 #include "iPad.h"
+#include "iFile.h"
+#include "iMenuMouse.h"
 #include "iPadHost.h"
 #include "iPadPrompts.h"
 #include "iPadSettings.h"
@@ -8,7 +10,9 @@
 #include <types.h>
 
 #include "xPad.h"
+#include "xString.h"
 #include "xTRC.h"
+#include "xstransvc.h"
 
 #include <math.h>
 
@@ -266,6 +270,44 @@ static S8 CameraAxis(S8 v, F32 sensitivity, S32 invert, F32 mouse)
     return ClampS8(f);
 }
 
+// Back opens the upgrade window, and the two releases' menus hear it as
+// different events (docs/CONTROLS.md): the Xbox's on PadPressSelect, the
+// GameCube's on PadPressE, which zUI::DoUpdate raises for Z. Back sets both
+// bits and DoUpdate raises only the first it finds, Select, so under the
+// GameCube's menus -- a GameCube disc, or a mod's GameCube menus -- Back did
+// nothing. A GameCube pad has no Select (gc/iPad.cpp never sets it), so there
+// Back is the GameCube's Z alone. Which menus are loaded is the package of the
+// one that opens the window (and the pause menu), MN\mnui.HIP's.
+//
+// The package is asked once per press, when Select comes on, and the answer is
+// kept while it is held: the question resolves the mod overrides and reads the
+// file's header, too much for every frame on a port that reads an SD card, and
+// a press is let go as what it was pressed as.
+static bool sBackHeld[IPAD_MAX_CONTROLLERS];
+static bool sBackAsZ[IPAD_MAX_CONTROLLERS];
+
+static U32 SelectForTheMenus(S32 port, U32 on)
+{
+    if (!(on & XPAD_BUTTON_SELECT))
+    {
+        sBackHeld[port] = false;
+        return on;
+    }
+
+    if (!sBackHeld[port])
+    {
+        static const U32 kPauseMgr = xStrHash("__PAUSE_STATE_PAUSE MGR");
+        const char* pkg = xST_xAssetID_HIPFullPath(kPauseMgr);
+        sBackHeld[port] = true;
+        sBackAsZ[port] = pkg != NULL && iFilePackagePlatformOf(pkg) == IGCPLAT_GAMECUBE;
+    }
+    if (!sBackAsZ[port])
+    {
+        return on;
+    }
+    return (on & ~XPAD_BUTTON_SELECT) | XPAD_BUTTON_Z;
+}
+
 static void iPadUpdateRumble(_tagxPad* pad)
 {
     if (pad->flags & 8)
@@ -313,6 +355,7 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
         pad->analog2.x = 0;
         pad->analog2.y = 0;
 
+        sBackHeld[pad->port] = false;
         if (pad->port == 0)
         {
             iPadTestFrame(pad, 0, host);
@@ -324,6 +367,16 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     // the console does it here with the Z-modifier trick, which the gamecube
     // preset's chords reproduce.
     *on = host->buttons;
+
+    // The mouse in the game's menus (iMenuMouse.h): its click, right click and
+    // wheel as the buttons a controller would press, in place of the ones
+    // the mouse buttons are bound to.
+    if (pad->port == 0)
+    {
+        *on = iMenuMouseUpdate((pad->flags & 0x10) != 0, *on);
+    }
+
+    *on = SelectForTheMenus(pad->port, *on);
 
     const iPadSettings& cfg = iPadSettingsGet();
 

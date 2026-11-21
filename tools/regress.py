@@ -6,10 +6,11 @@
 What it does, in order:
 
   1. (--build) builds each width's existing build directory with `cmake --build`
-     inside that width's MSVC environment. It never configures: a build
-     directory is made once with build-debug.bat (or the cmake line in
-     src/SB/Core/pc/README.md), and its cache keeps the compiler and the vcpkg
-     prefix it was made with.
+     inside that width's MSVC environment, or, for a directory configured with
+     MinGW's gcc, with the CMake it was configured with and the MinGW folder
+     first on PATH. It never configures: a build directory is made once with
+     build-debug.bat (or the cmake lines in src/SB/Core/pc/README.md), and its
+     cache keeps the compiler and the FFmpeg prefix it was made with.
   2. runs tssm.exe of each width with the same scripted controller (TSSM_INPUT)
      from the legal screen through the title, New Game, the autosave prompt, the
      first save, story1.bik and BB02's opening cutscene into gameplay, capturing
@@ -50,7 +51,64 @@ What it does, in order:
        front of it and held still (TSSM_TEST_PLACE, TSSM_TEST_HOLD). Its frames
        are compared with references as in 4, and the belt has to move between
        two frames 12 apart (check_scroll; no reference needed).
+     - bb02_crowd_xbox, bb02_crowd_gamecube: No Cheese!'s fish crowd, with the
+       player put down facing it and held still, once with [extras] crowds =
+       xbox and once with gamecube. Checked by themselves (check_crowd): the
+       crowd has to move between two frames 40 apart with xbox and stand still
+       with gamecube. No reference frames.
+     - bb02_xbox: the run to gameplay again with every [extras] key at xbox:
+       the title with the Xbox menu glow, and BB02 with the Xbox glow (0.55),
+       its spotlights and its crowd. Its frames are compared with references
+       of their own.
+     - tt01_spot_xbox, tt01_spot_gamecube: TT01's disco, its script started
+       (TSSM_TEST_SEND) with the player held there, once with [extras]
+       spotlights = xbox and once with gamecube. The scene's spotlights are
+       logged (TSSM_TEST_SPOTLOG) and checked (check_spotlights): the 12 disco
+       lights, which only the Xbox files have, come on with xbox and never
+       with gamecube. No reference frames (the disco moves over the whole
+       picture).
+     - bb01_crowd_xbox, bb01_crowd_gamecube: Sandwich Driving 101's crowd
+       with the car held by it, its objects logged (TSSM_TEST_CROWDLOG) and
+       checked (check_crowd_log): their cycle runs with xbox, and with
+       gamecube all 22 stand at speed 0.
+     - sc02_water_xbox, sc02_water_gamecube, b301_water_xbox,
+       b301_water_gamecube: the two levels with water, once with [extras]
+       water = xbox and once with gamecube. The water's own log lines are
+       checked (check_water): with xbox the Xbox water is set up for every
+       body and its surface drawn, with gamecube the GameCube water is used
+       because the setting says so, and the level's extras line agrees. No
+       reference frames.
+     - bb03_token: a Goofy Goober Token collected in BB03, the player put down
+       on it (TSSM_TEST_PLACE). Checked by itself (check_token): while it is
+       being collected the token's multi-coloured patches have to be in the
+       picture. No reference frames (the patches are random).
+     - bb02_guitar_xbox, bb02_guitar_gamecube: the Sonic Wave Guitar given
+       (TSSM_TEST_POWERUP) and fired in BB02, once with [extras]
+       guitar_distortion = xbox and once with gamecube. The screen
+       distortion's amount is logged for every frame its pass is asked for
+       (TSSM_TEST_DISTORT=log) and checked (check_guitar): with xbox it rises
+       to 1 and is drawn in every one of those frames, with gamecube the pass
+       is never asked for, and the level's extras line agrees. No reference
+       frames.
+     - pt01_portal: a portal inside PT01 (the one Mervyn's cutscene ends with)
+       with every world locked in the boot mod's sb04.ini, as a mod's ini can
+       have them. Checked (check_portal): the run exits by itself, the event
+       reached the portal and the player stayed in the level, as on the
+       GameCube. No reference frames.
+     - bb03_upgrade_xbox, bb03_upgrade_gamecube: Tab, the keyboard's Back,
+       pressed in BB03's play and again a little later, by a keyboard of the
+       test's own (TSSM_TEST_KEYS), once with the Xbox files and once with the
+       GameCube files (--gc-assets; the row is left out without them). The
+       menus are logged (TSSM_TEST_UILOG) and checked (check_upgrade): the
+       upgrade window's manager has the menus' focus after the first press and
+       not before it, and has let it go after the second. No reference frames.
      --quick leaves them out.
+
+     Every run's config.ini sets the six [extras] keys (the Xbox release's
+     features, src/SB/Core/pc/iExtras.h) to gamecube, except the one a run is
+     about, so the references show the GameCube versions and a change to an
+     xbox version cannot move them. It also sets [game] save_text = xbox, so
+     the autosave prompt keeps the Xbox disc's words the references show.
   6. runs every unit test of each width: save_selftest, tssm_input_test,
      tssm_modtest, tssm_sndtest (boot.HIP and MN/mnuc.HIP) and tssm_widentest.
   7. prints a pass/fail table, writes report.json and report.html (the frames
@@ -69,6 +127,9 @@ captures are game frames: keep them out of the repository (--reference and
 
 Options:
   --assets DIR        the Xbox asset folder (else TSSM_ASSETS)
+  --gc-assets DIR     the GameCube disc's files folder, for the runs on the
+                      GameCube files (else TSSM_TEST_GC_ASSETS; without it they
+                      are left out)
   --reference DIR     where the reference frames are: <width>/frame_NNNNN.png
                       for the run to gameplay, <width>/<run>/frame_NNNNN.png for
                       the level runs (else TSSM_REGRESS_REFERENCE)
@@ -192,7 +253,227 @@ RUN_PT03_BELT = {
     "timeout": 60,
     "about": "boot PT03, held in front of a belt, to frame 340",
 }
-RUNS = [RUN_BB02, RUN_DE01_FLY, RUN_PT03_BELT]
+# The Xbox extras ([extras] in config.ini, src/SB/Core/pc/iExtras.h). Every run
+# above pins all six to gamecube (EXTRAS), so the references show the GameCube
+# release's versions and a change to an xbox version cannot move them. These
+# runs are the xbox ones, each checked by itself (no reference frames: the
+# crowd's cycle is not at the same point from run to run).
+#
+# bb02_crowd_xbox, bb02_crowd_gamecube: No Cheese!'s fish crowd behind the
+# barrier, with the player put down facing it and held still (as pt03_belt).
+# check_crowd compares CROWD_CROP of frames 2500 and 2540: with crowds = xbox
+# it has to move, with gamecube it has to stand still.
+EXTRAS = ("glow", "spotlights", "crowds", "water", "frame_lock", "guitar_distortion")
+# A taps every 100 frames up to 1500 skip story1.bik and BB02's opening cutscene
+# (left to play, the cutscene was still on at 1840 in one run of three).
+RUN_BB02_CROWD_XBOX = {
+    "name": "bb02_crowd_xbox", "item": "BB02 crowd (xbox)", "boot": "BB02",
+    "script": ",".join("%d:a/4" % f for f in range(300, 1501, 100)), "exit": 2560,
+    "frames": [(2500, "game"), (2540, "game")],
+    "env": {"TSSM_TEST_PLACE": "2400:-41.0:7.0:7.0:320", "TSSM_TEST_HOLD": "2401-2560"},
+    "timeout": 100, "extras": {"crowds": "xbox"}, "compare": False,
+    "about": "boot BB02, held facing the crowd, to frame 2560, crowds xbox",
+}
+RUN_BB02_CROWD_GC = dict(RUN_BB02_CROWD_XBOX, name="bb02_crowd_gamecube", item="BB02 crowd (gamecube)",
+                         extras={"crowds": "gamecube"},
+                         about="boot BB02, held facing the crowd, to frame 2560, crowds gamecube")
+# bb02_xbox: the run to gameplay with every extra at xbox, against references
+# of its own: the title (the menu glow), the main menu, and BB02 (the Xbox
+# glow at 0.55, the spotlights, the crowd).
+RUN_BB02_XBOX = {
+    "name": "bb02_xbox", "item": "run to gameplay (xbox)", "boot": None, "script": SCRIPT,
+    "exit": EXIT_FRAME,
+    "frames": [(100, "menu"), (400, "menu"), (700, "menu"), (2200, "game"), (2500, "game"),
+               (2700, "game"), (3000, "game")],
+    "env": {}, "timeout": None, "extras": dict((k, "xbox") for k in EXTRAS),
+    "about": "to frame %d with every [extras] key at xbox" % EXIT_FRAME,
+}
+# tt01_spot_xbox, tt01_spot_gamecube: Bubble Blowing Baby Hunt's disco lights,
+# which only the Xbox files have and which the disco machine's script
+# (DISCO_SCRIPT_01) switches on 5 s after it starts. The script is started at
+# TT01_SPOT_SEND, the player put down in the disco and held there, and the
+# scene's spotlights logged every 10 frames (TSSM_TEST_SPOTLOG). The only
+# buttons are two B presses that close Mindy's tokens message, which opens
+# after the player is put down (an A by the level's start opens the warp menu
+# instead). check_spotlights: with
+# spotlights = xbox the 12 disco lights have to come on; with gamecube none of
+# them may, through the whole script. TT01 is one of the GameCube's 30 fps
+# levels, so both runs set frame_lock = xbox and run at 60. No reference
+# frames: the disco's floor dots and lasers move over the whole picture, and two
+# runs differ by a mean of 10 at the same frame; the frames are kept for the
+# report.
+TT01_SPOT_SEND = 700
+RUN_TT01_SPOT_XBOX = {
+    "name": "tt01_spot_xbox", "item": "TT01 disco lights (xbox)", "boot": "TT01",
+    "script": "1050:b,1150:b", "exit": 1710,
+    "frames": [(1300, "game"), (1500, "game")],
+    "env": {"TSSM_TEST_SEND": "%d:DISCO_SCRIPT_01" % TT01_SPOT_SEND, "TSSM_TEST_SPOTLOG": "10",
+            "TSSM_TEST_PLACE": "750:160:12:-150:127", "TSSM_TEST_HOLD": "751-1710"},
+    "timeout": 80, "extras": {"spotlights": "xbox", "frame_lock": "xbox"}, "compare": False,
+    "about": "boot TT01, the disco started at %d, to frame 1710, spotlights xbox" % TT01_SPOT_SEND,
+}
+RUN_TT01_SPOT_GC = dict(RUN_TT01_SPOT_XBOX, name="tt01_spot_gamecube",
+                        item="TT01 disco lights (gamecube)",
+                        extras={"spotlights": "gamecube", "frame_lock": "xbox"},
+                        about="boot TT01, the disco started at %d, to frame 1710, spotlights "
+                              "gamecube" % TT01_SPOT_SEND)
+# bb01_crowd_xbox, bb01_crowd_gamecube: Sandwich Driving 101's fish crowd,
+# with the Patty Wagon put down by one of its groups and held (BB01 is a
+# GameCube 30 fps level: frame_lock = xbox in both). The held car's camera
+# still sways, so frames cannot show the crowd's own motion; the crowd objects
+# are logged every 60 frames instead (TSSM_TEST_CROWDLOG) and checked
+# (check_crowd_log): with xbox the cycle runs at speed 1 and the crowd in view
+# moves on in it, with gamecube every one of the 22 is at speed 0 and none
+# moves.
+RUN_BB01_CROWD_XBOX = {
+    "name": "bb01_crowd_xbox", "item": "BB01 crowd (xbox)", "boot": "BB01",
+    "script": "99999:start", "exit": 2100, "frames": [(2000, "game")],
+    "env": {"TSSM_TEST_CROWDLOG": "60", "TSSM_TEST_PLACE": "1500:-128:10:185:180",
+            "TSSM_TEST_HOLD": "1501-2100"},
+    "timeout": 100, "extras": {"crowds": "xbox", "frame_lock": "xbox"}, "compare": False,
+    "about": "boot BB01, the car held by the crowd, to frame 2100, crowds xbox",
+}
+RUN_BB01_CROWD_GC = dict(RUN_BB01_CROWD_XBOX, name="bb01_crowd_gamecube", item="BB01 crowd (gamecube)",
+                         extras={"crowds": "gamecube", "frame_lock": "xbox"},
+                         about="boot BB01, the car held by the crowd, to frame 2100, crowds gamecube")
+# sc02_water_xbox, sc02_water_gamecube, b301_water_xbox, b301_water_gamecube:
+# the Xbox water (iXboxWater.cpp), on by default, in the two levels that have
+# water bodies, with no button pressed. check_water reads the water's lines:
+# with water = xbox, "Xbox water in <scene>: <n> bodies" with the level's
+# number of bodies (WATER_BODIES) and "<scene>: the surface is drawn"; with
+# gamecube, "GameCube water in <scene> -- extras.water is gamecube" and no
+# Xbox water; and the level's "extras:" line names the same water. SC02 is a
+# GameCube 30 fps level, so both SC02 runs set frame_lock = xbox. Measured
+# (2026-11-18, D3D9, both widths): both xbox lines come before SC02's frame 300
+# and before B301's 600 (its opening cutscene), and every run passes in 13 to
+# 18 s. No reference frames: one frame of each is kept for the report.
+WATER_BODIES = {"SC02": 2, "B301": 1}
+RUN_SC02_WATER_XBOX = {
+    "name": "sc02_water_xbox", "item": "SC02 water (xbox)", "boot": "SC02",
+    "script": "99999:start", "exit": 400, "frames": [(300, "game")],
+    "env": {}, "timeout": 60, "extras": {"water": "xbox", "frame_lock": "xbox"},
+    "compare": False, "about": "boot SC02 to frame 400, water xbox",
+}
+RUN_SC02_WATER_GC = dict(RUN_SC02_WATER_XBOX, name="sc02_water_gamecube", item="SC02 water (gamecube)",
+                         extras={"water": "gamecube", "frame_lock": "xbox"},
+                         about="boot SC02 to frame 400, water gamecube")
+RUN_B301_WATER_XBOX = dict(RUN_SC02_WATER_XBOX, name="b301_water_xbox", item="B301 water (xbox)",
+                           boot="B301", exit=700, frames=[(600, "game")], timeout=70,
+                           extras={"water": "xbox"}, about="boot B301 to frame 700, water xbox")
+RUN_B301_WATER_GC = dict(RUN_B301_WATER_XBOX, name="b301_water_gamecube", item="B301 water (gamecube)",
+                         extras={"water": "gamecube"},
+                         about="boot B301 to frame 700, water gamecube")
+WATER_RUNS = (RUN_SC02_WATER_XBOX, RUN_SC02_WATER_GC, RUN_B301_WATER_XBOX, RUN_B301_WATER_GC)
+# bb03_token: the particle tanks that carry a matrix per particle
+# (rw/ptank.cpp's instancePTankMatrices). While a Goofy Goober Token is being
+# collected, about 3.5 s, it gives off multi-coloured round patches
+# (zEntPickup.cpp's sGGSparks, the texture fx_color_patches), which are such a
+# tank; so are sparks, fire, explosions and splash rings. An A at 300 skips
+# BB03's opening cutscene (gameplay by 400), and at TOKEN_PLACE the player is
+# put down on GGTOKEN_MAIN_PICKUP_01, which collects it at once. check_token
+# counts the vivid pixels (saturation above 0.6, value above 0.7) of
+# TOKEN_FRAMES whose hue is not red-to-yellow (the room's own curtains, lamps
+# and the token's light are): the larger share of the two has to reach
+# TOKEN_MIN_SHARE. Measured (2026-11-19, D3D9, glow gamecube as every run
+# here): the larger share was 1.9 to 5.5 % over four runs of each width, and
+# 0.00 % in a build without instancePTankMatrices. No reference frames: the
+# patches are random.
+TOKEN_PLACE = 500
+TOKEN_FRAMES = (TOKEN_PLACE + 100, TOKEN_PLACE + 130)
+TOKEN_MIN_SHARE = 0.2
+RUN_BB03_TOKEN = {
+    "name": "bb03_token", "item": "BB03 token patches", "boot": "BB03",
+    "script": "300:a/4", "exit": TOKEN_PLACE + 150,
+    "frames": [(f, "game") for f in TOKEN_FRAMES],
+    "env": {"TSSM_TEST_PLACE": "%d:-14.3:6.4:2.4:180" % TOKEN_PLACE},
+    "timeout": 60, "compare": False,
+    "about": "boot BB03, put down on a token at %d, to frame %d" % (TOKEN_PLACE, TOKEN_PLACE + 150),
+}
+# bb02_guitar_xbox, bb02_guitar_gamecube: the Sonic Wave Guitar's screen
+# distortion (iXboxDistort.cpp), which the Xbox draws while the camera flies
+# to the wave and rides it and the GameCube never draws. BB02 with the
+# cutscene skipped as above; every move's power-up is set at GUITAR_GIVEN
+# (TSSM_TEST_POWERUP), rt is held from GUITAR_FIRE for 60 frames and let go,
+# and TSSM_TEST_DISTORT=log logs the amount for every frame the pass is asked
+# for. check_guitar: with xbox, at least GUITAR_MIN_FRAMES such lines, the
+# first below 1 (the camera's S-curve), one at 1.000 (riding the wave) and none
+# "not drawn"; with gamecube, none at all; and the level's "extras:" line names
+# the same look. Measured (2026-11-19, D3D9, x64): 166 lines, from
+# frame 1894 (0.000) through 1.000 at about 1990 to the wave's end near 2060;
+# frame 2030 is kept for the report. No reference frames.
+GUITAR_GIVEN = 1600
+GUITAR_FIRE = 1800
+GUITAR_MIN_FRAMES = 60
+RUN_BB02_GUITAR_XBOX = {
+    "name": "bb02_guitar_xbox", "item": "BB02 guitar (xbox)", "boot": "BB02",
+    "script": ",".join("%d:a/4" % f for f in range(300, 1501, 100)) + ",%d:rt/60" % GUITAR_FIRE,
+    "exit": 2200, "frames": [(2030, "game")],
+    "env": {"TSSM_TEST_POWERUP": "%d:1" % GUITAR_GIVEN, "TSSM_TEST_DISTORT": "log"},
+    "timeout": 100, "extras": {"guitar_distortion": "xbox"}, "compare": False,
+    "about": "boot BB02, the guitar fired at frame %d, to frame 2200, guitar_distortion xbox"
+             % GUITAR_FIRE,
+}
+RUN_BB02_GUITAR_GC = dict(RUN_BB02_GUITAR_XBOX, name="bb02_guitar_gamecube",
+                          item="BB02 guitar (gamecube)", extras={"guitar_distortion": "gamecube"},
+                          about="boot BB02, the guitar fired at frame %d, to frame 2200, "
+                                "guitar_distortion gamecube" % GUITAR_FIRE)
+GUITAR_RUNS = (RUN_BB02_GUITAR_XBOX, RUN_BB02_GUITAR_GC)
+# pt01_portal: a portal inside a level whose world sb04.ini's TaskStatus lines
+# lock. zSceneSwitch asks zDispatcher_FindNextValidWorld for the first unlocked
+# world from the portal's own, in Menu order; past a run of locked worlds the
+# search asks about a scene with no TaskStatus line (Menu13's WM01, whose line
+# is GG01; a mod's own level in Menu01), and zMenuSB_IsTaskUnlocked read the
+# table at index -1. The GameCube finds zeros there (the end of zMenu's
+# corruptFiles) and goes on; the 64-bit port read 4G entries past the table and
+# crashed. A mod's ini can lock the worlds this way, and Mervyn's cutscene in
+# PT01 ends with such a portal (SPIKEWALL_PORTAL_01). The pause menu's warp
+# goes through the same search, so a mod whose Menu01 line names its own level
+# crashed there too. The run boots PT01 with every TaskStatus line zeroed
+# (lock_worlds, boot_mod), so the search goes round every world, WM01 too, and,
+# as on the GameCube, the portal keeps the player in the level; it sends the
+# portal eEventTeleportPlayer (16) at PORTAL_SEND, during the level's
+# fly-through. check_portal: the run exited by itself, the event reached the
+# portal and the level never changed (one "extras:" line, PT01's).
+PORTAL_SEND = 300
+RUN_PT01_PORTAL = {
+    "name": "pt01_portal", "item": "PT01 portal, worlds locked", "boot": "PT01",
+    "script": "1360:start", "exit": PORTAL_SEND + 60, "frames": [(PORTAL_SEND + 50, "game")],
+    "env": {"TSSM_TEST_SEND": "%d:SPIKEWALL_PORTAL_01:16" % PORTAL_SEND},
+    "timeout": 60, "compare": False, "lock_worlds": True,
+    "about": "boot PT01 with every world locked, its portal at frame %d, to frame %d"
+             % (PORTAL_SEND, PORTAL_SEND + 60),
+}
+# bb03_upgrade_xbox, bb03_upgrade_gamecube: Back opens the upgrade window.
+# The Xbox's menus open it on PadPressSelect, the GameCube's on PadPressE (Z),
+# and with the GameCube files Back did nothing (src/SB/Core/pc/iPad.cpp).
+# Played from the keyboard (Tab), with a keyboard of the test's own, so the
+# keyboard's bindings and everything after them are in the path. Space at 300
+# skips BB03's opening cutscene (gameplay by 400); Tab at UPGRADE_OPEN opens
+# the window, Tab at UPGRADE_CLOSE closes it. check_upgrade reads the menus'
+# log (TSSM_TEST_UILOG every 10 frames): the window's manager (_POWERUP MGR,
+# UPGRADE_MGR) has the focus in a dump after UPGRADE_OPEN and in none before
+# it, and in none from UPGRADE_CLOSE + 30 on. No reference frames.
+UPGRADE_OPEN = 700
+UPGRADE_CLOSE = 900
+UPGRADE_MGR = "062F6B6D"
+RUN_BB03_UPGRADE_XBOX = {
+    "name": "bb03_upgrade_xbox", "item": "BB03 upgrade window (Xbox files)", "boot": "BB03",
+    "script": "", "exit": UPGRADE_CLOSE + 100, "frames": [(UPGRADE_OPEN + 60, "game")],
+    "env": {"TSSM_TEST_KEYS": "300:space/4,%d:tab,%d:tab" % (UPGRADE_OPEN, UPGRADE_CLOSE),
+            "TSSM_TEST_UILOG": "10"},
+    "timeout": 70, "compare": False,
+    "about": "boot BB03, Tab at %d and %d, to frame %d" % (UPGRADE_OPEN, UPGRADE_CLOSE,
+                                                           UPGRADE_CLOSE + 100),
+}
+RUN_BB03_UPGRADE_GC = dict(RUN_BB03_UPGRADE_XBOX, name="bb03_upgrade_gamecube",
+                           item="BB03 upgrade window (GameCube files)", files="gamecube",
+                           about="boot BB03 from the GameCube files, Tab at %d and %d, to frame "
+                                 "%d" % (UPGRADE_OPEN, UPGRADE_CLOSE, UPGRADE_CLOSE + 100))
+UPGRADE_RUNS = (RUN_BB03_UPGRADE_XBOX, RUN_BB03_UPGRADE_GC)
+RUNS = [RUN_BB02, RUN_DE01_FLY, RUN_PT03_BELT, RUN_BB02_CROWD_XBOX, RUN_BB02_CROWD_GC,
+        RUN_BB02_XBOX, RUN_TT01_SPOT_XBOX, RUN_TT01_SPOT_GC, RUN_BB01_CROWD_XBOX,
+        RUN_BB01_CROWD_GC] + list(WATER_RUNS) + [RUN_BB03_TOKEN] + list(GUITAR_RUNS) + \
+    list(UPGRADE_RUNS) + [RUN_PT01_PORTAL]
 
 # check_camera: while the fly-through plays (the log says "fly-through on"), the
 # camera must be finite and within CAMERA_LIMIT of the origin on every axis; it
@@ -218,6 +499,29 @@ CAMERA_MIN_FLY = 300
 BELT_CROP = (180, 360, 420, 480)
 BELT_FRAMES = (300, 312)
 BELT_MIN_CHANGE = 2.0
+
+# check_crowd: the crowd's part of the 640x480 frame, the least mean change
+# (as crop_change) between CROWD_FRAMES that counts as moving (xbox) and the
+# most that counts as standing still (gamecube). Measured (2026-11-16, D3D9,
+# x64): 2.18 and 2.24 moving, 0.13 still (SpongeBob's idle and the seaweed).
+CROWD_CROP = (190, 165, 420, 255)
+CROWD_FRAMES = (2500, 2540)
+CROWD_MOVING = 1.0
+CROWD_STILL = 0.5
+
+# check_spotlights: TT01's disco lights (DISCO_BALL_SPOTLIGHT_01-08 and
+# DISCO_SPOTLIGHT_01-04, their xStrHash IDs), and the frames after
+# TT01_SPOT_SEND by which the script has switched them on (5 s, at 60 fps)
+# and the log has to have reached.
+DISCO_LIGHTS = frozenset(["715F7AA%s" % c for c in "BCDEF"] + ["715F7AB%d" % d for d in (0, 1, 2)] +
+                         ["7F57F41%d" % d for d in (5, 6, 7, 8)])
+DISCO_ON_BY = 300 + 60
+DISCO_LOGGED_TO = 900
+
+# check_crowd_log: BB01's crowd objects (CROWD_SIMP_01-22), and the frame from
+# which the log is read (the car is held from 1500).
+BB01_CROWD = 22
+BB01_CROWD_FROM = 1600
 
 # Mean block difference (0-255) and share of blocks differing by more than
 # BLOCK_LEVEL, per class. Measured on one machine (2026-10-23, three runs per
@@ -250,6 +554,8 @@ UNIT_TESTS = [
     ("tssm_sndtest boot.HIP", "tssm_sndtest", ["{assets}/boot.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_sndtest mnuc.HIP", "tssm_sndtest", ["{assets}/MN/mnuc.HIP", "{scratch}"], {"TSSM_AUDIO": "0"}),
     ("tssm_widentest", "tssm_widentest", ["{assets}"], {}),
+    ("tssm_extrastest", "tssm_extrastest", ["{scratch}"], {}),
+    ("tssm_watertest", "tssm_watertest", [], {}),
 ]
 
 EXE = ".exe" if os.name == "nt" else ""
@@ -380,10 +686,45 @@ def find_vcvarsall():
     return vcvars if os.path.exists(vcvars) else None
 
 
+def cache_value(build_dir, name):
+    """A CMakeCache.txt entry's value, or None."""
+    with open(os.path.join(build_dir, "CMakeCache.txt"), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            key, sep, value = line.rstrip("\r\n").partition("=")
+            if sep and key.split(":", 1)[0] == name:
+                return value
+    return None
+
+
+def mingw_folder(build_dir):
+    """The MinGW bin folder a build directory was configured with (its C++
+    compiler's, when gcc is beside it), or None."""
+    cxx = cache_value(build_dir, "CMAKE_CXX_COMPILER")
+    if cxx and os.path.isabs(cxx):
+        folder = os.path.dirname(cxx)
+        if os.path.exists(os.path.join(folder, "gcc" + EXE)):
+            return folder
+    return None
+
+
 def build(width, build_dir, log_path):
-    """cmake --build in the width's MSVC environment; never configures."""
+    """cmake --build in the width's MSVC environment, or a MinGW build
+    directory's own; never configures."""
     if not os.path.exists(os.path.join(build_dir, "CMakeCache.txt")):
         return False, "%s is not configured (make it with build-debug.bat first)" % build_dir
+    mingw = mingw_folder(build_dir)
+    if mingw:
+        # gcc, its assembler and linker load DLLs from their own folder, which
+        # has to be on PATH outside the MSYS2 shell.
+        env = dict(os.environ)
+        env["PATH"] = mingw + os.pathsep + env.get("PATH", "")
+        cmake = cache_value(build_dir, "CMAKE_COMMAND") or "cmake"
+        with open(log_path, "w") as log:
+            r = subprocess.run([cmake, "--build", build_dir], stdout=log,
+                               stderr=subprocess.STDOUT, env=env)
+        if r.returncode != 0:
+            return False, "build failed (%s)" % log_path
+        return True, "built (MinGW)"
     vcvars = find_vcvarsall()
     if vcvars is None:
         return False, "no Visual Studio (vswhere/vcvarsall) found"
@@ -406,9 +747,10 @@ def build(width, build_dir, log_path):
     return True, "built"
 
 
-def boot_mod(assets, run_dir, scene):
+def boot_mod(assets, run_dir, scene, lock_worlds=False):
     """A mod folder (TSSM_MOD) whose sb04.ini is the game's with BOOT=<scene>
-    and ShowMenuOnBoot=0: the game starts in that scene, past the menus."""
+    and ShowMenuOnBoot=0: the game starts in that scene, past the menus. With
+    lock_worlds every TaskStatus line's tasks are 0 (every world locked)."""
     lines = open(os.path.join(assets, "sb04.ini"), "rb").read().decode("latin-1").splitlines()
     wanted = {"BOOT": "BOOT = %s" % scene, "ShowMenuOnBoot": "ShowMenuOnBoot = 0"}
     out = []
@@ -420,6 +762,9 @@ def boot_mod(assets, run_dir, scene):
                 continue  # the first setting of each is replaced, any later one dropped
             done.add(key)
             line = wanted[key]
+        elif lock_worlds and "=" in line and key == "TaskStatus":
+            words = line.split("=", 1)[1].split("#")[0].split()
+            line = "TaskStatus = %s" % " ".join(words[:1] + ["0"] * (len(words) - 1))
         out.append(line)
     out[1:1] = [v for k, v in wanted.items() if k not in done]  # settings the file lacked
     mod = os.path.join(run_dir, "mod_boot")
@@ -434,7 +779,15 @@ def run_game(width, exe, assets, run_dir, backend, timeout, wait, spec=RUN_BB02)
     os.makedirs(os.path.join(run_dir, "frames"), exist_ok=True)
     os.makedirs(os.path.join(run_dir, "save"), exist_ok=True)
     with open(os.path.join(run_dir, "config.ini"), "w", newline="\r\n") as f:
-        f.write("[video]\n%sbackend = %s\n[game]\nintro_movies = off\n" % (VIDEO, backend))
+        # save_text = xbox: the Xbox disc's own words on the autosave prompt
+        # (frame 1000), which is what the references show; the default (auto)
+        # puts the PC's there (src/SB/Core/pc/iSaveText.h).
+        f.write("[video]\n%sbackend = %s\n[game]\nintro_movies = off\nsave_text = xbox\n"
+                % (VIDEO, backend))
+        # Every Xbox extra at gamecube unless the run is about one (EXTRAS).
+        extras = dict((k, "gamecube") for k in EXTRAS)
+        extras.update(spec.get("extras", {}))
+        f.write("[extras]\n" + "".join("%s = %s\n" % (k, extras[k]) for k in EXTRAS))
     env = dict(os.environ)
     # Nothing from the caller's environment that changes what a run does.
     for k in [k for k in env if k.upper().startswith("TSSM_TEST_")] + [
@@ -455,7 +808,7 @@ def run_game(width, exe, assets, run_dir, backend, timeout, wait, spec=RUN_BB02)
         "TSSM_LOG": os.path.join(run_dir, "tssm.log"),
     })
     if spec["boot"]:
-        env["TSSM_MOD"] = boot_mod(assets, run_dir, spec["boot"])
+        env["TSSM_MOD"] = boot_mod(assets, run_dir, spec["boot"], spec.get("lock_worlds", False))
     env.update(spec["env"])
 
     result = {"width": width, "dir": run_dir, "attempts": 0}
@@ -666,6 +1019,229 @@ def check_scroll(frames_dir):
     return True, detail
 
 
+def check_crowd(frames_dir, moving):
+    """(ok, detail): the crowd moved between CROWD_FRAMES (crowds = xbox), or
+    stood still (gamecube)."""
+    a, b = (os.path.join(frames_dir, "frame_%05d.png" % f) for f in CROWD_FRAMES)
+    for p in (a, b):
+        if not os.path.exists(p):
+            return False, "%s not captured" % os.path.basename(p)
+    try:
+        change = crop_change(a, b, CROWD_CROP)
+    except ValueError as e:
+        return False, str(e)
+    detail = "crowd crop %s, frame %d vs %d: mean change %.2f (%s)" % (
+        "x".join(map(str, CROWD_CROP)), CROWD_FRAMES[0], CROWD_FRAMES[1], change,
+        "moving from %.1f" % CROWD_MOVING if moving else "still below %.1f" % CROWD_STILL)
+    if moving and change < CROWD_MOVING:
+        return False, detail + "; the crowd stands still"
+    if not moving and change > CROWD_STILL:
+        return False, detail + "; the crowd moves"
+    return True, detail
+
+
+def vivid_share(path):
+    """Per cent of the picture's pixels that are vivid (saturation above 0.6,
+    value above 0.7) with a hue outside red-to-yellow (the first sixth of the
+    hue circle)."""
+    w, h, bpp, rows = read_png(path)
+    n = 0
+    for line in rows:
+        for i in range(0, w * bpp, bpp):
+            r, g, b = line[i], line[i + 1], line[i + 2]
+            hi, lo = max(r, g, b), min(r, g, b)
+            # value above 0.7, saturation above 0.6; red-to-yellow is r >= g >= b
+            if hi > 178 and (hi - lo) * 10 > hi * 6 and not (r >= g >= b):
+                n += 1
+    return 100.0 * n / (w * h)
+
+
+def check_token(frames_dir):
+    """(ok, detail): the token's coloured patches are in TOKEN_FRAMES."""
+    shares = []
+    for f in TOKEN_FRAMES:
+        p = os.path.join(frames_dir, "frame_%05d.png" % f)
+        if not os.path.exists(p):
+            return False, "%s not captured" % os.path.basename(p)
+        try:
+            shares.append(vivid_share(p))
+        except ValueError as e:
+            return False, str(e)
+    detail = "vivid pixels not red-to-yellow, frames %s: %s %% (patches from %.1f %%)" % (
+        " and ".join(map(str, TOKEN_FRAMES)), " and ".join("%.2f" % x for x in shares),
+        TOKEN_MIN_SHARE)
+    if max(shares) < TOKEN_MIN_SHARE:
+        return False, detail + "; no coloured patches round the token"
+    return True, detail
+
+
+SPOTLOG = re.compile(r"tssm: test: frame (\d+): spotlights (\d+) on of (\d+), (\d+) drawn, "
+                     r"(?:(\d+) flares, )?camera inside (\d+)(?:, nearest beam ([-0-9.]+))?;(.*)")
+
+
+def check_spotlights(log, xbox):
+    """(ok, detail): TT01's disco lights came on (spotlights = xbox) or never did
+    (gamecube), as TSSM_TEST_SPOTLOG logged the scene's spotlights."""
+    seen = []
+    for line in log.splitlines():
+        m = SPOTLOG.search(line)
+        if m:
+            ids = set(t.rstrip("+") for t in m.group(8).split() if t != "none")
+            seen.append((int(m.group(1)), ids & DISCO_LIGHTS, int(m.group(6))))
+    after = [x for x in seen if x[0] > TT01_SPOT_SEND]
+    if not after or after[-1][0] < TT01_SPOT_SEND + DISCO_LOGGED_TO:
+        return False, "the spotlights were logged to frame %d, not to %d" % (
+            after[-1][0] if after else 0, TT01_SPOT_SEND + DISCO_LOGGED_TO)
+    most = max(len(x[1]) for x in seen)
+    first = [f for f, ids, _ in after if len(ids) == len(DISCO_LIGHTS)]
+    inside = sum(1 for x in after if x[2] > 0)
+    detail = "%d frames logged to %d; disco lights on: at most %d of %d%s; camera in a beam in %d" % (
+        len(seen), seen[-1][0], most, len(DISCO_LIGHTS),
+        ", all from frame %d" % first[0] if first else "", inside)
+    if xbox and not (first and first[0] <= TT01_SPOT_SEND + DISCO_ON_BY):
+        return False, detail + "; the disco lights did not all come on by frame %d" % (
+            TT01_SPOT_SEND + DISCO_ON_BY)
+    if not xbox and most > 0:
+        return False, detail + "; a disco light came on"
+    return True, detail
+
+
+CROWDLOG = re.compile(r"tssm: test: frame (\d+): crowd (\d+) objects, speed ([-0-9.]+), (\d+) moved")
+
+
+def check_crowd_log(log, moving):
+    """(ok, detail): BB01's crowd objects, as TSSM_TEST_CROWDLOG logged them, ran their cycle
+    (crowds = xbox) or stood at speed 0 (gamecube)."""
+    seen = [(int(m.group(1)), int(m.group(2)), float(m.group(3)), int(m.group(4)))
+            for m in CROWDLOG.finditer(log) if int(m.group(1)) >= BB01_CROWD_FROM]
+    if not seen:
+        return False, "no crowd lines logged from frame %d" % BB01_CROWD_FROM
+    counts = sorted(set(x[1] for x in seen))
+    speeds = sorted(set(x[2] for x in seen))
+    moved = [x[3] for x in seen]
+    detail = "%d lines from frame %d: %s objects, speed %s, %d-%d moved a line" % (
+        len(seen), seen[0][0], "/".join(map(str, counts)), "/".join("%.2f" % v for v in speeds),
+        min(moved), max(moved))
+    if counts != [BB01_CROWD]:
+        return False, detail + "; not the %d crowd objects" % BB01_CROWD
+    if moving and (speeds != [1.0] or min(moved) < 1):
+        return False, detail + "; the crowd stands still"
+    if not moving and (speeds != [0.0] or max(moved) > 0):
+        return False, detail + "; the crowd moves"
+    return True, detail
+
+
+def check_water(log, scene, xbox):
+    """(ok, detail): the level's water as its log lines say: the Xbox water set up for
+    every body and its surface drawn (water = xbox), or the GameCube water because the
+    setting says so (gamecube); and the level's extras line names the same."""
+    lines = [l.strip() for l in log.splitlines()]
+    bodies = WATER_BODIES[scene]
+    xb = [l for l in lines if l.startswith("tssm: water: Xbox water in %s:" % scene)]
+    gc = [l for l in lines if l.startswith("tssm: water: GameCube water in %s --" % scene)]
+    drawn = any(l.startswith("tssm: water: %s: the surface is drawn" % scene) for l in lines)
+    ex = [l for l in lines if l.startswith("tssm: extras: %s " % scene)]
+    want = "water %s" % ("xbox" if xbox else "gamecube")
+    detail = "%d Xbox water line(s), %d GameCube water line(s), surface %s, extras line %s" % (
+        len(xb), len(gc), "drawn" if drawn else "not drawn",
+        "names %s" % want if any(want + "," in l for l in ex) else "missing or other")
+    if not ex or not all(want + "," in l for l in ex):
+        return False, detail + "; the extras line does not say %s" % want
+    if xbox:
+        body = "%d bod%s" % (bodies, "y" if bodies == 1 else "ies")
+        if not xb or not all((": %s;" % body) in l for l in xb):
+            return False, detail + "; not 'Xbox water in %s: %s'" % (scene, body)
+        if gc or not drawn:
+            return False, detail + "; the Xbox water fell back or was not drawn" + (
+                ": " + gc[0] if gc else "")
+    else:
+        if xb or not gc or not all("extras.water is gamecube" in l for l in gc):
+            return False, detail + "; not the GameCube water by the setting"
+    return True, detail
+
+
+def check_guitar(log, xbox):
+    """(ok, detail): the guitar's screen distortion as TSSM_TEST_DISTORT=log logged it: asked
+    for and drawn while the wave is flown to and ridden, its amount rising to 1 (xbox), or
+    never asked for (gamecube); and the level's extras line names the same."""
+    lines = [l.strip() for l in log.splitlines()]
+    head = "tssm: test: guitar distortion amount "
+    asked = [l[len(head):] for l in lines if l.startswith(head)]
+    amounts = [float(l.split()[0]) for l in asked]
+    undrawn = sum(1 for l in asked if "not drawn" in l)
+    ex = [l for l in lines if l.startswith("tssm: extras: BB02 ")]
+    want = "guitar distortion %s" % ("xbox" if xbox else "gamecube")
+    detail = "%d frame(s) of the pass" % len(asked)
+    if amounts:
+        detail += ", amount %.3f to %.3f, %d not drawn" % (min(amounts), max(amounts), undrawn)
+    if not ex or not all(l.endswith(want) for l in ex):
+        return False, detail + "; the extras line does not say %s" % want
+    if not xbox:
+        return (not asked), detail + ("" if not asked else "; the pass ran with gamecube")
+    if len(asked) < GUITAR_MIN_FRAMES:
+        return False, detail + "; fewer than %d (was the guitar fired?)" % GUITAR_MIN_FRAMES
+    if undrawn or amounts[0] >= 1.0 or max(amounts) != 1.0:
+        return False, detail + "; not a rise to 1 with every frame drawn"
+    return True, detail
+
+
+def check_portal(result):
+    """(ok, detail): pt01_portal's run exited by itself at its exit frame, its event reached
+    SPIKEWALL_PORTAL_01 and the player stayed in PT01: the only level the run's "extras:"
+    lines name is PT01, once. A run that crashed after the portal shows PT01 alone too, so
+    the exit is asked as well."""
+    log = result.get("log", "")
+    exited = (not result.get("timed_out") and result.get("exit") == 0
+              and "TSSM_EXIT_AFTER reached" in log)
+    lines = [l.strip() for l in log.splitlines()]
+    # "... to SPIKEWALL_PORTAL_01 (TSSM_TEST_SEND)", or with ": no such object in this scene"
+    # before the tag when the level has no such object (iTestSend.cpp)
+    sent = [l for l in lines if "to SPIKEWALL_PORTAL_01" in l and "(TSSM_TEST_SEND)" in l]
+    levels = [l.split()[2] for l in lines if l.startswith("tssm: extras: ")]
+    detail = "levels loaded: %s" % (" ".join(levels) or "none")
+    if not sent:
+        return False, detail + "; the portal's event was never sent"
+    if "no such object" in sent[0]:
+        return False, detail + "; " + sent[0]
+    if not exited:
+        return False, detail + "; the run did not exit by itself after the portal (exit %s)" % (
+            "timed out" if result.get("timed_out") else result.get("exit"))
+    if levels != ["PT01"]:
+        return False, detail + "; the portal took the player out of PT01"
+    return True, detail + "; the portal kept the player in PT01"
+
+
+def check_upgrade(log):
+    """(ok, detail): the upgrade window's manager has the menus' focus in a dump of the menus
+    (TSSM_TEST_UILOG) after the first Tab and in none before it, and in none from a little
+    after the second."""
+    dumps = set()
+    focus = set()
+    for line in log.splitlines():
+        m = re.match(r"tssm: test: frame (\d+): ui (\S+) ([0-9A-F]{8}) ", line.strip())
+        if not m:
+            continue
+        frame = int(m.group(1))
+        dumps.add(frame)
+        if m.group(3) == UPGRADE_MGR and " focus " in line:
+            focus.add(frame)
+    if not dumps:
+        return False, "no menu dumps in the log"
+    before = sorted(f for f in focus if f <= UPGRADE_OPEN)
+    during = sorted(f for f in focus if UPGRADE_OPEN < f < UPGRADE_CLOSE)
+    after = sorted(f for f in focus if f >= UPGRADE_CLOSE + 30)
+    detail = "focus in %d dump(s) of %d" % (len(focus), len(dumps))
+    if focus:
+        detail += ", frames %d-%d" % (min(focus), max(focus))
+    if before:
+        return False, detail + "; open before Tab"
+    if not during:
+        return False, detail + "; Tab did not open it"
+    if after:
+        return False, detail + "; the second Tab did not close it"
+    return True, detail
+
+
 # ---------------------------------------------------------------------------
 # References
 
@@ -755,6 +1331,7 @@ def frames_detail(results):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--assets", default=os.environ.get("TSSM_ASSETS"))
+    ap.add_argument("--gc-assets", default=os.environ.get("TSSM_TEST_GC_ASSETS"))
     ap.add_argument("--reference", default=os.environ.get("TSSM_REGRESS_REFERENCE"))
     ap.add_argument("--out", default=os.environ.get("TSSM_REGRESS_OUT"))
     ap.add_argument("--widths", default="x86,x64")
@@ -803,6 +1380,11 @@ def main():
         if n not in [spec["name"] for spec in RUNS]:
             ap.error("unknown run %s (runs: %s)" % (n, ", ".join(spec["name"] for spec in RUNS)))
     specs = [spec for spec in RUNS if spec["name"] in names]
+    if not a.gc_assets:
+        left = [spec["name"] for spec in specs if spec.get("files") == "gamecube"]
+        if left:
+            print("no --gc-assets (or TSSM_TEST_GC_ASSETS): %s left out" % ", ".join(left))
+        specs = [spec for spec in specs if spec.get("files") != "gamecube"]
     for path in (a.out, a.reference):
         if path and os.path.abspath(path).startswith(ROOT + os.sep):
             ap.error("%s is inside the repository; game frames stay out of it" % path)
@@ -852,7 +1434,8 @@ def main():
                     print("run %s %s (%s) ..." % (spec["name"], w, spec["about"]))
                     timeout = a.timeout if spec["timeout"] is None else \
                         int(math.ceil(spec["timeout"] * a.timeout / 88.0))
-                    r = run_game(w, exe, a.assets, os.path.join(out, folder), a.backend, timeout,
+                    files = a.gc_assets if spec.get("files") == "gamecube" else a.assets
+                    r = run_game(w, exe, files, os.path.join(out, folder), a.backend, timeout,
                                  a.wait, spec)
                 runs[(spec["name"], w)] = r
                 detail = "exit %s at %.1f s" % (r.get("exit"), r.get("elapsed", 0)) if r["ok"] else r["why"]
@@ -869,11 +1452,49 @@ def main():
                 elif spec is RUN_PT03_BELT:
                     ok, detail = check_scroll(os.path.join(r["dir"], "frames"))
                     rows.append(("PT03 belt scrolls", w, ok, detail))
+                elif spec is RUN_BB02_CROWD_XBOX or spec is RUN_BB02_CROWD_GC:
+                    moving = spec is RUN_BB02_CROWD_XBOX
+                    ok, detail = check_crowd(os.path.join(r["dir"], "frames"), moving)
+                    rows.append(("BB02 crowd %s" % ("moves" if moving else "stands still"), w, ok,
+                                 detail))
+                elif spec is RUN_TT01_SPOT_XBOX or spec is RUN_TT01_SPOT_GC:
+                    xbox = spec is RUN_TT01_SPOT_XBOX
+                    ok, detail = check_spotlights(r.get("log", ""), xbox)
+                    rows.append(("TT01 disco lights %s" % ("on" if xbox else "stay off"), w, ok,
+                                 detail))
+                elif spec is RUN_BB01_CROWD_XBOX or spec is RUN_BB01_CROWD_GC:
+                    moving = spec is RUN_BB01_CROWD_XBOX
+                    ok, detail = check_crowd_log(r.get("log", ""), moving)
+                    rows.append(("BB01 crowd %s" % ("moves" if moving else "stands still"), w, ok,
+                                 detail))
+                elif spec in WATER_RUNS:
+                    xbox = spec["extras"]["water"] == "xbox"
+                    ok, detail = check_water(r.get("log", ""), spec["boot"], xbox)
+                    rows.append(("%s water %s" % (spec["boot"], "xbox" if xbox else "gamecube"), w,
+                                 ok, detail))
+                elif spec is RUN_BB03_TOKEN:
+                    ok, detail = check_token(os.path.join(r["dir"], "frames"))
+                    rows.append(("BB03 token patches show", w, ok, detail))
+                elif spec in GUITAR_RUNS:
+                    xbox = spec is RUN_BB02_GUITAR_XBOX
+                    ok, detail = check_guitar(r.get("log", ""), xbox)
+                    rows.append(("BB02 guitar distortion %s" % ("drawn" if xbox else "not drawn"),
+                                 w, ok, detail))
+                elif spec is RUN_PT01_PORTAL:
+                    ok, detail = check_portal(r)
+                    rows.append(("PT01 portal keeps the player in the level", w, ok, detail))
+                elif spec in UPGRADE_RUNS:
+                    ok, detail = check_upgrade(r.get("log", ""))
+                    rows.append(("BB03 Tab opens and closes the upgrade window (%s files)" %
+                                 ("GameCube" if spec is RUN_BB03_UPGRADE_GC else "Xbox"), w, ok,
+                                 detail))
 
         # Frames: against the references (and their variants), and x64 against
         # this run's x86.
         for (name, w), r in runs.items():
             spec = [s for s in RUNS if s["name"] == name][0]
+            if not spec.get("compare", True):
+                continue  # checked by itself above, no references
             sub = ref_sub(spec)
             item = "frames vs reference" if spec is RUN_BB02 else spec["item"] + " frames"
             ref_dir = os.path.join(a.reference, w, sub)

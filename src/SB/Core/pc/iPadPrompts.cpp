@@ -3,6 +3,7 @@
 #include "iPadPrompts.h"
 
 #include "iConfig.h"
+#include "iFile.h"
 #include "iHost.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -112,6 +113,11 @@ S32 iPadPromptsPatchVerb(U32* len, char* text, U32 capacity, bool press)
 
 namespace
 {
+    // Whose pictures the loaded font.HIP has: the Xbox's unless its package is
+    // the GameCube release's (iFilePackagePlatformOf, asked when a new copy of
+    // the pictures appears; ApplyGlyphs).
+    bool sGameCubeFont;
+
     iPadLayoutKind sAppliedLayout = IPAD_LAYOUT_XBOX;
     void* sMoveAsset[sizeof(kPadPromptMoves) / sizeof(kPadPromptMoves[0])];
 
@@ -121,9 +127,12 @@ namespace
     {
         static const char* const kNames[] = { "push_trigger_text", "push_trigger_text_lower" };
 
-        const bool press =
-            set != NULL && (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0 ||
-                            strcmp(set, "touch") == 0);
+        // With the disc's own pictures (set NULL), the disc's own word: "Press"
+        // on the GameCube's, whose font this follows.
+        const bool press = set != NULL ?
+                               (strcmp(set, "keyboard") == 0 || strcmp(set, "gamecube") == 0 ||
+                                strcmp(set, "touch") == 0) :
+                               sGameCubeFont;
 
         for (U32 i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
         {
@@ -201,6 +210,35 @@ namespace
     };
 
     const S32 kSlotCount = (S32)(sizeof(kSlots) / sizeof(kSlots[0]));
+
+    // A picture that shows no button of the pad its font is for.
+    const S32 kNoInput = -50;
+
+    // The same slots in the GameCube release's font.HIP: the same names, rows
+    // and bits, other pictures. Measured on the disc: A, Y, B and X in slots
+    // 1-4, L and R in L1 and R1, Z in R2, the start button, the control stick
+    // and the C stick; L2 and SELECT are the PS2's, left in the font, and show
+    // nothing a GameCube pad has. The inputs are where an adapter puts those
+    // buttons (iPadTokens.cpp: B west, X east, Z on the right bumper).
+    const S32 kGameCubeInput[] = { PADIN_A,  PADIN_Y,  PADIN_X,  PADIN_B,
+                                   PADIN_LT, PADIN_RT, kNoInput, PADIN_RB,
+                                   PADIN_START, kNoInput, -1, -2 };
+
+    TSSM_STATIC_ASSERT(sizeof(kGameCubeInput) / sizeof(kGameCubeInput[0]) ==
+                           sizeof(kSlots) / sizeof(kSlots[0]),
+                       "one GameCube input per slot");
+
+    // The set whose pictures the disc's are.
+    const char* NativeSet()
+    {
+        return sGameCubeFont ? "gamecube" : "xbox";
+    }
+
+    // What slot i's picture shows on the loaded font.
+    S32 SlotInput(S32 i)
+    {
+        return sGameCubeFont ? kGameCubeInput[i] : kSlots[i].input;
+    }
 
     enum Style
     {
@@ -815,9 +853,11 @@ namespace
         return NULL;
     }
 
-    // What `set` draws for `slot`. FALSE: keep the disc's picture.
-    bool Decide(const char* set, const Slot& slot, Glyph& g, S32* retailInput)
+    // What `set` draws for slot `index`. FALSE: keep the disc's picture.
+    bool Decide(const char* set, S32 index, Glyph& g, S32* retailInput)
     {
+        const Slot& slot = kSlots[index];
+        const S32 shows = SlotInput(index);
         memset(&g, 0, sizeof(g));
         *retailInput = -100;
 
@@ -860,7 +900,7 @@ namespace
             {
                 // The stick pictures: the four keys, or the mouse.
                 g.style = STYLE_KEY;
-                if (slot.input == -2 && iPadSettingsGet().mouse_camera)
+                if (slot.input == -2 && iPadSettingsGet().mouse_look)
                 {
                     SetLabel(g, "MOUS");
                     return true;
@@ -912,7 +952,7 @@ namespace
         // A pad set: whatever the row is bound to on the pad.
         if (slot.input < 0)
         {
-            if (iHostStrCaseCmp(set, "xbox") == 0)
+            if (iHostStrCaseCmp(set, NativeSet()) == 0)
             {
                 return false;
             }
@@ -971,13 +1011,14 @@ namespace
             return true;
         }
 
-        if (iHostStrCaseCmp(set, "xbox") == 0)
+        if (iHostStrCaseCmp(set, NativeSet()) == 0)
         {
-            // The disc has a picture of this Xbox button: use it, from
-            // whichever slot holds it.
+            // The disc has a picture of this button (an Xbox one on the Xbox
+            // disc, a GameCube one on the GameCube's): use it, from whichever
+            // slot holds it.
             for (S32 i = 0; i < kSlotCount; i++)
             {
-                if (kSlots[i].input == input)
+                if (SlotInput(i) == input)
                 {
                     *retailInput = input;
                     return true;
@@ -1001,14 +1042,14 @@ const char* iPadPromptsLabelFor(const char* set, const char* row)
 
         static Glyph g;
         S32 retail;
-        if (!Decide(set, kSlots[i], g, &retail))
+        if (!Decide(set, i, g, &retail))
         {
             return NULL;
         }
         if (retail != -100)
         {
             static char buf[16];
-            snprintf(buf, sizeof(buf), "xbox:%s", iPadInputLabel(retail, "xbox"));
+            snprintf(buf, sizeof(buf), "%s:%s", NativeSet(), iPadInputLabel(retail, NativeSet()));
             return buf;
         }
         return g.label;
@@ -1047,6 +1088,12 @@ const char* iPadPromptsIconsChoice()
     return kIconNames[sIcons];
 }
 
+void iPadPromptsSetGameCubeFont(bool gamecube)
+{
+    sGameCubeFont = gamecube;
+    sDirty = true;
+}
+
 const char* iPadPromptsActiveSet()
 {
     return sActiveSet;
@@ -1072,6 +1119,15 @@ static void Restore(Applied& a)
 
 static void ApplyGlyphs(const char* set)
 {
+    // Whose pictures they are, asked again whenever a new copy of them comes
+    // in: a mod's font.HIP can be either release's.
+    RwTexture* first = (RwTexture*)xSTFindAsset(xStrHash(kSlots[0].texture), NULL);
+    if (first != NULL && first != sApplied[0].texture)
+    {
+        const char* pkg = xST_xAssetID_HIPFullPath(xStrHash(kSlots[0].texture));
+        sGameCubeFont = iFilePackagePlatformOf(pkg) == IGCPLAT_GAMECUBE;
+    }
+
     // First pass: find every slot's texture, and its retail raster.
     RwRaster* retailFor[PADIN_COUNT];
     memset(retailFor, 0, sizeof(retailFor));
@@ -1093,9 +1149,9 @@ static void ApplyGlyphs(const char* set)
             a.retail = a.texture->raster;
         }
 
-        if (kSlots[i].input >= 0 && a.retail != NULL)
+        if (SlotInput(i) >= 0 && a.retail != NULL)
         {
-            retailFor[kSlots[i].input] = a.retail;
+            retailFor[SlotInput(i)] = a.retail;
         }
     }
 
@@ -1111,7 +1167,7 @@ static void ApplyGlyphs(const char* set)
         S32 retailInput;
         RwRaster* want = a.retail;
 
-        if (set != NULL && Decide(set, kSlots[i], g, &retailInput))
+        if (set != NULL && Decide(set, i, g, &retailInput))
         {
             if (retailInput >= 0)
             {
@@ -1190,6 +1246,23 @@ void iPadPromptsUpdate(const iPadHostState* host)
     sActiveSet = set;
     sSignature = signature;
     sDirty = false;
+}
+
+RwRaster* iPadPromptsDiscRaster(RwTexture* texture)
+{
+    if (texture == NULL)
+    {
+        return NULL;
+    }
+    for (S32 i = 0; i < kSlotCount; i++)
+    {
+        const Applied& a = sApplied[i];
+        if (a.texture == texture && a.swapped)
+        {
+            return a.retail;
+        }
+    }
+    return texture->raster;
 }
 
 void iPadPromptsShutdown()

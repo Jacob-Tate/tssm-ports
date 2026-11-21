@@ -124,8 +124,39 @@ example:
 - `files/FMV/LogoHI.bik`
 - `files/MN/mnus.HOP`
 
-A replacement package must come from the Xbox release, like the rest of the port's data. A package
-from the GameCube or PS2 release is refused with a log line, and the original is used.
+A replacement package can come from the Xbox release or the GameCube one, and the two can be mixed:
+each package's PLAT chunk says which console wrote it. A GameCube package is converted to the Xbox
+layout when it is opened. Its textures and models are read in the GameCube's own formats, and its
+texture names, which the GameCube disc leaves out, are taken from the asset names. The log says
+`tssm: GameCube package <name>: N asset(s) converted, ...`. A GameCube package that cannot be
+converted (a table of contents that does not hold together, an asset of a kind the port has no rule
+for, or one that does not fit its own sizes) is refused with a log line saying why, and so is a
+package from the PS2 release; the original is used then.
+
+Every replacement package, Xbox or GameCube, is checked before the game reads it: a file that is
+not a package at all (empty, or damaged at the start), or one whose table of contents does not hold
+together (cut short, a damaged chunk or count, an asset past the end of the file), is refused with
+a log line such as `tssm: mod: JK/jk01.HIP cannot be read: ...; using the original`. The game itself
+checks none of this and would crash reading such a file. Damage inside an Xbox asset's own data is
+not caught. Inside a GameCube package, the assets that are converted are checked as they are; of
+those read as they are, a model has to hold together as a RenderWare clump or the package is
+refused, and the rest (textures, fly-throughs, sounds) are checked as far as their readers check
+them. A model that still does not read, from either release, ends the game with a message naming
+it (`tssm: FATAL -- a game file could not be read: model ...`) instead of a crash.
+
+A GameCube package's sounds play as they do on the console: its sound table holds the GameCube's
+FSB3 banks of DSP-ADPCM, which the port reads in place and decodes, and its cutscenes' voice tracks
+are DSP-ADPCM too. Xbox and GameCube packages can be mixed in one game, each with its own sounds.
+Not yet supported: a `sounds/` replacement of a sound inside a GameCube sound table. It is logged,
+and the original sound is kept. Replace the whole package with an Xbox one if a sound has to
+change.
+
+The game itself can also run from a GameCube disc ("The game's files" in
+`src/SB/Core/pc/README.md`); every package of it is then a GameCube package, and Xbox packages in
+mods work beside them.
+
+Only the packages a mod ships are read this way. Code patches (Action Replay or Gecko codes, a
+changed `main.dol`) cannot be applied: the port runs its own build of the game code.
 
 The older single-folder setting, `[assets] mod` (or `TSSM_MOD`), still works. That folder copies
 the asset folder's layout, and its files win over every mod's.
@@ -154,6 +185,11 @@ such as `{i:text_button_center_01}`, works as it does in the original text.
 
 You can only replace an asset that exists. Adding new assets is not supported yet, and an empty
 file is ignored with a log line.
+
+**Always the Xbox layout.** A file in `assets/` is read in the Xbox release's layout, even when it
+replaces an asset of a GameCube package: the port converts the GameCube package's own assets, not
+a mod's replacement. So take the bytes from the Xbox disc's package (`modkit extract` refuses a
+GameCube asset unless you add `--raw`). A `.txt` file for a TEXT asset works with either release.
 
 **Text length.** Most text is laid out in text boxes, and a longer replacement simply takes more
 room on screen. A few strings, though, are copied into fixed-size buffers by the game's own code,
@@ -247,6 +283,8 @@ work as in `assets/`: `genenemy_throw.wav` replaces the asset `genenemy_throw.WA
 - Cutscene voice tracks live inside the cutscene (CSN) assets and are not replaced this way.
 - PCM is about 3.5 times the size of the Xbox ADPCM it replaces, so very long music tracks take
   more memory.
+- A sound in a GameCube package's table (above, "files/") is not replaced yet: the log says so,
+  and the original plays.
 
 ### fmv/ — movies by name
 
@@ -310,6 +348,11 @@ The log shows each change, with the old value:
     python tools/modkit.py find <assets folder> <what>      search IDs, names, texture names and text everywhere
     python tools/modkit.py extract <package> <ID|name> [out]  one asset; TEXT comes out as .txt
     python tools/modkit.py new <mods folder> <Folder>       a mod skeleton with mod.ini
+
+modkit reads the Xbox and the GameCube release's packages. A GameCube package is said so on the
+error output; its text is read big-endian, its textures (unnamed on the disc) are listed under the
+names the port gives them, and `extract` writes a GameCube asset other than TEXT only with `--raw`
+(see "Always the Xbox layout" above).
 
 For example, to change the title screen's prompt:
 

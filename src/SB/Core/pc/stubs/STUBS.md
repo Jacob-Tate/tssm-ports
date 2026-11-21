@@ -10,7 +10,7 @@ Rerun it after adding or implementing a stub (`--check` says when this file is s
 - **implemented**: a function in `stubs/` that does its job on PC; listed so each SDK module's
   whole PC surface is in one place.
 
-Totals: 23 stubbed, 5 implemented.
+Totals: 16 stubbed, 5 implemented.
 
 | Subsystem | File | Stubbed | Implemented |
 |---|---|---|---|
@@ -20,7 +20,6 @@ Totals: 23 stubbed, 5 implemented.
 | Dolphin SDK: CARD | `stubs/dolphin_card.cpp` | 7 | 1 |
 | Bink | `stubs/bink.cpp` | 6 | 0 |
 | FMOD | `stubs/fmod.cpp` | 0 | 1 |
-| Load-screen thread (iAsync) | `iAsync.cpp` | 7 | 0 |
 | Movies (iFMV) | `iFMV.cpp` | 1 | 0 |
 | RenderWare shim (TSSM additions) | `rw/tssm.cpp` | 1 | 0 |
 
@@ -73,23 +72,11 @@ Totals: 23 stubbed, 5 implemented.
 
 - `FSOUND_AUXFX_ShutdownEffect` (implemented, line 17)
 
-## Load-screen thread (iAsync)
-
-`src/SB/Core/pc/iAsync.cpp`: PC counterpart of gc/iAsync.cpp, compiled inside pc/iWad.cpp.
-
-- `iAsyncStart` (stub, line 28)
-- `iAsyncIsDone` (module stub, line 36)
-- `iAsyncTerminate` (module stub, line 41)
-- `iAsyncBeginUpdate` (module stub, line 46)
-- `iAsyncEndUpdate` (module stub, line 50)
-- `iAsyncSuspend` (module stub, line 54)
-- `iAsyncResume` (module stub, line 58)
-
 ## Movies (iFMV)
 
 `src/SB/Core/pc/iFMV.cpp`: PC iFMV: treedome's pc/iFMV.cpp -- find the movie, pace frames, watch the skip buttons, present -- with TSSM's interface.
 
-- `iFMVOpen` (stub, line 564)
+- `iFMVOpen` (stub, line 644)
 
 ## RenderWare shim (TSSM additions)
 

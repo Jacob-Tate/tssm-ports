@@ -71,6 +71,17 @@ void iWindowSetFrameRateCeiling(S32 fps)
     (void)fps;
 }
 
+// Nothing is paced here, so the GameCube's hold paces nothing either.
+void iWindowSetFrameLock(S32 count)
+{
+    (void)count;
+}
+
+S32 iWindowGetFrameLock()
+{
+    return 0;
+}
+
 S32 iWindowGetFrameRate()
 {
     return sFrameRate;
@@ -90,6 +101,12 @@ void iWindowFrameWorkDone()
 S32 iWindowGetPacedRate()
 {
     return 0;
+}
+
+// Nothing is paced, so the game keeps the measured time.
+F32 iWindowGameFrameTime(F32 measured)
+{
+    return measured;
 }
 
 // No monitor, so the rate cannot be determined. video.framerate = display
@@ -173,4 +190,9 @@ void iWindowDeferredCreated()
 const char* iWindowBackendName()
 {
     return "null";
+}
+
+// No window, no icon.
+void iWindowSetIcon(SDL_Window*)
+{
 }

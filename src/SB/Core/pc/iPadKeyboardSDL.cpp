@@ -13,7 +13,6 @@
 
 #include "iPadBind.h"
 #include "iPadHost.h"
-#include "iPadSettings.h"
 #include "iPadTokens.h"
 #include "xPad.h"
 
@@ -32,7 +31,13 @@ static SDL_MouseButtonFlags sMouseButtons;
 static S32 sWheelUpPolls;
 static S32 sWheelDownPolls;
 static F32 sWheelAccum;
-static bool sRelative;
+
+// This poll's mouse for iMouseLook.cpp and the menu pointer: the motion, the
+// buttons that went down since the poll before, and the wheel.
+static F32 sPollDX;
+static F32 sPollDY;
+static U32 sPollPressed;
+static S32 sPollWheel;
 
 // **Real mice only.** SDL also makes a mouse of the first finger on a touch
 // screen (SDL_TOUCH_MOUSEID; on by default) and of a pen (SDL_PEN_MOUSEID),
@@ -48,7 +53,11 @@ static bool sRelative;
 static SDL_AtomicInt sMotionX;
 static SDL_AtomicInt sMotionY;
 static SDL_AtomicInt sButtonsHeld;
+static SDL_AtomicInt sButtonsPressed;
 static SDL_AtomicInt sWheelNotches;
+// Escape went down: it frees the pointer whatever it is bound to
+// (iMouseLook.h), so the key itself is watched for.
+static SDL_AtomicInt sEscapeDown;
 static bool sMouseWatch;
 
 static bool RealMouse(SDL_MouseID which)
@@ -79,6 +88,16 @@ static bool SDLCALL WatchMouse(void*, SDL_Event* e)
                 was = SDL_GetAtomicInt(&sButtonsHeld);
             } while (!SDL_CompareAndSwapAtomicInt(&sButtonsHeld, was,
                                                   e->button.down ? (was | bit) : (was & ~bit)));
+
+            // Presses are kept apart from what is held, so a click that begins
+            // and ends between two polls is still a click.
+            if (e->button.down)
+            {
+                do
+                {
+                    was = SDL_GetAtomicInt(&sButtonsPressed);
+                } while (!SDL_CompareAndSwapAtomicInt(&sButtonsPressed, was, was | bit));
+            }
         }
         break;
 
@@ -94,10 +113,22 @@ static bool SDLCALL WatchMouse(void*, SDL_Event* e)
         }
         break;
 
+    case SDL_EVENT_KEY_DOWN:
+        if (e->key.scancode == SDL_SCANCODE_ESCAPE && !e->key.repeat)
+        {
+            SDL_SetAtomicInt(&sEscapeDown, 1);
+        }
+        break;
+
     default:
         break;
     }
     return true;
+}
+
+bool iPadKeyboardTakeEscape()
+{
+    return SDL_SetAtomicInt(&sEscapeDown, 0) != 0;
 }
 
 void iPadKeyboardTakeMouse(F32* dx, F32* dy, U32* buttons)
@@ -105,6 +136,14 @@ void iPadKeyboardTakeMouse(F32* dx, F32* dy, U32* buttons)
     *dx = (F32)SDL_SetAtomicInt(&sMotionX, 0) / 1000.0f;
     *dy = (F32)SDL_SetAtomicInt(&sMotionY, 0) / 1000.0f;
     *buttons = (U32)SDL_GetAtomicInt(&sButtonsHeld);
+}
+
+void iPadKeyboardForgetMouse()
+{
+    SDL_SetAtomicInt(&sMotionX, 0);
+    SDL_SetAtomicInt(&sMotionY, 0);
+    SDL_SetAtomicInt(&sButtonsPressed, 0);
+    SDL_SetAtomicInt(&sWheelNotches, 0);
 }
 
 static bool ScancodeDown(S32 code)
@@ -185,16 +224,45 @@ const iPadBind* iPadKeyboardBinds()
     return sKeyBind;
 }
 
-static bool sMouseAllowed = true;
-static void SetRelative(bool on);
-
-void iPadKeyboardSetMouseCapture(bool allowed)
+void iPadKeyboardMouse(F32* dx, F32* dy, U32* held, U32* pressed, S32* wheel)
 {
-    sMouseAllowed = allowed;
-    if (!allowed && sTest == NULL)
-    {
-        SetRelative(false);
-    }
+    *dx = sPollDX;
+    *dy = sPollDY;
+    *held = (U32)sMouseButtons;
+    *pressed = sPollPressed;
+    *wheel = sPollWheel;
+}
+
+static S16 sOnlyKey;
+
+static bool OnlyKeyDown(S16 id)
+{
+    return id == sOnlyKey;
+}
+
+U32 iPadKeyboardBitsOf(S32 id)
+{
+    sOnlyKey = (S16)id;
+    return iPadBindEvaluate(sKeyBind, OnlyKeyDown, NULL);
+}
+
+static S16 sExceptKey;
+static U32 sPollBefore;
+
+static bool KeyDownExcept(S16 id)
+{
+    return id != sExceptKey && KeyDown(id);
+}
+
+U32 iPadKeyboardHeldWithout(S32 id)
+{
+    sExceptKey = (S16)id;
+    return sPollBefore | iPadBindEvaluate(sKeyBind, KeyDownExcept, NULL);
+}
+
+bool iPadKeyboardIsTest()
+{
+    return sTest != NULL;
 }
 
 void iPadKeyboardSetTestSource(iPadKeyboardTestSource* source)
@@ -215,28 +283,6 @@ void iPadKeyboardInit()
     iPadBindLoad(IPAD_BIND_KEYBOARD, tokens, count, sKeyBind);
 }
 
-// The window that has the keyboard, which is the one place relative mouse mode
-// can be switched on. iWindowSDL.cpp owns it; asking SDL keeps this file from
-// needing a way in.
-static void SetRelative(bool on)
-{
-    if (sRelative == on)
-    {
-        return;
-    }
-
-    SDL_Window* w = SDL_GetKeyboardFocus();
-    if (w == NULL && on)
-    {
-        return;
-    }
-
-    if (w != NULL)
-    {
-        SDL_SetWindowRelativeMouseMode(w, on);
-    }
-    sRelative = on;
-}
 
 // Mouse motion in pixels this poll, and the buttons and wheel.
 static void ReadMouse(F32* dx, F32* dy)
@@ -257,9 +303,12 @@ static void ReadMouse(F32* dx, F32* dy)
     // the mouse events costs nothing here.
     U32 buttons = 0;
     iPadKeyboardTakeMouse(dx, dy, &buttons);
-    sMouseButtons = (SDL_MouseButtonFlags)buttons;
+    sPollPressed = (U32)SDL_SetAtomicInt(&sButtonsPressed, 0);
+    sMouseButtons = (SDL_MouseButtonFlags)(buttons | sPollPressed);
 
-    sWheelAccum += (F32)SDL_SetAtomicInt(&sWheelNotches, 0) / 1000.0f;
+    F32 notches = (F32)SDL_SetAtomicInt(&sWheelNotches, 0) / 1000.0f;
+    sPollWheel = notches > 0.0f ? 1 : (notches < 0.0f ? -1 : 0);
+    sWheelAccum += notches;
 
     // Held for one poll and released for one, so each notch is one press:
     // 2 is the poll it goes down, 1 the poll it is let go.
@@ -298,50 +347,29 @@ static F32 Axis(U32 axes, S32 negative, S32 positive)
     return v;
 }
 
-// The mouse in C-stick units. The camera turns by an amount proportional to
-// how far the C-stick is past 32 (zCameraUpdate), up to 110; a distance moved
-// becomes a deflection past 32 in proportion, so a quick flick and a slow drag
-// turn the camera as far as the hand went. Below 32 the game does nothing, so
-// the first pixel of movement starts at the deadzone edge.
-static F32 MouseToStick(F32 pixels, F32 sensitivity)
-{
-    const F32 perPixel = 2.0f;
-
-    if (pixels == 0.0f)
-    {
-        return 0.0f;
-    }
-
-    F32 mag = 33.0f + fabsf(pixels) * perPixel * sensitivity;
-    if (mag > 110.0f)
-    {
-        mag = 110.0f;
-    }
-    return pixels < 0.0f ? -mag : mag;
-}
 
 bool iPadKeyboardPoll(iPadHostState* s)
 {
-    const iPadSettings& cfg = iPadSettingsGet();
+    sPollDX = 0.0f;
+    sPollDY = 0.0f;
+    sPollPressed = 0;
+    sPollWheel = 0;
+    sPollBefore = s->buttons;
 
     if (sTest == NULL)
     {
         // SDL_GetKeyboardState reads a table the event pump maintains, so it is
-        // only as fresh as the last pump.
-        SDL_PumpEvents();
+        // only as fresh as the last pump: iPadHostPoll's (iPadHostSDL.cpp, the
+        // only caller), which has just run.
 
         // Focus is elsewhere: nothing held, so the character stops rather than
         // running on with a key the game never sees released. Still connected.
         if (SDL_GetKeyboardFocus() == NULL)
         {
-            SetRelative(false);
             sMouseButtons = 0;
 
-            // Movement made elsewhere is not the game's to turn by.
-            F32 dx;
-            F32 dy;
-            U32 buttons;
-            iPadKeyboardTakeMouse(&dx, &dy, &buttons);
+            // Movement and clicks made elsewhere are not the game's.
+            iPadKeyboardForgetMouse();
             return false;
         }
     }
@@ -349,11 +377,14 @@ bool iPadKeyboardPoll(iPadHostState* s)
     F32 mdx;
     F32 mdy;
     ReadMouse(&mdx, &mdy);
+    sPollDX = mdx;
+    sPollDY = mdy;
 
     U32 axes = 0;
     U32 on = iPadBindEvaluate(sKeyBind, KeyDown, &axes);
 
-    bool used = on != 0 || axes != 0 || mdx != 0.0f || mdy != 0.0f || sMouseButtons != 0;
+    bool used =
+        on != 0 || axes != 0 || mdx != 0.0f || mdy != 0.0f || sMouseButtons != 0 || sPollWheel != 0;
 
     s->buttons |= on;
 
@@ -374,31 +405,14 @@ bool iPadKeyboardPoll(iPadHostState* s)
         s->substick_y = cy;
     }
 
-    if (cfg.mouse_camera && sMouseAllowed)
-    {
-        if (sTest == NULL)
-        {
-            SetRelative(true);
-        }
-
-        // A mouse moved right looks right, which is the C-stick pushed LEFT in
-        // this camera (it orbits); moved down looks down, which is the C-stick
-        // pushed UP (the game's "above" pose). Game units: y positive is down.
-        F32 sx = -MouseToStick(mdx, cfg.mouse_sensitivity);
-        F32 sy = -MouseToStick(mdy, cfg.mouse_sensitivity);
-        s->camera_x += cfg.camera_invert_x ? -sx : sx;
-        s->camera_y += cfg.camera_invert_y ? -sy : sy;
-    }
-    else if (sTest == NULL)
-    {
-        SetRelative(false);
-    }
+    // The mouse's movement is iMouseLook.cpp's, which reads this poll's
+    // (iPadKeyboardMouse) right after.
 
     if (used)
     {
         s->connected = true;
         s->sources |= IPAD_HOST_SOURCE_KEYBOARD;
-        if (mdx != 0.0f || mdy != 0.0f || sMouseButtons != 0)
+        if (mdx != 0.0f || mdy != 0.0f || sMouseButtons != 0 || sPollWheel != 0)
         {
             s->sources |= IPAD_HOST_SOURCE_MOUSE;
         }
@@ -415,11 +429,9 @@ S32 iPadKeyboardCapture(S32 prime, char* out, S32 size)
     S32 count;
     const iPadBindToken* tokens = iPadKeyTokens(&count);
 
-    if (sTest == NULL)
-    {
-        SDL_PumpEvents();
-    }
-
+    // No pump of its own: the overlay asks once a presented frame, which has
+    // pumped (iWindowSDL.cpp), and the launcher once a pass of its own event
+    // loop.
     S32 found = -1;
     for (S32 code = 0; code < SDL_SCANCODE_COUNT; code++)
     {

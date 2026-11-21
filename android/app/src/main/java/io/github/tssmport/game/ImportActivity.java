@@ -40,12 +40,14 @@ import java.util.Locale;
  *
  * <p>The folder is chosen through the system picker, so it can be anywhere the
  * device can see without a storage permission. What is copied is what the
- * game reads, from an extracted Xbox disc of The SpongeBob SquarePants Movie:
+ * game reads, from an extracted Xbox or GameCube disc of The SpongeBob
+ * SquarePants Movie (the two are laid out alike; a Dolphin extraction keeps
+ * them in its files/ folder, which is found when the folder above is picked):
  * the .HIP and .HOP archives at the top (boot, font, plat and their _US
  * halves) and in the two-letter level folders (AM, B1, BB, MN, PL, ...), the
  * Bink movies in FMV/, and the game's .ini files at the top (sb04.ini,
- * explode.ini, water.ini). Everything else in the folder -- DEFAULT.XBE,
- * extraction leftovers -- stays behind. Based on treedome's ImportActivity
+ * explode.ini, water.ini). Everything else in the folder -- DEFAULT.XBE, the
+ * GameCube's banner and program, extraction leftovers -- stays behind. Based on treedome's ImportActivity
  * (CC0).
  *
  * <p>Or the folder is used where it is: with All files access granted, the
@@ -470,7 +472,7 @@ public class ImportActivity extends Activity {
         return boot && font;
     }
 
-    /** The files the game reads, by the Xbox disc's layout. */
+    /** The files the game reads, by the disc's layout (the Xbox's and the GameCube's alike). */
     private static void collect(ContentResolver resolver, Uri tree, String docId, String prefix,
             boolean top, List<Entry> out) {
         for (Child ch : children(resolver, tree, docId)) {

@@ -22,7 +22,9 @@ plugins {
 //   tssm.label     The app's name (its label): under the launcher icon, in
 //                  the recent apps and in Settings. Plain text. Default
 //                  "The SpongeBob SquarePants Movie Video Game" (app_name in
-//                  src/main/res/values/strings.xml).
+//                  src/main/res/values/strings.xml). The game's own windows
+//                  (the settings window's title, the About tab, message
+//                  boxes) take the same name, as CMake's TSSM_PC_TITLE.
 //   tssm.releaseDebugKey
 //                  true: the release APKs are signed with the SDK's debug
 //                  key, the one debug builds use (~/.android/debug.keystore).
@@ -92,6 +94,14 @@ def cmakeArgs = [
     '-DANDROID_PLATFORM=android-24',
     '-DTSSM_RENDER_BACKENDS=' + tssmBackends,
 ]
+if (!tssmLabel.isEmpty()) {
+    // CMake refuses a name with a double quote, a backslash or a percent sign.
+    if (tssmLabel.contains('"') || tssmLabel.contains('\\') || tssmLabel.contains('%')) {
+        throw new GradleException("tssm.label: ${tssmLabel} has a double quote, a backslash or a " +
+                'percent sign, which the name in the windows of the game cannot have.')
+    }
+    cmakeArgs += '-DTSSM_PC_TITLE=' + tssmLabel
+}
 if (!tssmFfmpeg.isEmpty()) {
     cmakeArgs += '-DTSSM_FFMPEG_ROOT=' + file(tssmFfmpeg).absolutePath.replace('\\', '/')
 }
@@ -111,8 +121,8 @@ android {
         minSdk = 24
         targetSdk = 35
 
-        versionCode = 17
-        versionName = '0.9.2'
+        versionCode = 19
+        versionName = '0.9.5'
 
         // A test build's own version (tssm.versionCode, tssm.versionName).
         if (tssmVersionCode != null) {

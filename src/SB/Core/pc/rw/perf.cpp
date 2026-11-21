@@ -12,7 +12,13 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#if defined(__MINGW32__)
+// __rdtsc. <intrin.h> is compat/intrin.h on this include path; clang under the
+// MSVC ABI has __rdtsc built in, GCC declares it in <x86intrin.h>.
+#include <x86intrin.h>
+#else
 #include <intrin.h>
+#endif
 #endif
 
 #include "rw.h"
@@ -120,6 +126,14 @@ namespace
 #ifdef RW_GL3
         rw::gl3::PerfCounts counts;
 #endif
+        // The host's side (iPerf.h): event pumps, the controllers' read, the pacer.
+        S32 pumps;
+        float pumpMs;
+        float pumpMaxMs;
+        float padMs;
+        float inputAgeMs;
+        float paceWantMs;
+        float paceLateMs;
     };
 
     struct Mark
@@ -143,6 +157,15 @@ namespace
     double sFirstSwapEnd;
     double sLastSwapEnd;
     Row sCurrent;
+
+    // The host's side of the frame in progress, reset at each frame's start.
+    S32 sPumps;
+    double sPumpNs, sPumpMaxNs;
+    double sPumpStart; // 0 outside a pump
+    double sLastPumpEnd; // across frames: the input's age is from the last pump
+    double sPadAt; // 0 until the controllers are read this frame
+    double sInputAge;
+    double sPaceWantNs, sPaceLateNs;
 
     // Rows wait here for their GPU time, which arrives a few frames late.
     const int kPending = 32;
@@ -506,12 +529,14 @@ namespace
             fprintf(sCsv, ",%.3f,%d", r.gpu, (int)r.cameras);
 #ifdef RW_GL3
             const rw::gl3::PerfCounts& c = r.counts;
-            fprintf(sCsv, ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%.1f,%u,%.1f\n", c.draws, c.tris, c.passes,
+            fprintf(sCsv, ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%.1f,%u,%.1f", c.draws, c.tris, c.passes,
                     c.screenPasses, c.blits, c.clears, c.programs, c.textureBinds, c.texUploads,
                     c.texBytes / 1024.0, c.bufUploads, c.bufBytes / 1024.0);
 #else
-            fprintf(sCsv, ",,,,,,,,,,,,\n");
+            fprintf(sCsv, ",,,,,,,,,,,,");
 #endif
+            fprintf(sCsv, ",%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", (int)r.pumps, r.pumpMs, r.pumpMaxMs,
+                    r.padMs, r.inputAgeMs, r.paceWantMs, r.paceLateMs);
         }
 
         // The window.
@@ -711,7 +736,8 @@ namespace
                 fprintf(sCsv, ",%s_wall,%s_cpu", kPhaseNames[p], kPhaseNames[p]);
             }
             fprintf(sCsv, ",gpu_ms,cameras,draws,tris,passes,screen_passes,blits,clears,programs,"
-                          "tex_binds,tex_uploads,tex_kb,buf_uploads,buf_kb\n");
+                          "tex_binds,tex_uploads,tex_kb,buf_uploads,buf_kb,pumps,pump_ms,pump_max_ms,"
+                          "pad_ms,input_age_ms,pace_want_ms,pace_late_ms\n");
         }
 
 #if !defined(_WIN32)
@@ -757,6 +783,13 @@ namespace
         sInFrame = true;
         sRenderSeen = false;
         sCameras = 0;
+        sPumps = 0;
+        sPumpNs = 0.0;
+        sPumpMaxNs = 0.0;
+        sPadAt = 0.0;
+        sInputAge = 0.0;
+        sPaceWantNs = 0.0;
+        sPaceLateNs = 0.0;
         SetPhase(PH_UPDATE);
     }
 } // namespace
@@ -886,6 +919,13 @@ void iPerfFrameEnd()
                 r.cpu[p] = 0.0f;
             }
         }
+        r.pumps = sPumps;
+        r.pumpMs = (float)(sPumpNs / 1.0e6);
+        r.pumpMaxMs = (float)(sPumpMaxNs / 1.0e6);
+        r.padMs = sPadAt > 0.0 ? (float)((sPadAt - sMark[PH_UPDATE].wall) / 1.0e6) : -1.0f;
+        r.inputAgeMs = sPadAt > 0.0 ? (float)(sInputAge / 1.0e6) : -1.0f;
+        r.paceWantMs = (float)(sPaceWantNs / 1.0e6);
+        r.paceLateMs = (float)(sPaceLateNs / 1.0e6);
         if (sPendCount == kPending)
         {
             Drain(true);
@@ -899,4 +939,51 @@ void iPerfFrameEnd()
     }
     Drain(false);
     BeginFrame(end);
+}
+
+void iPerfPumpBegin()
+{
+    if (sState != 1)
+    {
+        return;
+    }
+    sPumpStart = WallNs();
+}
+
+void iPerfPumpEnd()
+{
+    if (sState != 1 || sPumpStart == 0.0)
+    {
+        return;
+    }
+    const double end = WallNs();
+    const double ns = end - sPumpStart;
+    sPumps++;
+    sPumpNs += ns;
+    if (ns > sPumpMaxNs)
+    {
+        sPumpMaxNs = ns;
+    }
+    sPumpStart = 0.0;
+    sLastPumpEnd = end;
+}
+
+void iPerfInputRead()
+{
+    if (sState != 1 || sPadAt != 0.0)
+    {
+        return;
+    }
+    sPadAt = WallNs();
+    sInputAge = sLastPumpEnd > 0.0 ? sPadAt - sLastPumpEnd : 0.0;
+}
+
+void iPerfPace(U64 wantNs, S64 lateNs)
+{
+    if (sState != 1)
+    {
+        return;
+    }
+    sPaceWantNs = (double)wantNs;
+    sPaceLateNs = (double)lateNs;
 }

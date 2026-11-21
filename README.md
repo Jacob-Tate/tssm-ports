@@ -15,12 +15,12 @@ game files.
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
-  for Android: `TSSM-Dehydrated-0.9.2-Android.apk` for 64-bit phones and
-  `TSSM-Dehydrated-0.9.2-Android-32bit.apk` for older 32-bit-only ones, with no game data.
-  Install 0.9.2 by hand once (it installs over 0.9; saves stay); from then on it can update
-  itself when you ask: settings window (three fingers on the screen), Settings tab,
-  *Updates*, *Check for updates*. The APKs are this branch's release build
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.5
+  for Android: `TSSM-Dehydrated-0.9.5-Android.apk` for 64-bit phones and
+  `TSSM-Dehydrated-0.9.5-Android-32bit.apk` for older 32-bit-only ones, with no game data.
+  0.9.2 and later update themselves when you ask: settings window (three fingers on the
+  screen), Settings tab, *Updates*, *Check for updates*. A first install, or one over 0.9,
+  is by hand (it installs over 0.9; saves stay). The APKs are this branch's release build
   (`docs/ANDROID.md`, "Release APKs") with `-Ptssm.releaseDebugKey=true`,
   `"-Ptssm.label=TSSM Dehydrated"`, `-Ptssm.update=true`, FFmpeg for the movies and the
   port's own icon (`tools/make_icons.ps1 -Background '#1E6FB0'` on the `switch` branch's
@@ -55,9 +55,11 @@ You need your own copy of the game
 ----------------------------------
 
 This repository contains **no game data**, and neither does the app. It reads the files of
-the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own copy of
-that disc and its files copied off it (about 1 GB): the folder that holds `boot.HIP`,
-`font.HIP` and `FMV`. Never put those files in the repository.
+the **Xbox** or the **GameCube** release of *The SpongeBob SquarePants Movie*, so you need
+your own copy of one of those discs and its files copied off it (about 1 GB): from an Xbox
+disc, the folder that holds `boot.HIP`, `font.HIP` and `FMV`; from a GameCube disc
+extracted with Dolphin (*Extract Entire Disc*), its `files` folder or the folder above it.
+Never put those files in the repository.
 
 Building the APKs
 -----------------
@@ -98,7 +100,8 @@ More documentation:
 |---|---|
 | `docs/ANDROID.md` | building, importing the game files, playing, files on the device, known issues |
 | `docs/CONTROLS.md` | the controls |
-| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube |
+| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube; Xbox, PlayStation 2 and PlayStation 3 saves |
+| `docs/EXTRAS.md`, `docs/CHEATS.md` | the Xbox release's extras; the Cheats tab |
 | `docs/MODDING.md` | mods |
 | `docs/ICON.md` | using your own picture as the app's icon |
 | `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |

@@ -38,6 +38,17 @@ bool iPadTouchShowing();
 // touched again.
 void iPadTouchPoll(iPadHostState* s, bool padOnPort0);
 
+// A tap since the last poll, once: one finger put down and lifted again where
+// it landed, not on a button (a stick's finger counts: it has not pushed it).
+// Where it landed, as fractions of the window (0 to 1, y down). For the
+// game's menus (iMenuMouse.h), where a tap on an item is what a mouse click on
+// it is; FALSE with input.touch_menus off or the controls put away.
+bool iPadTouchTakeTap(F32* x, F32* y);
+
+// For unattended runs (TSSM_TEST_TAP, iTestEvents.h): a tap at this spot of
+// the window (fractions), found at the next poll as a finger's is.
+void iPadTouchTestTap(F32 x, F32 y);
+
 // The letter on the on-screen button that presses the row `row` of
 // kPadBindButtons ("a", "lt", "start"), or 0 when no button does. For the
 // button prompts.

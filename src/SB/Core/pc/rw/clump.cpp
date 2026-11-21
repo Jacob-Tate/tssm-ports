@@ -17,6 +17,9 @@
 
 #include <stdio.h> // brings in librw's rw.h, which must not be included twice
 
+// After librw's headers: types.h has a `null` they cannot be read under.
+#include "iLoadFrame.h"
+
 static inline rw::Clump* asClump(RpClump* clump)
 {
     return reinterpret_cast<rw::Clump*>(clump);
@@ -29,6 +32,16 @@ static inline rw::Atomic* asAtomic(RpAtomic* atomic)
 
 RpClump* RpClumpStreamRead(RwStream* stream)
 {
+    // A model, a world or a texture set is in: a chance for the loading
+    // screen's next frame, on every way out of here (iLoadFrame.h).
+    struct PumpOnExit
+    {
+        ~PumpOnExit()
+        {
+            iLoadFramePump(iLOADPUMP_CLUMP);
+        }
+    } pumpOnExit;
+
     if (stream == NULL)
     {
         return NULL;

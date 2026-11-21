@@ -67,6 +67,13 @@ const char* iFileModRoot()
     return "";
 }
 
+// No game files: nothing here converts a save between consoles
+// (tests/xsave_selftest.cpp does).
+const char* iFileAssetRoot()
+{
+    return "";
+}
+
 const char* iConfigGetString(const char* key, const char* def)
 {
     return def;

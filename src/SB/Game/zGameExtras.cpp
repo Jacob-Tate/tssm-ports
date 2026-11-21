@@ -633,3 +633,51 @@ void zGame_HackGalleryInit()
     U32 obj = xStrHash("KIOSK SELECT UIF");
     sGalleryTitle = (xEnt*)zSceneFindObject(obj);
 }
+
+#ifdef PLATFORM_PC
+// PC: the Cheats tab (iCheats.h) reads cheatList and enters a code without the buttons.
+
+const GECheat* zGameExtras_PCCheat(S32 index)
+{
+    if (index < 0 || index >= (S32)(sizeof(cheatList) / sizeof(cheatList[0])) - 1)
+    {
+        return NULL;
+    }
+    return &cheatList[index];
+}
+
+// What zGameCheatsUpdate does for a row of cheatList when the buttons match it.
+void zGameExtras_PCEnterCheat(S32 index, bool sound)
+{
+    const GECheat* rec = zGameExtras_PCCheat(index);
+    if (rec == NULL)
+    {
+        return;
+    }
+
+    if (rec->flg_mode & 1)
+    {
+        GEC_CheatFlagToggle(rec->flg_keep);
+    }
+    else
+    {
+        GEC_CheatFlagAdd(rec->flg_keep);
+    }
+
+    if (rec->fun_cheat)
+    {
+        rec->fun_cheat();
+        if (sound)
+        {
+            xSndMgrPlay(xSndMgrGetSoundGroup(xStrHash("CHEAT_SUCCESS")), 0, NULL, NULL, NULL, NULL,
+                        NULL);
+        }
+    }
+}
+
+// A co-op joiner takes the host's cheat word (iCheatsShared).
+void zGameExtras_PCSetCheatFlags(S32 flags)
+{
+    g_flg_chEnabled = flags;
+}
+#endif

@@ -26,6 +26,10 @@ struct iSndDataSource
     U32 block_align;
     U32 bits;
     U32 sample_rate; // for TSSM_SND_DUMP's files only
+
+    // A sound of a GameCube table (iSndGC.h): DSP-ADPCM, decoded with its own
+    // coefficients, and the format fields above are not used. NULL for Xbox.
+    const struct iSndGCSound* gc;
 };
 
 // The samples of one asset as 16-bit PCM, interleaved, reading and decoding

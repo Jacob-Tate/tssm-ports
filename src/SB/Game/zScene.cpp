@@ -150,6 +150,15 @@
 #include "xShadowSimple.h"
 #include "zSymbol.h"
 
+#ifdef PLATFORM_PC
+#include "iWaterBody.h"
+#include "iXboxWater.h"
+#include "iExtras.h"
+#include "iExtrasGC.h"
+#include "iXboxDistort.h"
+#include "iLoadFrame.h"
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -281,6 +290,13 @@ namespace
         { "game_object:RingControl", eBaseTypeRingControl, sizeof(zRingControl), false, zRingControl::Load },
         { "logic:Function Generator", eBaseTypeFunctionGenerator, sizeof(xFunctionGenerator), false, xFunctionGenerator_Init },
         { "logic:reference", eBaseTypeReference, sizeof(zReference), false, zReferenceInit }
+#ifdef PLATFORM_PC
+        // PC: the Xbox files' water bodies, which the GameCube build has no object for
+        // (iXboxWater.h; without the Xbox water, iWaterBody.h). As a dynamic type it comes after
+        // sInitTable's types in the scene's list, so it gets SceneBegin after the dispatchers. The
+        // comma is here so the GameCube table is as it was.
+        , { "effect:water_body", eBaseTypeWaterBody, sizeof(zWaterBody), false, zWaterBody::load }
+#endif
     };
     // clang-format on
 } // namespace
@@ -895,6 +911,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
 
     zSceneLoadPackFile(theSceneID, 1, false, NULL);
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the Xbox release's features are decided for the level here, with its
+    // package read and before any of its objects is made (iExtras.h).
+    iExtrasSceneEnter(theSceneID);
+#endif
+
     pdone += 2.0f;
     zGameScreenTransitionUpdate(pdone, "...initializing scene - sound\n");
 
@@ -978,6 +1000,23 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
 
     g_xSceneCur = globals.sceneCur;
 
+#ifdef PLATFORM_PC
+    // PC: whether the Xbox water takes this scene's water bodies, decided from the files before
+    // the pipe tables are read and the objects are made from their assets (iXboxWater.h).
+    xWaterScenePrepare();
+
+    // Without it, the GameCube look for the Xbox files' water bodies: some of their assets are
+    // changed here too (iWaterBody.h).
+    if (!iXboxWaterWillRun())
+    {
+        iWaterBodyScenePrepare();
+    }
+
+    // With GameCube files, the Xbox extras those files hold but leave unused get the assets
+    // they need here (iExtrasGC.h).
+    iExtrasGCScenePrepare(theSceneID);
+#endif
+
     xModelPipeNumTables = xSTAssetCountByType('PIPT');
 
     for (S32 i = 0; i < xModelPipeNumTables; i++)
@@ -1024,6 +1063,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     zDispatcher_scenePrepare();
     zAnimListInit();
     zGooInit(24);
+
+#ifdef PLATFORM_PC
+    // PC: the console's loading screen is drawn by a thread that cuts in anywhere. Here it is
+    // drawn at pump points, and setting the scene up is long enough to need some (iLoadFrame.h).
+    iLoadFramePump(iLOADPUMP_SCENE);
+#endif
 
     zGameScreenTransitionUpdate(100.0f, "...initializing scene - base types\n");
 
@@ -1118,6 +1163,10 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
         {
             base_idx = sInitTable[i].func(s, &sInitTable[i], base_idx);
         }
+
+#ifdef PLATFORM_PC
+        iLoadFramePump(iLOADPUMP_SCENE);
+#endif
     }
 
     base_idx = init_dynamic_types(*s, base_idx);
@@ -1126,6 +1175,10 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
 
     zNMEAsset_CreateEnemies();
     zNMEAsset_RegisterEnemies(s, &base_idx);
+
+#ifdef PLATFORM_PC
+    iLoadFramePump(iLOADPUMP_SCENE);
+#endif
 
     s->num_update_base = 0;
 
@@ -1195,6 +1248,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     xFXHighDynamicRangeSetBackgroundDefault(s->parameters->hdrGlow, s->parameters->hdrDarken, true);
     xClimateInit(&gClimate);
 
+#ifdef PLATFORM_PC
+    // PC: the Xbox water's bodies forgotten and its body objects checked (iXboxWater.h), where
+    // the Xbox clears its bodies (0x742CB).
+    xWaterSceneInit();
+#endif
+
     for (i = 0; i < s->baseCount[eBaseTypePlatform]; i++)
     {
         // Retail always resets the first platform's destructible, never indexing by i.
@@ -1224,6 +1283,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     globals.sceneCur->enableDrawing = TRUE;
 
     iSndSuspendCD(0);
+
+#ifdef PLATFORM_PC
+    // ... and the links of their objects, before the first reset and SceneBegin.
+    iExtrasGCSceneObjects(theSceneID);
+    iExtrasSceneReady(theSceneID, globals.minVSyncCnt);
+#endif
 }
 
 void zSceneExit(S32 beginReload)
@@ -1324,6 +1389,9 @@ void zSceneExit(S32 beginReload)
     zSplashSceneExit();
     zSmokeSceneExit();
     xLightVolume::scene_exit();
+#ifdef PLATFORM_PC
+    xWaterSceneExit();
+#endif
     zFire::scene_exit();
     zExplosion::scene_exit();
     xTransient::scene_exit();
@@ -2010,6 +2078,9 @@ void zSceneReset()
     zSceneResetLightKits();
     zReactiveReset();
     zSpotlight::reset_all();
+#ifdef PLATFORM_PC
+    zWaterBody::reset_all();
+#endif
     zDustReset();
     xLightVolume::reset_all();
     zLightningReset();
@@ -3087,6 +3158,9 @@ void zSceneUpdate(F32 elapsedSec)
 
     if (!isPaused)
     {
+#ifdef PLATFORM_PC
+        xWaterUpdate(elapsedSec);
+#endif
         xFXHighDynamicRangeUpdate(elapsedSec);
         zReactiveUpdate(elapsedSec);
         zSpotlight::update_all(elapsedSec);
@@ -3098,6 +3172,9 @@ void zSceneUpdate(F32 elapsedSec)
         xFXStreakUpdate(elapsedSec);
         xFXShineUpdate(elapsedSec);
         xFXFireworksUpdate(elapsedSec);
+#ifdef PLATFORM_PC
+        zWaterBody::update_all();
+#endif
         zActionLineUpdate(elapsedSec);
         zLightningUpdate(elapsedSec);
         xClimateUpdate(&gClimate, elapsedSec);
@@ -3279,6 +3356,9 @@ void zSceneRenderPreFX()
         }
 
         xLightVolume::render_all();
+#ifdef PLATFORM_PC
+        xWaterRender(globals.screen->icam);
+#endif
         xDecal::render_all();
 
         zRenderState(SDRS_AlphaModels);
@@ -3384,11 +3464,29 @@ static void zSceneRenderPostFX()
 
     if (globals.sceneCur->enableDrawing)
     {
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: the Xbox (0x6a0f0) draws the guitar's HUD last, after its screen
+        // distortion (iXboxDistort.h), so the HUD is not swirled; with that look off, the
+        // GameCube's order.
+        const bool xboxDistort = iXboxDistortActive();
+        if (!xboxDistort)
+        {
+            cruise_bubble::render_screen();
+        }
+#else
         cruise_bubble::render_screen();
+#endif
         RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
         xScreenWarp::render(globals.screen->icam);
         xFXHighDynamicRangeRender(globals.screen->icam);
         xScrFxLensFlare_Render(globals.screen->icam);
+#ifdef PLATFORM_PC
+        if (xboxDistort)
+        {
+            iXboxDistortRender(globals.screen->icam);
+            cruise_bubble::render_screen();
+        }
+#endif
     }
     else
     {
@@ -3972,12 +4070,17 @@ bool zSceneLoadPackFile(U32 id, S32 options, bool noLocalized, const char* filen
     if (!versionNumber && (options & 3))
     {
 #ifdef PLATFORM_PC
-        // PLATFORM_PC: a HIP or HOP the game cannot do without (only the localized pack, 3, is
-        // optional). Retail carries on and crashes in zTransient::scene_enter; a disc always
-        // has the file, a copied file set may not.
-        if ((options & 3) != 3)
+        // PLATFORM_PC: a HIP the game cannot do without stops the run with the file's name.
+        // Retail carries on and crashes in zTransient::scene_enter; a disc always has the
+        // file, a copied file set may not. A level's HOP (2) may be absent, as in retail: a
+        // mod's level can be one HIP (iFile.h). The localized pack (3) is optional.
+        if ((options & 3) == 1)
         {
             iFileMissingPackage(id, options, filename);
+        }
+        else if ((options & 3) == 2)
+        {
+            iFileOptionalPackage(id, options, filename);
         }
 #endif
         return false;

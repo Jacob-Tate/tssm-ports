@@ -1,6 +1,8 @@
-// The About tab: versions, the renderer and folders in use, and the
-// third-party notices. (The Saves and Mods tabs are gui/iGuiSaves.cpp and
-// gui/iGuiMods.cpp.)
+// The list of tabs the overlay and the launcher both show, and the About tab:
+// versions, the renderer and folders in use, and the third-party notices.
+// (The Settings, Controls, Saves, Mods and Cheats tabs are gui/iGuiSettings.cpp,
+// gui/iGuiControls.cpp, gui/iGuiSaves.cpp, gui/iGuiMods.cpp and
+// gui/iGuiCheats.cpp.)
 
 #include "imgui.h"
 
@@ -8,6 +10,7 @@
 
 #include "gui/iGuiInternal.h"
 
+#include "iBuildInfo.h"
 #include "iConfig.h"
 #include "iFile.h"
 #include "iHost.h"
@@ -33,13 +36,112 @@ extern "C" {
 #define TSSM_GUI_VERSION "unknown"
 #endif
 
+// --- the tabs ------------------------------------------------------------------------
+
+namespace
+{
+    void PanelOr(iGuiPanel panel, void (*builtIn)())
+    {
+        void* user = NULL;
+        iGuiPanelFn fn = iGui::Panel(panel, &user);
+        if (fn != NULL)
+        {
+            fn(user);
+        }
+        else
+        {
+            builtIn();
+        }
+    }
+
+    void ControlsTab()
+    {
+        PanelOr(IGUI_PANEL_CONTROLS, iGui::DrawControls);
+    }
+
+    void SavesTab()
+    {
+        PanelOr(IGUI_PANEL_SAVES, iGui::DrawSaves);
+    }
+
+    void ModsTab()
+    {
+        PanelOr(IGUI_PANEL_MODS, iGui::DrawMods);
+    }
+
+    // Saves are files, and work before the game -- but not while another copy
+    // of the game is playing on the same folder, which owns them then
+    // (iSaveStoreClaimFolder).
+    const char* SavesNotBeforeGame()
+    {
+        static char why[160];
+        U32 holder = 0;
+        if (!iGui::SaveFolderInUse(&holder))
+        {
+            return NULL;
+        }
+        if (holder != 0)
+        {
+            snprintf(why, sizeof(why),
+                     "The game is already running on this save folder (process %u): change the "
+                     "saves there.",
+                     (unsigned)holder);
+        }
+        else
+        {
+            snprintf(why, sizeof(why),
+                     "The game is already running on this save folder: change the saves there.");
+        }
+        return why;
+    }
+
+    // Every tab, in the order they show. A tab added here is in the overlay
+    // and in the launcher; its notBeforeGame says what keeps it from working
+    // before the game runs, if anything does.
+    const iGui::Tab kTabs[] = {
+        { "settings", "Settings", iGui::DrawSettings, NULL },
+        { "controls", "Controls", ControlsTab, NULL },
+        { "saves", "Saves", SavesTab, SavesNotBeforeGame },
+        { "mods", "Mods", ModsTab, NULL },
+        // Works before the game too: the port's cheats are settings, and the game's
+        // own are listed there and greyed (gui/iGuiCheats.cpp).
+        { "cheats", "Cheats", iGui::DrawCheats, NULL },
+        { "about", "About", iGui::DrawAbout, NULL },
+    };
+} // namespace
+
+S32 iGui::TabCount()
+{
+    return (S32)(sizeof(kTabs) / sizeof(kTabs[0]));
+}
+
+const iGui::Tab& iGui::TabAt(S32 index)
+{
+    if (index < 0 || index >= TabCount())
+    {
+        index = 0;
+    }
+    return kTabs[index];
+}
+
+S32 iGui::TabFind(const char* name, size_t length)
+{
+    for (S32 i = 0; i < TabCount(); i++)
+    {
+        if (strlen(kTabs[i].name) == length && SDL_strncasecmp(name, kTabs[i].name, length) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void iGui::DrawAbout()
 {
 #ifdef __ANDROID__
-    ImGui::SeparatorText("The SpongeBob SquarePants Movie (port)");
+    ImGui::SeparatorText(TSSM_GAME_TITLE " (port)");
 #else
-    ImGui::SeparatorText(TouchWords() ? "The SpongeBob SquarePants Movie (port)" :
-                                        "The SpongeBob SquarePants Movie: PC port");
+    ImGui::SeparatorText(TouchWords() ? TSSM_GAME_TITLE " (port)" : TSSM_GAME_TITLE ": PC port");
 #endif
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
 #ifdef NDEBUG
@@ -47,7 +149,8 @@ void iGui::DrawAbout()
 #else
     const char* config = "debug";
 #endif
-    ImGui::Text("Built %s, %s, %d-bit", __DATE__, config, (int)(sizeof(void*) * 8));
+    ImGui::Text("Built %s from %s, %s, %d-bit", iBuildTime, iBuildCommit, config,
+                (int)(sizeof(void*) * 8));
 
     ImGui::Spacing();
     if (ImGui::BeginTable("about", 2, ImGuiTableFlags_SizingFixedFit))
@@ -57,12 +160,24 @@ void iGui::DrawAbout()
         snprintf(sdlVersion, sizeof(sdlVersion), "%d.%d.%d", SDL_VERSIONNUM_MAJOR(sdl),
                  SDL_VERSIONNUM_MINOR(sdl), SDL_VERSIONNUM_MICRO(sdl));
 
+        // Before the game there is no renderer yet, only the setting.
+        char renderer[96];
+        if (InLauncher())
+        {
+            snprintf(renderer, sizeof(renderer), "chosen when the game starts (setting: %s)",
+                     iConfigGetString("video.backend", "auto"));
+        }
+        else
+        {
+            snprintf(renderer, sizeof(renderer), "%s", RendererName());
+        }
+
         struct
         {
             const char* what;
             const char* value;
         } rows[] = {
-            { "Renderer", RendererName() },
+            { "Renderer", renderer },
             { "Window", iWindowBackendName() },
             { "Input", iPadHostName() },
             { "SDL", sdlVersion },
@@ -89,7 +204,7 @@ void iGui::DrawAbout()
 
     ImGui::Spacing();
     ImGui::TextWrapped("This port contains no game data. It reads the files of your own copy of "
-                       "the Xbox release. The SpongeBob SquarePants Movie and its characters "
+                       "the Xbox or GameCube release. The SpongeBob SquarePants Movie and its characters "
                        "belong to their owners; this project is not affiliated with them.");
 
     ImGui::SeparatorText("Licenses");

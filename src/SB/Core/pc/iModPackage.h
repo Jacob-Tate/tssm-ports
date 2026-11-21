@@ -48,6 +48,7 @@ struct iModPkgAsset
     U32 type; // the packer's four-character code, e.g. 'RWTX', 'SND '
     const char* name; // the ADBG name, "" when the package has none
     U32 size;
+    U32 off; // where its bytes are in the package file
 };
 
 // What replaces an asset.
@@ -75,19 +76,59 @@ typedef bool (*iModPkgLookupFn)(void* ctx, const iModPkgAsset& asset, iModPkgRep
 
 struct iModPkg;
 
+// What iModPkgBuild made of a file.
+enum iModPkgStatus
+{
+    IMODPKG_VIEW, // a view was built
+    IMODPKG_UNCHANGED, // a package nothing replaces anything in: read the file as it is
+    IMODPKG_UNREADABLE // not a package, or one whose table of contents does not hold together
+};
+
 // Builds the virtual package for the file at `path`. NULL when the lookup
 // replaces nothing, or when the file is not a package this understands (it is
-// then read as it is, which is the unmodded behaviour). Lines describing what
-// was replaced, or why nothing could be, are appended to `log`. The result has
-// one reference.
+// then read as it is, which is the unmodded behaviour); `status`, when not
+// NULL, says which. Lines describing what was replaced, or why nothing could
+// be, are appended to `log`. The result has one reference.
 iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
-                      std::vector<std::string>* log);
+                      std::vector<std::string>* log, U32 flags = 0,
+                      iModPkgStatus* status = NULL);
+
+// iModPkgBuild's flags.
+enum
+{
+    // The package is from the GameCube release (iGCPackage.h). Its SNDI is
+    // the GameCube's table, not the Xbox one described above, so it is never
+    // rewritten for a replaced sound: such a sound is logged and kept as the
+    // original, until the GameCube table can describe one. Its table of
+    // contents is held to iModPkgCheck's rules with exact counts: a GameCube
+    // package is read through its view whether or not anything replaces an
+    // asset in it, so one that does not hold together is UNREADABLE, never
+    // read as it is. A well-formed package with no assets (the GameCube's
+    // plat.HIP) is UNCHANGED.
+    IMODPKG_GAMECUBE = 1
+};
+
+// Whether the file at `path` is a package whose table of contents the packer
+// can read without running off it: every chunk inside PACK, DICT, ATOC, LTOC,
+// AHDR and LHDR fits its parent exactly; PCNT is there and the AHDR and LHDR
+// counts are no more than it says (`exactCounts`: equal to it); no asset has
+// a negative size or pad or runs past the end of the file; asset IDs are
+// unique and every layer names assets that exist, each in one layer at most,
+// and lies inside the file. Every retail package of both discs passes. False,
+// with the reason in `why`, otherwise. The packer itself checks none of this
+// (xpkrsvc.cpp): an AHDR past PCNT's count writes past its node pool, an LHDR
+// naming a missing asset reads the list at -1, and a truncated file reads
+// asset offsets that point past its end.
+bool iModPkgCheck(const char* path, bool exactCounts, std::string* why);
 
 void iModPkgRetain(iModPkg* pkg);
 void iModPkgRelease(iModPkg* pkg);
 
 // The virtual file's length.
 U32 iModPkgSize(const iModPkg* pkg);
+
+// The memory the view holds: the header and the replacement bytes.
+U64 iModPkgMemory(const iModPkg* pkg);
 
 // A positioned read of the virtual file. `original` is the caller's own handle
 // on the package file the view was built from. Bytes past the end read as
@@ -127,7 +168,8 @@ struct iModPkgToc
 };
 
 // Reads the table of contents of a package file, or of a virtual package when
-// `pkg` is not NULL (`fp` is then the original file). False if it is not one.
+// `pkg` is not NULL (`fp` is then the original file). False if it is not one,
+// or has no assets.
 bool iModPkgReadToc(FILE* fp, const iModPkg* pkg, iModPkgToc* toc);
 
 // The packer's layer size: each asset's size plus pad but the last's, rounded

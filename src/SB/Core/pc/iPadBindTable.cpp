@@ -32,7 +32,10 @@
 //            Xbox's zUIMgrUpdate wakes the menus on Start or Select. The
 //            GameCube code this port runs wakes them on Start or Z, so Back
 //            carries Z to wake them; zUI::DoUpdate tests Select before Z, so
-//            the press still arrives as Select.
+//            under the Xbox's menus the press arrives as Select. The
+//            GameCube's menus open the window on PadPressE (Z) and hear
+//            nothing on Select, so under them iPad.cpp's SelectForTheMenus
+//            sends Back as Z alone, as a GameCube pad does.
 const iPadBindButton kPadBindButtons[] = {
     { "a", XPAD_BUTTON_X, "#A", "space", "jump, double jump; accept; car: drive", IPAD_AXIS_NONE },
     { "b", XPAD_BUTTON_TRIANGLE, "#B", "mouse2, backspace",

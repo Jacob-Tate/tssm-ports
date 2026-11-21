@@ -485,6 +485,26 @@ bool iHostFlushDir(const char* path)
     return ok;
 }
 
+// Where the claims' lock files are.
+static bool LockDir(char* dir, size_t size)
+{
+#ifdef __ANDROID__
+    // files/locks, not the cache: the system may empty the cache while the
+    // game runs, and a lock file deleted under its holder stops nothing. The
+    // co-op app takes the save folder's lock through SaveShareProvider.
+    const char* internal = iAndroidDir("TSSM_ANDROID_INTERNAL");
+    if (internal == NULL)
+    {
+        return false;
+    }
+    snprintf(dir, size, "%s/locks", internal);
+    iHostMakeDir(dir);
+    return true;
+#else
+    return iHostTempDir(dir, size);
+#endif
+}
+
 S32 iHostClaimInstance(const char* key, U32* holder)
 {
     if (holder != NULL)
@@ -497,23 +517,10 @@ S32 iHostClaimInstance(const char* key, U32* holder)
     // descriptor closes, which it does however the process ends, so a file
     // left behind by a crash claims nothing.
     char dir[512];
-#ifdef __ANDROID__
-    // files/locks, not the cache: the system may empty the cache while the
-    // game runs, and a lock file deleted under its holder stops nothing. The
-    // co-op app takes the save folder's lock through SaveShareProvider.
-    const char* internal = iAndroidDir("TSSM_ANDROID_INTERNAL");
-    if (internal == NULL)
+    if (!LockDir(dir, sizeof(dir)))
     {
         return -1;
     }
-    snprintf(dir, sizeof(dir), "%s/locks", internal);
-    iHostMakeDir(dir);
-#else
-    if (!iHostTempDir(dir, sizeof(dir)))
-    {
-        return -1;
-    }
-#endif
 
     char path[700];
     snprintf(path, sizeof(path), "%s/%s.lock", dir, key != NULL ? key : "tssm");
@@ -550,6 +557,49 @@ S32 iHostClaimInstance(const char* key, U32* holder)
 
     // Never closed: the open descriptor is the claim.
     return 1;
+}
+
+bool iHostInstanceHeld(const char* key, U32* holder)
+{
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+
+    char dir[512];
+    if (!LockDir(dir, sizeof(dir)))
+    {
+        return false;
+    }
+    char path[700];
+    snprintf(path, sizeof(path), "%s/%s.lock", dir, key != NULL ? key : "tssm");
+
+    // Opened, never created; locked and let go at once when nobody holds it.
+    int fd = open(path, O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+    {
+        return false;
+    }
+
+    char text[32] = "";
+    ssize_t n = pread(fd, text, sizeof(text) - 1, 0);
+    const U32 id = n > 0 ? (text[n] = '\0', (U32)strtoul(text, NULL, 10)) : 0;
+
+    bool held = false;
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0)
+    {
+        flock(fd, LOCK_UN);
+    }
+    else if (errno == EWOULDBLOCK && id != (U32)getpid())
+    {
+        held = true;
+        if (holder != NULL)
+        {
+            *holder = id;
+        }
+    }
+    close(fd);
+    return held;
 }
 
 // No portable way to find and raise another process's window here.

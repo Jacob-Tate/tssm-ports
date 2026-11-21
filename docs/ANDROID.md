@@ -7,13 +7,21 @@ Android layer (the BfBB PC port, CC0), adapted to TSSM.
   build another; the prebuilt APKs on the Releases page are *TSSM Dehydrated*)
 - Package (application id): `io.github.tssmport.game`
 - No game data in the APK. The player supplies the files from their own copy
-  of the Xbox release of The SpongeBob SquarePants Movie (about 1 GB).
+  of the Xbox or the GameCube release of The SpongeBob SquarePants Movie
+  (about 1 GB).
 
 ## Status
 
 - Both APKs build: `arm64-v8a` (64-bit ARM) and `armeabi-v7a` (32-bit ARM).
 - arm64-v8a has been played on one phone; armeabi-v7a has not run on a
   device yet.
+- What 0.9.4 and 0.9.5 bring from the PC (the Xbox extras and water,
+  GameCube files, the save-screen text, the drag camera, taps in the menus;
+  the loading screen, the Cheats tab, the HUD at the screen's edges, the
+  Xbox, PlayStation 2 and PlayStation 3 saves, the steady frame time) was
+  checked in the PC build of this branch, which shares the code; it has not
+  run on a phone yet. The phone had no 0.9.4 release: 0.9.5 is its first
+  update from 0.9.2.
 - **arm64-v8a is the one for 64-bit phones** (Pixel 7 and later, and most
   phones sold since, run only 64-bit apps). It loads the game as the Windows
   x64 build does: the asset data that keeps pointers in 4-byte slots is
@@ -99,6 +107,10 @@ updater:
 gradle assembleRelease -Ptssm.releaseDebugKey=true "-Ptssm.label=TSSM Dehydrated" \
     -Ptssm.icon=<icon folder> -Ptssm.ffmpeg=<folder> -Ptssm.update=true
 ```
+
+The label is also the name in the game's own windows (the settings window's
+title, the About tab, message boxes, the first line of `config.ini`): Gradle
+passes it to CMake as `TSSM_PC_TITLE`.
 
 With `-Ptssm.update=true` Gradle prints `tssm: in-app updates on
 (tssm.update)` and CMake `Updates: on, from the releases of <owner/name>; this
@@ -207,12 +219,13 @@ screen again (to re-import, or to switch between a copy and a linked folder).
 
 `ImportActivity` explains what is needed and offers two choices. Both use the
 system folder picker. The player picks the folder holding `boot.HIP` and
-`font.HIP` (the root of the extracted Xbox disc), or the folder directly above
-it.
+`font.HIP` (the root of the extracted Xbox disc, or the `files` folder of a
+GameCube disc extracted with Dolphin), or the folder directly above it.
 
 **Copy into the app.** Needs no permission. Copies into
 `Android/data/io.github.tssmport.game/files/assets`. Only the files the game
-reads are copied, by the Xbox disc's layout:
+reads are copied, by the disc's layout, which the Xbox and the GameCube
+releases share:
 
 - `.HIP` and `.HOP` files at the top level (`boot.HIP`, `font.HIP`,
   `plat.HIP` and the `_US` halves) and in the two-letter level folders
@@ -222,7 +235,8 @@ reads are copied, by the Xbox disc's layout:
 - the game's `.ini` files at the top level (`sb04.ini`, `explode.ini`,
   `water.ini`)
 
-`DEFAULT.XBE` and anything else stays behind. The copy goes to
+`DEFAULT.XBE`, the GameCube's banner and program and anything else stay
+behind. The copy goes to
 `assets.importing` and is renamed to `assets` when complete. If there is not
 room for two copies, the old `assets` is deleted first. The screen stays on
 during the copy.
@@ -242,12 +256,17 @@ app can no longer read, sends the next launch back to the import screen.
 `iAndroidStartup` sets it to `<external files>/assets` when that folder
 exists. If neither applies, `[assets] path` in `config.ini` decides, as on
 every other host. The game then checks for `boot.HIP` and `font.HIP` and for
-the Xbox platform id in `boot.HIP`; a failure shows an error box and the log
-says where it looked.
+the Xbox or GameCube platform id in `boot.HIP`; a failure shows an error box
+and the log says where it looked. GameCube files are converted as each
+package is opened (src/SB/Core/pc/PORTING.md), on both ABIs; the Settings
+tab's Game files note has the phone's own steps (extract on a computer, copy
+the folder over, Import game files).
 
 The ImGui launcher (`gui.launcher`) does not open on Android unless
 `gui.launcher = always`: the import screen has already found the files, and
-SDL's folder picker returns a `content://` URI the game cannot open.
+SDL's folder picker returns a `content://` URI the game cannot open. When it
+is asked for it has the overlay's own tabs (Settings, Controls, Saves, Mods,
+Cheats, About), as on the PC.
 
 ## Playing
 
@@ -299,7 +318,8 @@ SDL's folder picker returns a `content://` URI the game cannot open.
   | Setting | Default | Does |
   | --- | --- | --- |
   | `input.touch_controls` | `auto` | on, off, or auto (on for Android); applies at the next start |
-  | `input.touch_drag_look` | `off` | a drag on the empty right half (not a button, not near the right stick) also turns the camera, as in 0.2 |
+  | `input.touch_drag_look` | `off` | a drag on the empty right half (not a button, not near the right stick) also turns the camera. From 0.9.4 it turns the on-foot camera directly, as the mouse does on the PC (it stays where it is pointed), and only once a finger has dragged: until then, and again after either right stick or a controller is used, the camera is the game's own |
+  | `input.touch_menus` | `on` | a tap on an item in the game's menus selects it, as a mouse click does on the PC (docs/CONTROLS.md); a tap on an on-screen button is still that button |
   | `input.touch_scale` | `1.0` | size of the controls, 0.5 to 1.2 |
   | `input.touch_opacity` | `100` | how solid they are drawn, 10 to 100 percent |
 
@@ -311,7 +331,7 @@ SDL's folder picker returns a `content://` URI the game cannot open.
 - **Settings overlay** (docs/GUI.md): three fingers down within a quarter of
   a second open or close it, wherever they land (on the controls too);
   Back+Start on a controller. Its tabs are
-  Settings, Controls, Saves, Mods and About, and it is used by tapping.
+  Settings, Controls, Saves, Mods, Cheats and About, and it is used by tapping.
   SDL's Java half sends touch, key and mouse events from Android's UI
   thread; the overlay queues them and handles them on the game's thread at
   the next frame (`gui/iGui.cpp`). While it is closed it queues only the
@@ -366,6 +386,62 @@ SDL's folder picker returns a `content://` URI the game cannot open.
   stands behind vsync, a quarter above the cap, in case the display does not
   wait. A cap under the panel's rate (60 on 120 Hz, movies) is paced by the
   sleep as before.
+
+### Xbox extras
+
+From 0.9.4 the app has the PC's Xbox extras (docs/EXTRAS.md), each with its
+row in the settings window's Settings tab and `xbox` by default: the glow, the
+spotlights, the moving fish crowds, the Xbox water and the 30 fps levels at
+60. `gamecube` is one choice away for each, and with GameCube files a row says
+what the level's files cannot give.
+
+The Xbox water draws two extra pictures of the scene for each water area in
+view (what is under the surface and what is mirrored in it), into targets of
+their own: 1024x1024 at most here, where the PC's are up to 2048. A target
+needs a depth buffer only while it is being drawn, so here all of them use
+one (`iXboxWaterPass.cpp`, `ShareDepth`; the log's water line ends ", one
+depth buffer between them"). SC02's two tanks then keep 4 colour targets and
+1 depth buffer, 20 MB, where a depth buffer each would be 32 MB, and a level
+with more water areas grows by 8 MB an area instead of 16.
+`TSSM_WATER_DEPTH=own` gives each target its own again, for comparisons. If
+the targets cannot be made the level gets the GameCube water and the row says
+so.
+
+Not timed or looked at on a phone yet: the water's cost at the phone's render
+size, and the spotlights' in TT01's disco (docs/EXTRAS.md, "What the extras
+cost"). `extras.water = gamecube` and `extras.spotlights = gamecube` are the
+switches if either is too slow.
+
+The Sonic Wave Guitar's screen swirl (`extras.guitar_distortion`) has its row
+too, but stays off on the phone: its pass is written for OpenGL ES 3 and has
+not run on one, so `iExtrasResolve` gives `gamecube` and the row says "Not on
+Android or the Switch yet." until it has been seen on a device.
+
+### New in 0.9.5 on the phone
+
+- **The loading screen** (the life preserver) shows while a level loads, drawn
+  between pieces of the load as on the PC (src/SB/Core/pc/PORTING.md, "The
+  loading screen"). The touch buttons are not drawn on its frames
+  (`rw/touch_overlay.cpp`); they come back with the game's next frame.
+- **The Cheats tab** (docs/CHEATS.md). Its text names LT and RT as the touch
+  controls' L and R. Flight needs white and black: the touch controls have
+  black but no white, so flying needs a controller (LB and RB).
+- **The HUD at the screen's edges** (`video.ui`, `video.ui_margin`, Settings
+  tab, Display; docs/WIDESCREEN.md). The margin keeps it clear of a notch or
+  rounded corners. A phone held upright always has it at the top and bottom.
+- **Xbox, PlayStation 2 and PlayStation 3 saves** can be imported in the
+  Saves tab (docs/SAVES.md sections 7 to 9), from a file or a .zip, through
+  the system's picker as the GameCube saves are: an Xbox save as a .zip of its
+  folder, a PS2 save as a .psu, .max or memory card file (.ps2, .VM2), a PS3
+  save as a .psv. Import only: SDL has no folder picker on Android
+  (`SDL_androiddialog.c`), and the export code writes by plain path, which the
+  picker's `content://` address is not, so the folder import and the Xbox,
+  PS2 and PS3 exports are left out of the phone (`IGS_EXPORT_OTHER_CONSOLES`,
+  `gui/iGuiSaves.cpp`). A PC with the same saves makes those.
+- **The steady frame time** (docs/PACING.md): Android's window is
+  `iWindowSDL.cpp`, so a frame that came on time gets the steady time. Where
+  vsync paces it (the phone's default when the cap is the panel's rate,
+  `TSSM_VSYNC_PACE`), the period is the panel's own refresh.
 
 ### Heat, battery and frame drops
 

@@ -85,6 +85,13 @@ void GEC_cb_PanHandle();
 void zGame_HackGalleryInit();
 U32 zGame_HackIsGallery();
 
+#ifdef PLATFORM_PC
+// PC: for the Cheats tab (iCheats.h).
+const GECheat* zGameExtras_PCCheat(S32 index);
+void zGameExtras_PCEnterCheat(S32 index, bool sound);
+void zGameExtras_PCSetCheatFlags(S32 flags);
+#endif
+
 template <class T> T xUtil_choose(const T* list, S32 cnt, const F32* wts);
 
 #endif

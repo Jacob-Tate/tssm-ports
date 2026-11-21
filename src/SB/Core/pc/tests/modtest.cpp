@@ -1,10 +1,12 @@
 // Checks the mod system by running it: tssm_modtest (CMake target).
 //
-//     tssm_modtest <asset folder> <scratch folder>
+//     tssm_modtest <asset folder> <scratch folder> [<GameCube files>]
 //
 // The asset folder is your own extracted Xbox disc (TSSM_ASSETS); the scratch
 // folder is where the test writes its mods. Without an asset folder only the
 // parts that need no game file run (INI overlays, sound decoding, scanning).
+// The GameCube folder (an extracted GameCube disc's files/, or
+// TSSM_TEST_GC_ASSETS) adds the GameCube package checks.
 //
 // What it checks:
 //   * INI overlays: replace, repeated keys, add, remove, sections, CRLF.
@@ -17,6 +19,14 @@
 //     bytes, every asset at `layer + (d_off - first d_off)` -- and every
 //     asset's bytes are compared with what they should be; the DICT, the
 //     chunk sizes, the alignments and random reads across extents too.
+//   * Tables of contents (iModPkgCheck): every package of both discs holds
+//     together; damaged copies (cut short, garbage after the header, a count,
+//     a size, a chunk size that wraps around) do not, and are said so quickly.
+//   * GameCube packages read through their converted view (iModOpenPackage):
+//     a retail one converts, plat.HIP (no assets) is fine with nothing to
+//     convert, and cut-short, garbage and damaged copies fail rather than
+//     being read as they are; a zero-length file is not a package; a JSP that
+//     is neither a clump nor JSPINFO is malformed.
 //   * The manager (iMod): two mods, by name and by ID, scoped and not; load
 //     order from folder names, priorities and mods.ini; conflicts; enable,
 //     disable, move, save; loose files, textures, movies, INI overlays; the
@@ -24,6 +34,8 @@
 //
 // Exit code 0 when every check passed.
 
+#include "iGCPackage.h"
+#include "iGCSwap.h"
 #include "iHost.h"
 #include "iMod.h"
 #include "iModAudio.h"
@@ -35,6 +47,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -83,6 +98,7 @@ static int sFailures;
 
 static std::string sAssets;
 static std::string sScratch;
+static std::string sGameCube; // an extracted GameCube disc's files/, or ""
 
 static bool WriteFile(const std::string& path, const void* data, size_t len)
 {
@@ -677,6 +693,354 @@ static void TestPackages()
     }
 }
 
+// --- tables of contents and GameCube packages -------------------------------------------
+
+static std::vector<U8> ReadAll(const std::string& path)
+{
+    std::vector<U8> out;
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (fp == NULL)
+    {
+        return out;
+    }
+    fseek(fp, 0, SEEK_END);
+    long len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (len > 0)
+    {
+        out.resize((size_t)len);
+        if (fread(&out[0], 1, out.size(), fp) != out.size())
+        {
+            out.clear();
+        }
+    }
+    fclose(fp);
+    return out;
+}
+
+static U32 Be32(const U8* p)
+{
+    return ((U32)p[0] << 24) | ((U32)p[1] << 16) | ((U32)p[2] << 8) | (U32)p[3];
+}
+
+static void PutBe32(U8* p, U32 v)
+{
+    p[0] = (U8)(v >> 24);
+    p[1] = (U8)(v >> 16);
+    p[2] = (U8)(v >> 8);
+    p[3] = (U8)v;
+}
+
+// The offset of the first chunk `id` at or after `from` in a package's bytes,
+// by search (the chunks are where the packer put them): 0 when there is none.
+static U32 FindChunk(const std::vector<U8>& b, const char* id, U32 from = 8)
+{
+    for (U32 i = from; i + 8 <= b.size(); i++)
+    {
+        if (memcmp(&b[i], id, 4) == 0)
+        {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static std::vector<std::string> PackagesUnder(const std::string& root)
+{
+    std::vector<std::string> out;
+    std::error_code ec;
+    for (std::filesystem::recursive_directory_iterator it(root, ec), end; !ec && it != end;
+         it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+        {
+            continue;
+        }
+        std::string ext = it->path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".hip" || ext == ".hop")
+        {
+            out.push_back(it->path().generic_string());
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// Every package under `root` holds together.
+static void CheckDisc(const std::string& root, bool exact, const char* label)
+{
+    std::vector<std::string> pkgs = PackagesUnder(root);
+    int ok = 0;
+    for (size_t i = 0; i < pkgs.size(); i++)
+    {
+        std::string why;
+        bool good = iModPkgCheck(pkgs[i].c_str(), exact, &why);
+        CHECK(good, "%s: %s: %s", label, pkgs[i].c_str(), why.c_str());
+        ok += good;
+    }
+    CHECK(!pkgs.empty(), "%s: no packages under %s", label, root.c_str());
+    printf("   %s: %d of %d packages hold together\n", label, ok, (int)pkgs.size());
+}
+
+// A damaged copy of `bytes`, written under the scratch folder as `name`: false
+// from iModPkgCheck (with a reason), quickly, and, as a GameCube package, a
+// failure from iModOpenPackage rather than the file read as it is.
+static void CheckDamaged(const std::vector<U8>& bytes, const std::string& name, bool gamecube)
+{
+    std::string path = sScratch + "/gc/" + name;
+    CHECK(WriteFile(path, bytes.empty() ? NULL : &bytes[0], bytes.size()), "write %s", name.c_str());
+
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    std::string why;
+    bool good = iModPkgCheck(path.c_str(), gamecube, &why);
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(!good && !why.empty(), "%s: iModPkgCheck said it holds together", name.c_str());
+    CHECK(ms < 2000.0, "%s: the check took %.0f ms", name.c_str(), ms);
+    printf("   %s: refused (%.1f ms): %s\n", name.c_str(), ms, why.c_str());
+
+    if (gamecube)
+    {
+        bool failed = false;
+        iModPkg* view = iModOpenPackage(path.c_str(), true, &failed);
+        CHECK(failed && view == NULL, "%s: the GameCube view did not fail", name.c_str());
+        iModPkgRelease(view);
+    }
+}
+
+static void TestGameCubePackages()
+{
+    printf("-- tables of contents and GameCube packages\n");
+    MakeDirs(sScratch + "/gc");
+
+    if (!sAssets.empty())
+    {
+        CheckDisc(sAssets, false, "Xbox disc");
+        CheckDisc(sAssets, true, "Xbox disc, exact counts");
+    }
+    if (sGameCube.empty())
+    {
+        printf("   no GameCube folder: the GameCube checks are skipped\n");
+        return;
+    }
+    CheckDisc(sGameCube, true, "GameCube disc");
+
+    // A retail level package converts; plat.HIP (no assets) has nothing to
+    // convert and is not a failure.
+    std::string jk01 = sGameCube + "/JK/jk01.HIP";
+    std::string jk01hop = sGameCube + "/JK/jk01.HOP";
+    std::string plat = sGameCube + "/plat.HIP";
+    {
+        bool failed = true;
+        iModPkg* view = iModOpenPackage(jk01.c_str(), true, &failed);
+        CHECK(!failed && view != NULL, "jk01.HIP: converted view");
+        iModPkgRelease(view);
+        failed = true;
+        view = iModOpenPackage(plat.c_str(), true, &failed);
+        CHECK(!failed && view == NULL, "plat.HIP: a package with nothing to convert");
+        iModPkgRelease(view);
+    }
+
+    std::vector<U8> hip = ReadAll(jk01);
+    std::vector<U8> hop = ReadAll(jk01hop);
+    CHECK(hip.size() > 0x10000 && hop.size() > 0x10000, "jk01.HIP and jk01.HOP");
+    if (hip.size() <= 0x10000 || hop.size() <= 0x10000)
+    {
+        return;
+    }
+
+    // Cut short.
+    CheckDamaged(std::vector<U8>(hip.begin(), hip.begin() + hip.size() / 2), "trunc.HIP", true);
+    CheckDamaged(std::vector<U8>(hop.begin(), hop.begin() + hop.size() * 3 / 10), "trunc.HOP", true);
+
+    // Garbage after the first 0x200 bytes (the PACK and the start of the DICT).
+    {
+        std::vector<U8> b = hip;
+        U32 seed = 1;
+        for (size_t i = 0x200; i < b.size(); i++)
+        {
+            seed = seed * 1103515245 + 12345;
+            b[i] = (U8)(seed >> 16);
+        }
+        CheckDamaged(b, "garbage.HIP", true);
+    }
+
+    // One AHDR's size made huge: refused before anything is allocated.
+    {
+        std::vector<U8> b = hip;
+        U32 ahdr = FindChunk(b, "AHDR");
+        for (int n = 0; n < 100 && ahdr != 0; n++)
+        {
+            ahdr = FindChunk(b, "AHDR", ahdr + 8);
+        }
+        CHECK(ahdr != 0, "an AHDR to damage");
+        if (ahdr != 0)
+        {
+            PutBe32(&b[ahdr + 8 + 12], 0x7FFFFFF0);
+            CheckDamaged(b, "ahdrsize.HIP", true);
+        }
+    }
+
+    // PCNT's asset count one more than the AHDRs.
+    {
+        std::vector<U8> b = hip;
+        U32 pcnt = FindChunk(b, "PCNT");
+        CHECK(pcnt != 0, "PCNT");
+        if (pcnt != 0)
+        {
+            PutBe32(&b[pcnt + 8], Be32(&b[pcnt + 8]) + 1);
+            CheckDamaged(b, "pcnt.HIP", true);
+        }
+    }
+
+    // A chunk inside STRM whose size wraps the walk around (it used to loop
+    // forever); the same in an Xbox package.
+    {
+        std::vector<U8> b = hip;
+        U32 strm = FindChunk(b, "STRM");
+        CHECK(strm != 0 && memcmp(&b[strm + 8], "DHDR", 4) == 0, "STRM starting with DHDR");
+        if (strm != 0)
+        {
+            PutBe32(&b[strm + 12], 0xFFFFFFF8);
+            CheckDamaged(b, "strmwrap.HIP", true);
+        }
+        if (!sAssets.empty())
+        {
+            std::vector<U8> x = ReadAll(sAssets + "/JK/jk01.HIP");
+            U32 xs = FindChunk(x, "STRM");
+            if (xs != 0 && memcmp(&x[xs + 8], "DHDR", 4) == 0)
+            {
+                PutBe32(&x[xs + 12], 0xFFFFFFF8);
+                CheckDamaged(x, "strmwrap_xbox.HIP", false);
+            }
+        }
+    }
+
+    // A layer naming an asset that is not there.
+    {
+        std::vector<U8> b = hip;
+        U32 lhdr = FindChunk(b, "LHDR");
+        while (lhdr != 0 && Be32(&b[lhdr + 12]) == 0)
+        {
+            lhdr = FindChunk(b, "LHDR", lhdr + 8);
+        }
+        CHECK(lhdr != 0, "an LHDR with assets");
+        if (lhdr != 0)
+        {
+            PutBe32(&b[lhdr + 16], 0xDEADBEEF);
+            CheckDamaged(b, "lhdr.HIP", true);
+        }
+    }
+
+    // Not a package: empty, and not starting with HIPA.
+    {
+        CHECK(iGCPackagePlatform(NULL, 0, NULL, 0, NULL, 0) == IGCPLAT_NONE, "no bytes");
+        U8 none[16] = { 0 };
+        CHECK(iGCPackagePlatform(none, 0, NULL, 0, NULL, 0) == IGCPLAT_NOTPACKAGE, "empty");
+        CHECK(iGCPackagePlatform(none, sizeof(none), NULL, 0, NULL, 0) == IGCPLAT_NOTPACKAGE,
+              "zeros");
+        CHECK(iGCPackagePlatform(&hip[0], 512, NULL, 0, NULL, 0) == IGCPLAT_GAMECUBE, "jk01.HIP");
+        std::string empty = sScratch + "/gc/empty.HIP";
+        CHECK(WriteFile(empty, NULL, 0), "write empty.HIP");
+        std::string why;
+        CHECK(!iModPkgCheck(empty.c_str(), false, &why), "empty.HIP holds together");
+        bool failed = false;
+        iModPkg* view = iModOpenPackage(empty.c_str(), true, &failed);
+        CHECK(failed && view == NULL, "empty.HIP as a GameCube package did not fail");
+        iModPkgRelease(view);
+    }
+
+    // JSP: a clump is left as it is, JSPINFO is converted, anything else is
+    // malformed.
+    {
+        iModPkgToc toc;
+        FILE* fp = fopen(jk01hop.c_str(), "rb");
+        bool have = fp != NULL && iModPkgReadToc(fp, NULL, &toc);
+        if (fp)
+        {
+            fclose(fp);
+        }
+        CHECK(have, "jk01.HOP's table of contents");
+        int clumps = 0, infos = 0, damaged = 0;
+        for (size_t i = 0; have && i < toc.assets.size(); i++)
+        {
+            const iModPkgTocAsset& a = toc.assets[i];
+            if (a.type != 0x4A535020 || a.size < 16 || a.off + a.size > hop.size()) // 'JSP '
+            {
+                continue;
+            }
+            std::vector<U8> j(hop.begin() + a.off, hop.begin() + a.off + a.size);
+            iGCSwapResult r = iGCSwapCheck(a.type, &j[0], a.size);
+            if (j[0] == 0x10 && j[1] == 0 && j[2] == 0 && j[3] == 0)
+            {
+                CHECK(r == IGCSWAP_ASIS, "JSP clump %08X: %d", a.id, (int)r);
+                clumps++;
+            }
+            else
+            {
+                CHECK(r == IGCSWAP_DONE, "JSPINFO %08X: %d", a.id, (int)r);
+                infos++;
+            }
+            j[1] ^= 0x60; // 0xBEEF01 becomes 0xBE8F01, a clump's 0x10 becomes 0x6010
+            r = iGCSwapCheck(a.type, &j[0], a.size);
+            CHECK(r == IGCSWAP_MALFORMED, "damaged JSP %08X: %d", a.id, (int)r);
+            damaged++;
+        }
+        CHECK(clumps > 0 && infos > 0, "JSP clumps %d, JSPINFO %d", clumps, infos);
+        printf("   JSP: %d clump(s) as they are, %d JSPINFO converted, %d damaged malformed\n",
+               clumps, infos, damaged);
+
+        // MODL: every model holds together; a damaged one fails the package
+        // instead of reaching the game (iGCPackageModelFits).
+        int models = 0, refused = 0;
+        U32 firstModel = 0, firstSize = 0;
+        for (size_t i = 0; have && i < toc.assets.size(); i++)
+        {
+            const iModPkgTocAsset& a = toc.assets[i];
+            if (a.type != 0x4D4F444C || a.size < 64 || a.off + a.size > hop.size()) // 'MODL'
+            {
+                continue;
+            }
+            std::vector<U8> m(hop.begin() + a.off, hop.begin() + a.off + a.size);
+            CHECK(iGCPackageModelFits(&m[0], a.size), "MODL %08X does not fit", a.id);
+            models++;
+            if (firstModel == 0)
+            {
+                firstModel = a.off;
+                firstSize = a.size;
+            }
+
+            std::vector<U8> b = m;
+            memset(&b[0], 0xEE, 24); // the clump and struct headers
+            refused += !iGCPackageModelFits(&b[0], a.size);
+            refused += !iGCPackageModelFits(&m[0], a.size / 2); // cut short
+            b = m;
+            b[24] ^= 0x01; // the clump's atomic count off by one
+            refused += !iGCPackageModelFits(&b[0], a.size);
+        }
+        CHECK(models > 0 && refused == models * 3, "MODL: %d models, %d of %d damaged refused",
+              models, refused, models * 3);
+        printf("   MODL: %d model(s) hold together, %d of %d damaged copies refused\n", models,
+               refused, models * 3);
+        CHECK(!iGCPackageModelFits(NULL, 0) && !iGCPackageModelFits(&hop[0], 11),
+              "MODL: no bytes, or too few");
+
+        if (firstModel != 0)
+        {
+            std::vector<U8> b = hop;
+            memset(&b[firstModel], 0xEE, 24);
+            std::string path = sScratch + "/gc/modl.HOP";
+            CHECK(WriteFile(path, &b[0], b.size()), "write modl.HOP");
+            bool failed = false;
+            iModPkg* view = iModOpenPackage(path.c_str(), true, &failed);
+            CHECK(failed && view == NULL, "modl.HOP: a damaged model did not fail the package");
+            iModPkgRelease(view);
+            printf("   modl.HOP (one model's first 24 bytes 0xEE, %u bytes): refused\n",
+                   firstSize);
+        }
+    }
+}
+
 // --- the manager ---------------------------------------------------------------------
 
 static void Setenv(const char* name, const char* value)
@@ -926,6 +1290,23 @@ int main(int argc, char** argv)
         sAssets = getenv("TSSM_ASSETS");
     }
     sScratch = argc > 2 ? argv[2] : "modtest-scratch";
+    if (argc > 3)
+    {
+        sGameCube = argv[3];
+    }
+    else if (getenv("TSSM_TEST_GC_ASSETS") != NULL)
+    {
+        sGameCube = getenv("TSSM_TEST_GC_ASSETS");
+    }
+    for (size_t i = 0; i < sGameCube.size(); i++)
+    {
+        sGameCube[i] = sGameCube[i] == '\\' ? '/' : sGameCube[i];
+    }
+    if (!sGameCube.empty() && !iHostPathExists((sGameCube + "/boot.HIP").c_str()))
+    {
+        printf("no boot.HIP in %s: the GameCube checks are skipped\n", sGameCube.c_str());
+        sGameCube.clear();
+    }
     for (size_t i = 0; i < sAssets.size(); i++)
     {
         sAssets[i] = sAssets[i] == '\\' ? '/' : sAssets[i];
@@ -947,6 +1328,7 @@ int main(int argc, char** argv)
     {
         TestPackages();
     }
+    TestGameCubePackages();
     TestManager();
 
     printf("%d checks, %d failed\n", sChecks, sFailures);

@@ -62,6 +62,7 @@ namespace iGui
     void DrawSettings();
     void SettingsGameFiles();
     void SettingsDisplay();
+    void SettingsExtras();
     void SettingsAudio();
     void SettingsGame();
     void SettingsInterface();
@@ -76,7 +77,39 @@ namespace iGui
     void DrawControls();
     void DrawSaves();
     void DrawMods();
+    void DrawCheats();
     void DrawAbout();
+
+    // --- the tabs -------------------------------------------------------------------
+
+    // Every tab, in order, for the overlay and the launcher alike
+    // (gui/iGuiTabs.cpp): a tab added to the list -- the co-op builds' Co-op,
+    // Cheats -- is in both, with every setting it has.
+    struct Tab
+    {
+        const char* name;  // TSSM_GUI_TAB's word for it, and capture names
+        const char* label; // on the tab
+        // Draws the tab: the module's own panel when one was set
+        // (iGuiSetPanel), the built-in one otherwise.
+        void (*draw)();
+        // In the launcher, before the game runs: NULL when the tab works there,
+        // else the one line that says why it is greyed. NULL for no check.
+        const char* (*notBeforeGame)();
+    };
+    S32 TabCount();
+    const Tab& TabAt(S32 index);
+    // The index of the tab TSSM_GUI_TAB names this way, or -1.
+    S32 TabFind(const char* name, size_t length);
+
+    // The controllers the input backend has open, handed to ImGui's SDL3
+    // backend in its manual mode, so it navigates with them without opening
+    // or closing anything itself. Once a frame, to see one plugged in.
+    void UseOpenGamepads();
+
+    // The launcher, before the game: the save folder as config.ini has it now
+    // (the game sets it at startup), and whether another copy of the game is
+    // running on it (*holder its process id, 0 when unknown).
+    bool SaveFolderInUse(U32* holder);
 
     // The running renderer as a player would name it: "Direct3D 11".
     const char* RendererName();
@@ -109,7 +142,8 @@ namespace iGui
     // --- the game's files -------------------------------------------------------
 
     // Whether `dir` holds the game's files: boot.HIP and FONT.HIP, in any case,
-    // from the Xbox release. `why` gets a sentence either way.
+    // from the Xbox or GameCube release, directly or (a GameCube disc extracted
+    // with Dolphin) in its files folder. `why` gets a sentence either way.
     bool CheckAssetFolder(const char* dir, char* why, size_t whySize);
 
     // --- folders and files --------------------------------------------------------

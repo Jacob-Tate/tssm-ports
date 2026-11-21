@@ -36,6 +36,7 @@
 
 // After rw.h: iScreen.h brings in types.h, which breaks librw's rwengine.h when
 // it comes first.
+#include "iClip2D.h"
 #include "iScreen.h"
 
 #include <vector>
@@ -87,6 +88,12 @@ RwReal RwIm2DGetFarScreenZ(void)
 // draw into anything but the screen -- render-to-texture targets are
 // CAMERATEXTURE rasters or another size. On a 4:3 render size the box is the
 // screen and nothing is copied.
+//
+// A HUD widget's draws are also carried out to the edge of the real screen it
+// belongs to, when the HUD is set to be there or the screen is taller than 4:3
+// (iScreenSetAnchor, iHudAnchor.h). On a screen taller than 4:3 the menus' and
+// the HUD's draws are cut at the top and bottom of their 4:3 screen (DrawCut,
+// iScreen2DClipY).
 //
 // One exception is decided here rather than at a call site: a single quad as
 // wide as the screen (as tall, on a screen taller than 4:3). Textured, it is
@@ -148,13 +155,14 @@ namespace
         return texture != NULL ? PLACE_COVER : PLACE_AS_GIVEN;
     }
 
-    // The mapped copy. The game draws from one thread (iAsync.cpp), so one
-    // buffer, kept between calls.
+    // The mapped copy. The game draws from one thread (the loading screen
+    // too, iAsync.cpp), so one buffer, kept between calls.
     std::vector<RwIm2DVertex> sMapped;
 
-    RwIm2DVertex* ToUIBox(RwIm2DVertex* vertices, RwInt32 numVertices)
+    RwIm2DVertex* ToUIBox(RwIm2DVertex* vertices, RwInt32 numVertices, Placement* placed)
     {
         const Placement placement = PlacementFor(vertices, numVertices);
+        *placed = placement;
         if (placement == PLACE_AS_GIVEN)
         {
             return vertices;
@@ -179,6 +187,15 @@ namespace
             ox = cx - cx * sx;
             oy = cy - cy * sy;
         }
+        else
+        {
+            // A HUD widget carried out to an edge of the real screen
+            // (iScreenSetAnchor): its offset is in UI units, the box's width
+            // and height. Zero unless the HUD is at the edges (video.ui =
+            // native, or a screen taller than 4:3).
+            ox += iScreenAnchorX(0.0f) * iScreenUIWidthF();
+            oy += iScreenAnchorY(0.0f) * iScreenUIHeightF();
+        }
 
         sMapped.assign(vertices, vertices + numVertices);
         for (RwInt32 i = 0; i < numVertices; i++)
@@ -187,6 +204,123 @@ namespace
             sMapped[i].y = oy + sMapped[i].y * sy;
         }
         return sMapped.data();
+    }
+
+    // On a screen taller than 4:3, a menu's or a HUD group's draw in the box is
+    // cut at the top and bottom of its 4:3 screen (iScreen2DClipY), so what a
+    // 4:3 television would not show is not seen there either. Here because a
+    // backend's scissor would be one more thing in each of four backends, and
+    // the game's 2D is a few triangles a draw.
+    //
+    // A draw wholly inside goes through as it is, which is nearly every one. A
+    // draw that crosses a line is drawn here as the triangles left after the
+    // cut, a plain list; one wholly outside is not drawn at all.
+    //
+    // Not cut: one quad as wide as the screen. It is a layer of a menu's
+    // backdrop that runs off the 4:3 screen's sides and on past its edge (the
+    // title's surf over the sand), and cut, the full-bleed art under it would
+    // show a hard line at the 4:3 area's edge. The panels, items and words
+    // that slide are narrower than the screen.
+    std::vector<RwIm2DVertex> sCut;
+
+    // librw's dynamic vertex buffer holds 10000 (d3dimmed.cpp); a whole
+    // number of triangles under that.
+    const size_t kCutBatch = 9999;
+
+    // TRUE when the draw was handled here.
+    bool DrawCut(RwPrimitiveType primType, const RwIm2DVertex* v, RwInt32 numVertices,
+                 const RwImVertexIndex* indices, RwInt32 numIndices)
+    {
+        F32 top;
+        F32 bottom;
+        if (!iScreen2DClipY(&top, &bottom))
+        {
+            return false;
+        }
+        if (primType != rwPRIMTYPETRILIST && primType != rwPRIMTYPETRISTRIP &&
+            primType != rwPRIMTYPETRIFAN)
+        {
+            return false;
+        }
+
+        F32 lo = v[0].y;
+        F32 hi = lo;
+        for (RwInt32 i = 1; i < numVertices; i++)
+        {
+            lo = v[i].y < lo ? v[i].y : lo;
+            hi = v[i].y > hi ? v[i].y : hi;
+        }
+        if (lo >= top && hi <= bottom)
+        {
+            return false;
+        }
+
+        if (numVertices <= 6)
+        {
+            F32 left = v[0].x;
+            F32 right = left;
+            for (RwInt32 i = 1; i < numVertices; i++)
+            {
+                left = v[i].x < left ? v[i].x : left;
+                right = v[i].x > right ? v[i].x : right;
+            }
+            if (left <= 0.5f && right >= iScreenWidthF() - 0.5f)
+            {
+                return false;
+            }
+        }
+
+        // The draw's triangles, in their own winding: a strip's every other
+        // one is turned back, a fan's all share the first corner.
+        const RwInt32 count = indices != NULL ? numIndices : numVertices;
+        const RwInt32 triangles = primType == rwPRIMTYPETRILIST ? count / 3 : count - 2;
+        sCut.clear();
+        RwIm2DVertex out[9];
+        for (RwInt32 t = 0; t < triangles; t++)
+        {
+            RwInt32 k[3];
+            if (primType == rwPRIMTYPETRILIST)
+            {
+                k[0] = 3 * t;
+                k[1] = 3 * t + 1;
+                k[2] = 3 * t + 2;
+            }
+            else if (primType == rwPRIMTYPETRISTRIP)
+            {
+                k[0] = (t & 1) ? t + 1 : t;
+                k[1] = (t & 1) ? t : t + 1;
+                k[2] = t + 2;
+            }
+            else
+            {
+                k[0] = 0;
+                k[1] = t + 1;
+                k[2] = t + 2;
+            }
+
+            const RwIm2DVertex* c[3];
+            bool valid = true;
+            for (S32 i = 0; i < 3; i++)
+            {
+                const RwInt32 at = indices != NULL ? (RwInt32)indices[k[i]] : k[i];
+                valid = valid && at < numVertices;
+                c[i] = &v[valid ? at : 0];
+            }
+            if (!valid)
+            {
+                continue;
+            }
+
+            const S32 n = iClip2DTriangle(*c[0], *c[1], *c[2], top, bottom, out);
+            sCut.insert(sCut.end(), out, out + n);
+        }
+
+        for (size_t at = 0; at < sCut.size(); at += kCutBatch)
+        {
+            const size_t n = sCut.size() - at < kCutBatch ? sCut.size() - at : kCutBatch;
+            rw::im2d::RenderPrimitive(rw::PRIMTYPETRILIST, &sCut[at], (rw::int32)n);
+        }
+        return true;
     }
 } // namespace
 
@@ -198,8 +332,13 @@ RwBool RwIm2DRenderPrimitive(RwPrimitiveType primType, RwIm2DVertex* vertices,
         return FALSE;
     }
 
-    vertices = ToUIBox(vertices, numVertices);
+    Placement placement;
+    vertices = ToUIBox(vertices, numVertices, &placement);
     BindStateRaster();
+    if (placement == PLACE_BOX && DrawCut(primType, vertices, numVertices, NULL, 0))
+    {
+        return TRUE;
+    }
     rw::im2d::RenderPrimitive((rw::PrimitiveType)primType, vertices, numVertices);
     return TRUE;
 }
@@ -215,8 +354,13 @@ RwBool RwIm2DRenderIndexedPrimitive(RwPrimitiveType primType, RwIm2DVertex* vert
 
     // RwImVertexIndex is an RwUInt16 and librw reads its indices as int16, so
     // the array goes through as it is.
-    vertices = ToUIBox(vertices, numVertices);
+    Placement placement;
+    vertices = ToUIBox(vertices, numVertices, &placement);
     BindStateRaster();
+    if (placement == PLACE_BOX && DrawCut(primType, vertices, numVertices, indices, numIndices))
+    {
+        return TRUE;
+    }
     rw::im2d::RenderIndexedPrimitive((rw::PrimitiveType)primType, vertices, numVertices, indices,
                                      numIndices);
     return TRUE;

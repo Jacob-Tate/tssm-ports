@@ -6,6 +6,7 @@
 
 #include "backend.h"
 
+#include "iLoadFrame.h"
 #include "iTouchOverlay.h"
 
 #include <stdint.h>
@@ -211,6 +212,12 @@ namespace
     // the vertex count.
     S32 BuildVertices()
     {
+        // A loading frame (iLoadFrame.h) is the game's picture alone: the
+        // buttons come back with the game's next frame.
+        if (iLoadFrameDrawing())
+        {
+            return 0;
+        }
         const iTouchOverlayShape* shapes;
         S32 shapeCount = iTouchOverlayShapes(&shapes);
 

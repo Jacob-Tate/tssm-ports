@@ -38,8 +38,16 @@
 // phases' wall and CPU ms, gpu_ms (GL3 timer query, -1 when not available),
 // cameras (RwCameraBeginUpdate calls: the main camera, shadows, glow), and the
 // GL3 counters: draws, tris, passes, screen_passes, blits, clears, programs,
-// tex_binds, tex_uploads, tex_kb, buf_uploads, buf_kb. The summary's "1% low"
-// is the frame rate over the slowest 1% of the window's frames.
+// tex_binds, tex_uploads, tex_kb, buf_uploads, buf_kb; then the host's side of
+// the frame: pumps (SDL event pumps in it; the window's, at the present, with
+// its events' handling), pump_ms (their total), pump_max_ms (the longest),
+// pad_ms (the frame's start to the controllers' read, iPadHostPoll; -1 when
+// nothing read them), input_age_ms (how old the event
+// pump's state was at that read: the time since the last pump ended), and the
+// pacer: pace_want_ms (the sleep it asked for, 0 when the deadline had already
+// passed) and pace_late_ms (how far past its deadline it let the frame go:
+// the sleep's overshoot, or the overrun when it did not sleep). The summary's
+// "1% low" is the frame rate over the slowest 1% of the window's frames.
 
 #include <types.h>
 
@@ -49,6 +57,14 @@ void iPerfPresentBegin(); // RwCameraShowRaster, on entry
 void iPerfSwapBegin(); // just before the backend's showRaster
 void iPerfSwapEnd(); // just after it
 void iPerfFrameEnd(); // after iWindowPaceFrame
+
+// The host's hooks: around each SDL_PumpEvents (the whole of iWindowSDL.cpp's
+// iWindowPump), where the controllers are read,
+// and the pacer's sleep (nanoseconds asked for, and how late it returned).
+void iPerfPumpBegin();
+void iPerfPumpEnd();
+void iPerfInputRead();
+void iPerfPace(U64 wantNs, S64 lateNs);
 
 // TRUE once TSSM_PERF has turned the metrics on.
 S32 iPerfOn();

@@ -49,6 +49,11 @@
 #include "zAutoTweak.h"
 #include "xRand.h"
 
+#ifdef PLATFORM_PC
+#include "iHudAnchor.h"
+#include "iXboxDistort.h"
+#endif
+
 namespace cruise_bubble
 {
     namespace CruiseBubble
@@ -1736,9 +1741,18 @@ namespace cruise_bubble
             shared.flags &= ~0x80;
         }
 
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: empty on the GameCube. The Xbox's (0x1af2e0) keeps the amount for its
+        // screen distortion, drawn by zSceneRenderPostFX (iXboxDistort.h).
+        static inline void distort_screen(F32 amount)
+        {
+            iXboxDistortSetAmount(amount);
+        }
+#else
         static inline void distort_screen(F32)
         {
         }
+#endif
 
         static inline void exit_triggers(xScene& s)
         {
@@ -4486,6 +4500,11 @@ void cruise_bubble::CruiseBubble::render_hud()
         }
     }
 
+#ifdef PLATFORM_PC
+    // PC: the countdown goes to its corner of a screen that is not 4:3 with the HUD at the
+    // screen's edges (iHudAnchor.h); the sights above stay on what they aim at.
+    iHudAnchorScope anchor(current_tweak->hud.timer.x, current_tweak->hud.timer.y);
+#endif
     render_timer(hud.alpha, hud.glow);
 }
 
@@ -4723,6 +4742,10 @@ void cruise_bubble::xCamReturn()
 
 void cruise_bubble::deinit()
 {
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the Xbox's deinit (0x91ac7) ends the distortion too.
+    distort_screen(0.0f);
+#endif
     hud.model.wind = NULL;
     hud.model.reticle = NULL;
     hud.model.swirl = NULL;

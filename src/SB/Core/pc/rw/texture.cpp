@@ -24,6 +24,9 @@ namespace rw
 #include <stdlib.h>
 #include <string.h>
 
+// After librw's headers: types.h has a `null` they cannot be read under.
+#include "iLoadFrame.h"
+
 // TSSM-ADAPTED: mods. Set by iModTexture.cpp (the platform layer) when the
 // mod system starts; called for every texture RwTexDictionaryStreamRead reads,
 // after its raster has been converted, so that a mod's replacement image can
@@ -345,6 +348,16 @@ static rw::Texture* convertRasterToPlatform(rw::Texture* texture, void* data)
 
 RwTexDictionary* RwTexDictionaryStreamRead(RwStream* stream)
 {
+    // A model, a world or a texture set is in: a chance for the loading
+    // screen's next frame, on every way out of here (iLoadFrame.h).
+    struct PumpOnExit
+    {
+        ~PumpOnExit()
+        {
+            iLoadFramePump(iLOADPUMP_TEXDICT);
+        }
+    } pumpOnExit;
+
     if (stream == NULL)
     {
         return NULL;
