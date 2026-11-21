@@ -49,6 +49,12 @@
 #include "iEnv.h"
 #include "iFile.h"
 
+#ifdef PLATFORM_PC
+#include "iCheats.h"
+#include "iWindow.h"
+#include "iXboxWater.h"
+#endif
+
 #include <dolphin/os.h>
 
 #include <stdio.h>
@@ -384,6 +390,12 @@ void zGameSetup()
         zEntEventAll(NULL, 0, eEventLevelBegin, NULL);
     }
 
+#ifdef PLATFORM_PC
+    // PC: the Xbox water's bodies hidden and their tiles built (iXboxWater.h), where the Xbox
+    // does it (0x52A48).
+    zWaterBody::setup_all();
+#endif
+
     if (globals.updateMgr != NULL)
     {
         xUpdateCull_Update(globals.updateMgr, 100);
@@ -461,6 +473,12 @@ void zGameLoop()
 
         sTimeCurrent = iTimeGet();
         sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);
+#ifdef PLATFORM_PC
+        // PC: a frame that came on time runs on a steady frame time, as every
+        // console frame is one NTSC retrace, so the enemies' end-of-animation
+        // checks see their ends as on the console (iSteadyFrame.h).
+        sTimeElapsed = iWindowGameFrameTime(sTimeElapsed);
+#endif
 
         if (sTimeElapsed > 0.1f)
         {
@@ -542,6 +560,10 @@ void zGameLoop()
         globals.update_dt = sTimeElapsed;
 
         zGameExtras_SceneUpdate(sTimeElapsed);
+#ifdef PLATFORM_PC
+        // PC: the Cheats tab's requests and the port's own cheats (iCheats.h).
+        iCheatsGameFrame();
+#endif
         iFileAsyncService();
         iDrawBegin();
 
@@ -623,6 +645,9 @@ void zGameLoop()
 #ifdef PLATFORM_PC
             // PC: the shadows, before the scene's camera begins (zScene.cpp).
             zScenePreRenderShadows();
+            // PC: the Xbox water's refraction and reflection targets, there
+            // too (iXboxWater.h).
+            xWaterPreRender(globals.screen->icam);
 #endif
         }
 

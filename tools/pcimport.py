@@ -79,8 +79,6 @@ TREEDOME = [
     # input devices
     "iPadStick.h",
     "iPadStick.cpp",
-    "iCameraLook.h",
-    "iCameraLook.cpp",
     "iTouchOverlay.h",
     "iTouchOverlay.cpp",
     # audio device (the seam and both backends are adapted, below)
@@ -113,6 +111,10 @@ TREEDOME_RW_DIRS = ["rw"]
 TREEDOME_ADAPTED = [
     "rw/engine_start.cpp",
     "rw/texture.cpp",
+    # the loading screen's pump at the end of each reader (iLoadFrame.h)
+    "rw/atomic.cpp",
+    "rw/clump.cpp",
+    "rw/world.cpp",
     "rw/engine.cpp",
     "rw/renderstate.cpp",
     "iConfig.cpp",
@@ -135,6 +137,9 @@ TREEDOME_ADAPTED = [
     "iPadTokens.h",
     "iPadTokens.cpp",
     "iPadTouch.h",
+    # mouse look: the turn taken in one call, and who asked for it
+    "iCameraLook.h",
+    "iCameraLook.cpp",
     "iFile.h",
     "iFile.cpp",
     "iTime.cpp",

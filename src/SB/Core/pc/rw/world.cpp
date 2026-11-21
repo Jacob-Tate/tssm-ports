@@ -49,6 +49,9 @@ namespace rw
 #include <stdio.h>
 #include <string.h>
 
+// After librw's headers: types.h has a `null` they cannot be read under.
+#include "iLoadFrame.h"
+
 static inline rw::World* asWorld(RpWorld* world)
 {
     return reinterpret_cast<rw::World*>(world);
@@ -382,6 +385,16 @@ RpWorld* RpWorldRemoveLight(RpWorld* world, RpLight* light)
 // bytes in both.
 RpWorld* RpWorldStreamRead(RwStream* stream)
 {
+    // A model, a world or a texture set is in: a chance for the loading
+    // screen's next frame, on every way out of here (iLoadFrame.h).
+    struct PumpOnExit
+    {
+        ~PumpOnExit()
+        {
+            iLoadFramePump(iLOADPUMP_WORLD);
+        }
+    } pumpOnExit;
+
     rw::uint32 length;
     if (stream == NULL || !rw::findChunk(stream, rw::ID_STRUCT, &length, NULL) || length < 64 ||
         length > 128)

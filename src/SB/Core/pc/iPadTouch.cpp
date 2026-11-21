@@ -154,6 +154,10 @@ namespace
     F32 sCameraOwedX;
     F32 sCameraOwedY;
     Uint64 sLastPollNS;
+
+    // A drag has the camera. Until the first one, and again once the right
+    // stick or the camera keys are used, the game's own camera has it.
+    bool sCameraDragged;
     U32 sHeld;
 
     void ButtonCenter(const Button& b, F32 w, F32 h, F32* cx, F32* cy)
@@ -485,9 +489,19 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
 
     Submit(w, h);
 
-    // The camera turns with the finger while the controls are showing, and the
-    // retail camera, springs and all, comes back with a controller.
-    iCameraLookSetActive(sShowing);
+    // The camera is the finger's once it has been dragged, the way it is the
+    // mouse's once that has moved (iMouseLook.h): controls that are only
+    // showing leave the retail camera, springs and all, as it is, and it comes
+    // back with a controller, the right stick or the camera keys.
+    if (!sShowing || s->substick_x * s->substick_x + s->substick_y * s->substick_y > 0.09f)
+    {
+        sCameraDragged = false;
+    }
+    else if (sCameraDX != 0.0f || sCameraDY != 0.0f)
+    {
+        sCameraDragged = true;
+    }
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, sCameraDragged);
 
     if (!sShowing)
     {
@@ -514,25 +528,27 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
     sCameraOwedY -= turnY;
 
     // As a mouse moves it: a drag right turns the view right, a drag down looks
-    // down. Yaw runs against the way the C-stick pushes pgoal, and the engine's
-    // pitch is positive-down.
+    // down (the engine's pitch is positive-down).
     F32 perPixel = kCameraTurnPerHeight / h;
-    iCameraLookSet(-turnX * perPixel, turnY * perPixel);
+    iCameraLookSet(iCAMERALOOK_TOUCH, turnX * perPixel, turnY * perPixel);
 
-    // TSSM's camera reads only the C-stick (its zCamera.cpp has no iCameraLook
-    // hook), so the drag also becomes C-stick deflection, the way the mouse
-    // does: past the game's 32 in proportion to the distance, a screen height
-    // being a full deflection.
-    F32 turnStick[2] = { -turnX, -turnY };
-    F32* outStick[2] = { &s->camera_x, &s->camera_y };
-    for (S32 i = 0; i < 2; i++)
+    // The cameras that are not the on-foot one (a boss fight's, say) read only
+    // the C-stick, so while one of them has the view the drag becomes C-stick
+    // deflection, the way the mouse does (iMouseLook.h): past the game's 32 in
+    // proportion to the distance, a screen height being a full deflection.
+    if (!iCameraLookTaken())
     {
-        F32 v = turnStick[i] * 400.0f / h;
-        if (v != 0.0f)
+        F32 turnStick[2] = { -turnX, -turnY };
+        F32* outStick[2] = { &s->camera_x, &s->camera_y };
+        for (S32 i = 0; i < 2; i++)
         {
-            F32 mag = 33.0f + fabsf(v);
-            mag = mag > 110.0f ? 110.0f : mag;
-            *outStick[i] += v < 0.0f ? -mag : mag;
+            F32 v = turnStick[i] * 400.0f / h;
+            if (v != 0.0f)
+            {
+                F32 mag = 33.0f + fabsf(v);
+                mag = mag > 110.0f ? 110.0f : mag;
+                *outStick[i] += v < 0.0f ? -mag : mag;
+            }
         }
     }
 

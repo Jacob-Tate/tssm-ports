@@ -58,7 +58,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(TSSM_BUILD_32BIT AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR
     "TSSM_BUILD_32BIT is on, but ${CMAKE_CXX_COMPILER_ID} produced a "
-    "${CMAKE_SIZEOF_VOID_P}-byte pointer. Enter the x86 MSVC environment first.")
+    "${CMAKE_SIZEOF_VOID_P}-byte pointer. Enter the x86 MSVC environment first "
+    "(MinGW: configure from MSYS2's MINGW32 shell, whose gcc builds 32-bit).")
 endif()
 
 # Every warning off for code this project does not own the warnings of: the
@@ -84,20 +85,45 @@ set(SB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/SB)
 # Mandatory, not style: the source is full of *(U32*)&someFloat.
 add_compile_options(-fno-strict-aliasing)
 
-# Mandatory under GCC, also not style. GCC treats whatever an object's storage held
-# before its constructor ran as dead and deletes the stores (-flifetime-dse), and the
-# game zeroes memory and placement-news into it, relying on the zeros for the members
-# the constructor leaves alone. Clang does not do this. docs/SWITCH.md, Notes.
+# Also mandatory under GCC: the game clears an object's memory and then
+# constructs it in place (zLoadingScreen::Init: memset, then zUIImage_Init's
+# placement new), and relies on the fields the constructor leaves alone
+# staying zero. GCC treats storage as dead until a constructor runs and drops
+# the memset; zUI::custom keeps the allocator's fill, and zUI_Init calls
+# through it on the first level load. clang does no such thing.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-lifetime-dse>)
 endif()
 
-if(TSSM_BUILD_32BIT AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  add_compile_options(-msse2 -mfpmath=sse)
+# 32-bit x86 floating point in SSE2 registers, as clang's code for the MSVC-ABI
+# x86 build has it, not in the x87's 80-bit ones, which GCC uses by default
+# there: whether -m32 asked for 32-bit (TSSM_BUILD_32BIT) or the compiler only
+# builds 32-bit (MSYS2's MINGW32 gcc).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles("#ifndef __i386__\n#error not 32-bit x86\n#endif\nint main() { return 0; }"
+                            TSSM_GNU_X86_32)
+  if(TSSM_GNU_X86_32)
+    add_compile_options(-msse2 -mfpmath=sse)
+  endif()
+endif()
+
+# __FILE__ relative to the checkout (librw's messages and assertions carry
+# it), so the executable does not carry the folder it was built in: GCC, and
+# clang++ (the MSVC-ABI build and every other).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+   (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=>")
 endif()
 
 if(MINGW)
   add_link_options(-static)
+  # 32-bit MinGW's time_t is 32 bits unless asked (msvcrt's default), and ends
+  # in January 2038; the MSVC x86 build's UCRT has a 64-bit one. Save dates
+  # go through it (iHostWin32.cpp, iSaveFormat.cpp).
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_compile_definitions(_TIME_BITS=64)
+  endif()
 endif()
 
 # The positive marker that selects the port's arms in shared headers and the
@@ -113,9 +139,6 @@ endif()
 # TSSM_SWITCH here and __SWITCH__ in the source.
 if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
   set(TSSM_SWITCH ON)
-  # __FILE__ relative to the checkout (librw's messages and assertions carry
-  # it), so tssm.nro does not carry the folder it was built in.
-  add_compile_options("-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
 else()
   set(TSSM_SWITCH OFF)
 endif()
@@ -189,7 +212,7 @@ if(TSSM_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(TSSM_INPUT_BACKEND STREQUAL "sdl")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp
-                    ${PC_DIR}/iPadTokens.cpp ${PC_DIR}/iPadTouch.cpp
+                    ${PC_DIR}/iPadTokens.cpp ${PC_DIR}/iPadTouch.cpp ${PC_DIR}/iMouseLook.cpp
                     ${PC_DIR}/iPadPrompts.cpp ${PC_DIR}/iPadTest.cpp ${PC_DIR}/iPadControls.cpp)
   set(INPUT_LIBS tssm_sdl)
   set(TSSM_NEEDS_SDL ON)
@@ -216,8 +239,10 @@ list(APPEND AUDIO_SOURCES ${PC_DIR}/iSndReverb.cpp)
 
 # --- movies (FFmpeg, optional) ------------------------------------------------
 # TSSM's Xbox movies are Bink 1 (FMV/*.bik), which FFmpeg decodes. Point
-# CMAKE_PREFIX_PATH at vcpkg's installed/<arch>-windows (the build scripts do).
-# Without FFmpeg the null decoder is built and movies report "ran to the end".
+# CMAKE_PREFIX_PATH at vcpkg's installed/<arch>-windows (the build scripts do),
+# or under MinGW at what tools/mingw/build_ffmpeg.sh installed (static
+# libraries, linked into tssm.exe). Without FFmpeg the null decoder is built
+# and movies report "ran to the end".
 find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
 find_library(FFMPEG_AVCODEC_LIBRARY avcodec)
 find_library(FFMPEG_AVFORMAT_LIBRARY avformat)
@@ -233,7 +258,56 @@ if(FFMPEG_INCLUDE_DIR AND FFMPEG_AVCODEC_LIBRARY AND FFMPEG_AVFORMAT_LIBRARY
                     ${FFMPEG_AVUTIL_LIBRARY})
   set(FMV_INCLUDES ${FFMPEG_INCLUDE_DIR})
   set(FMV_DEFINES TSSM_HAVE_FFMPEG)
-  message(STATUS "FMV decoder: ffmpeg (${FFMPEG_INCLUDE_DIR})")
+  # A GNU static archive (libavcodec.a, not the import library libavcodec.dll.a):
+  # FFmpeg is linked in and no DLL ships. Static FFmpeg leaves the Windows
+  # libraries it calls to the program (its .pc files' Libs: bcrypt for
+  # libavutil's random seed, ole32 and user32).
+  set(TSSM_FFMPEG_STATIC OFF)
+  set(FFMPEG_SYSTEM_LIBS)
+  if(FFMPEG_AVCODEC_LIBRARY MATCHES "\\.a$" AND NOT FFMPEG_AVCODEC_LIBRARY MATCHES "\\.dll\\.a$")
+    set(TSSM_FFMPEG_STATIC ON)
+    if(WIN32)
+      set(FFMPEG_SYSTEM_LIBS bcrypt ole32 user32)
+      list(APPEND FMV_LIBRARIES ${FFMPEG_SYSTEM_LIBS})
+    endif()
+    message(STATUS "FMV decoder: ffmpeg, static (${FFMPEG_INCLUDE_DIR})")
+  else()
+    message(STATUS "FMV decoder: ffmpeg (${FFMPEG_INCLUDE_DIR})")
+  endif()
+  # The license this FFmpeg was configured under, for the About tab: under
+  # MinGW read from libavutil (the string avutil_license() returns), since the
+  # FFmpeg found there may be MSYS2's package, which is configured
+  # --enable-gpl --enable-version3 and links x264 and x265. What
+  # tools/mingw/build_ffmpeg.sh builds is LGPL 2.1 or later, as vcpkg's is.
+  set(TSSM_FFMPEG_LICENSE "LGPL 2.1 or later")
+  if(MINGW)
+    if(TSSM_FFMPEG_STATIC)
+      set(_avutil_files "${FFMPEG_AVUTIL_LIBRARY}")
+    else()
+      file(GLOB _avutil_files "${FFMPEG_INCLUDE_DIR}/../bin/avutil-*.dll")
+    endif()
+    set(_avutil_license)
+    foreach(_f IN LISTS _avutil_files)
+      file(STRINGS "${_f}" _avutil_license REGEX "libavutil license: " LIMIT_COUNT 1)
+      if(_avutil_license)
+        break()
+      endif()
+    endforeach()
+    if(_avutil_license)
+      string(REGEX REPLACE "^.*libavutil license: " "" _avutil_license "${_avutil_license}")
+      string(REPLACE "version " "" TSSM_FFMPEG_LICENSE "${_avutil_license}")
+    else()
+      message(WARNING "Could not read which license this FFmpeg was built under (no libavutil "
+                      "license string found); the About tab says ${TSSM_FFMPEG_LICENSE}.")
+    endif()
+    if(NOT TSSM_FFMPEG_LICENSE MATCHES "^LGPL")
+      message(WARNING
+              "This FFmpeg (${FFMPEG_INCLUDE_DIR}) is licensed ${TSSM_FFMPEG_LICENSE}, not LGPL "
+              "(MSYS2's FFmpeg package is GPL). A tssm.exe built with it is for your own use: handing it "
+              "out would put the whole program under that license's terms. "
+              "tools/mingw/build_ffmpeg.sh builds an LGPL FFmpeg that links into tssm.exe.")
+    endif()
+  endif()
 else()
   set(FMV_SOURCES ${PC_DIR}/iFMVDecoderNull.cpp)
   set(FMV_LIBRARIES)
@@ -273,8 +347,11 @@ else()
 endif()
 
 # --- SDL3 --------------------------------------------------------------------------
-# auto: an installed SDL3 if one links, third_party/SDL otherwise.
-if(ANDROID)
+# auto: an installed SDL3 if one links, third_party/SDL otherwise. MinGW
+# defaults to third_party/SDL: MSYS2's SDL3 is a DLL that needs MSYS2's own
+# DLLs beside it, a different version from the pinned one, and has no
+# TSSM_TEST_AUDIO_RESTART hooks (below); the vendored one links into tssm.exe.
+if(ANDROID OR MINGW)
   set(TSSM_SDL_DEFAULT "vendored")
 elseif(TSSM_SWITCH)
   # devkitPro's switch-sdl-3.4 fork, built by tools/switch/build_sdl.sh into a
@@ -345,6 +422,14 @@ if(TSSM_NEEDS_SDL)
     set(SDL_POWER OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
     target_compile_options(SDL3-static PRIVATE ${TSSM_NO_WARNINGS})
+    # SDL's configure finds itoa, which the Microsoft C runtime only has under
+    # its old name, in oldnames.lib. Clang's driver adds that library by
+    # default, but CMake's -nostdlib link for this ABI does not, so an
+    # executable whose other objects do not happen to pull it in fails to link
+    # once SDL is rebuilt (tssm_sndtest).
+    if(WIN32 AND NOT MINGW)
+      target_link_libraries(SDL3-static INTERFACE oldnames)
+    endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_target_properties(SDL3-static PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
     endif()
@@ -410,16 +495,32 @@ if(TSSM_LIBRW_PATCHES)
   # Bounded at third_party/, git sees either librw's own checkout or none.
   set(_librw_ceiling "$ENV{GIT_CEILING_DIRECTORIES}")
   set(ENV{GIT_CEILING_DIRECTORIES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+  # Line endings, whichever git this is. The patches are LF (.gitattributes),
+  # and git apply reads the files as LF only when core.autocrlf says so. Git
+  # for Windows sets it to true and checks out CRLF; MSYS2's, Linux's and
+  # macOS's gits leave it unset, and then no patch applies to a CRLF checkout,
+  # and matfx_uvtransform.patch to none (librw stores
+  # src/d3d/shaders/make_shaders.cmd with CRLF). true for a CRLF checkout and
+  # input for an LF one both read the files as LF, and each writes the patched
+  # files back with the checkout's own line endings.
+  # (In hex: a plain file(READ) on Windows turns CRLF into LF.)
+  file(READ ${_librw_dir}/CMakeLists.txt _librw_probe LIMIT 4096 HEX)
+  string(REGEX MATCH "^(..)*0d0a" _librw_crlf "${_librw_probe}")
+  if(NOT _librw_crlf)
+    set(_librw_git ${GIT_EXECUTABLE} -c core.autocrlf=input)
+  else()
+    set(_librw_git ${GIT_EXECUTABLE} -c core.autocrlf=true)
+  endif()
   foreach(_patch IN LISTS _librw_patches)
     get_filename_component(_name ${_patch} NAME)
-    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${_patch}
+    execute_process(COMMAND ${_librw_git} apply --reverse --check ${_patch}
                     WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
     if(NOT _rc EQUAL 0)
-      execute_process(COMMAND ${GIT_EXECUTABLE} apply ${_patch}
+      execute_process(COMMAND ${_librw_git} apply ${_patch}
                       WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc ERROR_VARIABLE _err)
       # Check it took.
       if(_rc EQUAL 0)
-        execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${_patch}
+        execute_process(COMMAND ${_librw_git} apply --reverse --check ${_patch}
                         WORKING_DIRECTORY ${_librw_dir} RESULT_VARIABLE _rc ERROR_VARIABLE _err)
       endif()
       if(NOT _rc EQUAL 0)
@@ -525,6 +626,54 @@ target_link_libraries(tssm_rw PUBLIC librw ${WINDOW_LIBS})
 target_compile_options(tssm_rw PRIVATE ${TSSM_NO_WARNINGS})
 # TSSM_TEST_HANG_DUMP's heartbeat (iHangDump.h; the dump is in tssm_main.cpp).
 target_sources(tssm_rw PRIVATE ${PC_DIR}/iHangDump.cpp)
+# The loading screen's pump and its frame flag (iLoadFrame.h; drawn by iAsync.cpp).
+target_sources(tssm_rw PRIVATE ${PC_DIR}/iLoadFrame.cpp)
+# The Xbox water's tiles and strips (iXboxWaterGrid.h), for rw/xboxwater.cpp and the
+# game half alike.
+target_sources(tssm_rw PRIVATE ${PC_DIR}/iXboxWaterGrid.cpp)
+
+# --- the program's name and version ------------------------------------------------
+# TSSM_PC_TITLE is what the program calls itself: the launcher's and the
+# game's window titles, the launcher's heading, the overlay's title, the About
+# tab's heading, every message box's caption, the first line of config.ini and
+# of the save tools' help, and the name in tssm.exe's version information
+# (Explorer's Properties, Task Manager, the volume mixer; with TSSM_PC_VERSION).
+# The game's own screens come from the player's game files and are not
+# touched. TSSM_VERSION_LINE is the About tab's version line. The TSSM
+# Dehydrated release sets all three (src/SB/Core/pc/README.md, "Building the
+# TSSM Dehydrated release").
+set(TSSM_PC_TITLE "The SpongeBob SquarePants Movie Video Game" CACHE STRING
+  "The program's name: window titles, the launcher, the overlay, message boxes, tssm.exe's version information")
+set(TSSM_PC_VERSION "0.9.5" CACHE STRING
+  "The version in tssm.exe's version information: up to four numbers, such as 0.9.1")
+set(TSSM_VERSION_LINE "" CACHE STRING
+  "The About tab's version line; empty: the branch and git describe")
+if(TSSM_PC_TITLE STREQUAL "" OR TSSM_PC_TITLE MATCHES "[\"\\\\%]")
+  message(FATAL_ERROR "TSSM_PC_TITLE is \"${TSSM_PC_TITLE}\": give a name without double quotes, "
+    "backslashes or percent signs.")
+endif()
+if(NOT TSSM_PC_VERSION MATCHES "^[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?(\\.[0-9]+)?$")
+  message(FATAL_ERROR "TSSM_PC_VERSION is \"${TSSM_PC_VERSION}\": give up to four numbers, such as 0.9.1.")
+endif()
+if(TSSM_VERSION_LINE MATCHES "[\"\\\\]")
+  message(FATAL_ERROR "TSSM_VERSION_LINE has a double quote or a backslash.")
+endif()
+message(STATUS "Program name: \"${TSSM_PC_TITLE}\", version ${TSSM_PC_VERSION}")
+
+# What this build is (src/SB/Core/pc/iBuildInfo.h): its time, version and git
+# commit, written by tools/build_info.cmake on every build, so crash.log's and
+# last_run.log's "built" stamp and the About tab name the build they are in.
+find_package(Git QUIET)
+set(TSSM_BUILD_INFO_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/iBuildInfo.cpp)
+add_custom_target(tssm_buildinfo_stamp
+  COMMAND ${CMAKE_COMMAND} "-DOUT=${TSSM_BUILD_INFO_SOURCE}" "-DSRC=${CMAKE_CURRENT_SOURCE_DIR}"
+          "-DVERSION=${TSSM_PC_VERSION}" "-DGIT=${GIT_EXECUTABLE}"
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_info.cmake
+  BYPRODUCTS ${TSSM_BUILD_INFO_SOURCE}
+  VERBATIM)
+add_library(tssm_buildinfo STATIC ${TSSM_BUILD_INFO_SOURCE})
+add_dependencies(tssm_buildinfo tssm_buildinfo_stamp)
+target_include_directories(tssm_buildinfo PRIVATE ${PC_DIR})
 
 # --- Dear ImGui and the GUI -----------------------------------------------------------
 # third_party/imgui is Dear ImGui (MIT), pinned to a release tag. One library
@@ -583,6 +732,7 @@ if(TSSM_GUI)
 
   set(GUI_SOURCES
     ${PC_DIR}/gui/iGui.cpp
+    ${PC_DIR}/gui/iGuiCheats.cpp
     ${PC_DIR}/gui/iGuiControls.cpp
     ${PC_DIR}/gui/iGuiFilePicker.cpp
     ${PC_DIR}/gui/iGuiLauncher.cpp
@@ -598,8 +748,6 @@ if(TSSM_GUI)
   # The About tab's version line: TSSM_VERSION_LINE when given (a release
   # build's version), else the branch and `git describe` at configure time
   # (re-run CMake for a newer one).
-  set(TSSM_VERSION_LINE "" CACHE STRING
-    "The About tab's version line; empty: the branch and git describe")
   if(TSSM_VERSION_LINE)
     set(TSSM_GUI_VERSION "${TSSM_VERSION_LINE}")
   else()
@@ -636,9 +784,9 @@ if(TSSM_GUI)
     string(APPEND _notice_text "  { \"${name}\", \"${license}\", \"${what}\", \"${url}\",\n    R\"tssm_notice(${_body})tssm_notice\" },\n")
   endmacro()
   if(TSSM_SWITCH)
-    set(_tssm_self "The SpongeBob SquarePants Movie (port)")
+    set(_tssm_self "${TSSM_PC_TITLE} (port)")
   else()
-    set(_tssm_self "The SpongeBob SquarePants Movie PC port")
+    set(_tssm_self "${TSSM_PC_TITLE}, PC port")
   endif()
   tssm_gui_notice("${_tssm_self}" "CC0 1.0" "This program's own code."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
@@ -648,15 +796,62 @@ if(TSSM_GUI)
                   "https://libsdl.org" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt")
   tssm_gui_notice("librw" "MIT" "The RenderWare graphics layer the game draws through."
                   "" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/LICENSE")
+  # A notice whose license file is not on this machine (MSYS2's FFmpeg package
+  # installs none; a Linux cross toolchain keeps the MinGW-w64 ones elsewhere)
+  # gets a short text saying where the license is, not the path looked in.
+  macro(tssm_gui_notice_text var name)
+    set(${var} ${CMAKE_CURRENT_BINARY_DIR}/gui/notice-${name}.txt)
+    string(CONCAT _notice_body ${ARGN})
+    file(WRITE ${${var}}.tmp "${_notice_body}")
+    configure_file(${${var}}.tmp ${${var}} COPYONLY)
+  endmacro()
+  set(_ffmpeg_notice "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  if(MINGW AND FMV_INCLUDES AND NOT EXISTS "${_ffmpeg_notice}")
+    tssm_gui_notice_text(_ffmpeg_notice ffmpeg
+      "This build of FFmpeg is licensed under the ${TSSM_FFMPEG_LICENSE} (no license file was "
+      "installed with it). FFmpeg's license texts and source: https://ffmpeg.org/legal.html\n")
+  endif()
   if(FMV_INCLUDES AND TSSM_SWITCH)
     # A .nro is one static image; the program's whole source is public, so it
     # can be rebuilt with another FFmpeg (docs/SWITCH.md).
     tssm_gui_notice("FFmpeg" "LGPL 2.1 or later"
                     "Movie decoding. Copyright (c) 2000-2026 the FFmpeg developers. Linked statically into tssm.nro, built by tools/switch/build_ffmpeg.sh from the source at ffmpeg.org."
                     "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+  elseif(FMV_INCLUDES AND TSSM_FFMPEG_STATIC)
+    tssm_gui_notice("FFmpeg" "${TSSM_FFMPEG_LICENSE}" "Movie decoding. Linked statically; its source is at ffmpeg.org."
+                    "https://ffmpeg.org" "${_ffmpeg_notice}")
   elseif(FMV_INCLUDES)
-    tssm_gui_notice("FFmpeg" "LGPL 2.1 or later" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
-                    "https://ffmpeg.org" "${FFMPEG_INCLUDE_DIR}/../share/ffmpeg/copyright")
+    tssm_gui_notice("FFmpeg" "${TSSM_FFMPEG_LICENSE}" "Movie decoding. Linked dynamically; its source is at ffmpeg.org."
+                    "https://ffmpeg.org" "${_ffmpeg_notice}")
+  endif()
+  if(MINGW)
+    # -static links in two parts of the MinGW-w64 runtime whose licenses ask
+    # for their notices in binary copies: winpthreads (GCC's threads: std::mutex,
+    # std::thread) and the CRT's startup and support code. libgcc and libstdc++
+    # are under GCC's runtime library exception, which asks for none.
+    get_filename_component(_mingw_prefix "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_mingw_prefix "${_mingw_prefix}/.." ABSOLUTE)
+    set(_winpthreads_notice "${_mingw_prefix}/share/licenses/winpthreads/COPYING")
+    set(_mingw_crt_notice "${_mingw_prefix}/share/licenses/crt/COPYING.MinGW-w64-runtime.txt")
+    if(NOT EXISTS "${_winpthreads_notice}" OR NOT EXISTS "${_mingw_crt_notice}")
+      message(WARNING "The MinGW-w64 runtime's license files are not under ${_mingw_prefix}/share/licenses "
+                      "(MSYS2 has them there); the About tab names those licenses without their text.")
+    endif()
+    if(NOT EXISTS "${_winpthreads_notice}")
+      tssm_gui_notice_text(_winpthreads_notice winpthreads
+        "winpthreads is part of the MinGW-w64 project and under the MIT license; its text is in "
+        "mingw-w64-libraries/winpthreads/COPYING of the MinGW-w64 source (https://www.mingw-w64.org).\n")
+    endif()
+    if(NOT EXISTS "${_mingw_crt_notice}")
+      tssm_gui_notice_text(_mingw_crt_notice mingw-crt
+        "The MinGW-w64 runtime's licenses (the Zope Public License 2.1 and others) are in "
+        "COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt of the MinGW-w64 source "
+        "(https://www.mingw-w64.org).\n")
+    endif()
+    tssm_gui_notice("MinGW-w64 winpthreads" "MIT" "Threads for the GCC runtime. Linked statically."
+                    "https://www.mingw-w64.org" "${_winpthreads_notice}")
+    tssm_gui_notice("MinGW-w64 runtime" "ZPL 2.1 and others" "The C runtime's startup and support code. Linked statically."
+                    "https://www.mingw-w64.org" "${_mingw_crt_notice}")
   endif()
   if(TSSM_SWITCH)
     # The Switch's system libraries, linked statically into the .nro. devkitPro
@@ -720,15 +915,37 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iSaveCLI.cpp
   ${PC_DIR}/iSaveFormat.cpp
   ${PC_DIR}/iSaveStore.cpp
-  # The load screen's "no saves" message, made to name the slot (game only:
-  # it rewrites a loaded TEXT asset).
+  # The other consoles' saves: the little-endian payload the PlayStation 2 and
+  # Xbox share, the Xbox's save folders and their signature, and the
+  # PlayStation 2's folder in a .psu, a memory card image or PCSX2's folder
+  # card (docs/SAVES.md sections 6 to 8), and a PlayStation 3's .psv with its
+  # signature (AES-128 for that).
+  ${PC_DIR}/iSaveAES.cpp
+  ${PC_DIR}/iSaveLE.cpp
+  ${PC_DIR}/iSaveSHA1.cpp
+  ${PC_DIR}/iSavePS2.cpp
+  ${PC_DIR}/iSaveStorePS2.cpp
+  ${PC_DIR}/iSaveStoreXbox.cpp
+  ${PC_DIR}/iSaveXbox.cpp
+  # The load screen's "no saves" message, made to name the slot, and the save
+  # screens' warning as a setting ([game] save_text): game only, it rewrites
+  # loaded TEXT assets. The table of lines and words is on its own, for
+  # tssm_savetexttest.
   ${PC_DIR}/iSaveText.cpp
+  ${PC_DIR}/iSaveTextTable.cpp
   ${PC_DIR}/iSaveZip.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
+  # The GameCube release's sound tables and DSP-ADPCM (iSndGC.h).
+  ${PC_DIR}/iSndDsp.cpp
+  ${PC_DIR}/iSndGC.cpp
   ${PC_DIR}/iSndXbox.cpp
   ${PC_DIR}/iSystem.cpp
   ${PC_DIR}/iTime.cpp
+  # The Xbox release's features beside the GameCube's ([extras], iExtras.h).
+  ${PC_DIR}/iExtras.cpp
+  # The Cheats tab's tables and the port's own cheats ([cheats], iCheats.h).
+  ${PC_DIR}/iCheats.cpp
 
   # The host layer under them (treedome).
   ${PC_DIR}/iBoot.cpp
@@ -762,6 +979,11 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iModPackage.cpp
   ${PC_DIR}/iModTexture.cpp
 
+  # GameCube packages: which console wrote a package (iGCPackage.h), and the
+  # per-type byte swaps into the Xbox layout (iGCSwap.h, tools/gcswap).
+  ${PC_DIR}/iGCPackage.cpp
+  ${PC_DIR}/iGCSwap.cpp
+
   ${TSSM_STUB_SOURCES}
 
   ${INPUT_SOURCES}
@@ -775,6 +997,8 @@ add_library(tssm_platform STATIC
 target_include_directories(tssm_platform PUBLIC ${TSSM_INCLUDES})
 target_link_libraries(tssm_platform PUBLIC tssm_rw ${INPUT_LIBS} ${AUDIO_LIBS})
 target_link_libraries(tssm_platform PRIVATE ${FMV_LIBRARIES})
+# The About tab's build stamp (iBuildInfo.h).
+target_link_libraries(tssm_platform PRIVATE tssm_buildinfo)
 if(TSSM_GUI)
   target_link_libraries(tssm_platform PRIVATE tssm_imgui)
   target_include_directories(tssm_platform PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gui)
@@ -786,6 +1010,8 @@ endif()
 if(FMV_DEFINES)
   target_compile_definitions(tssm_platform PRIVATE ${FMV_DEFINES})
 endif()
+# The program's name (TSSM_PC_TITLE, above), as iHost.h's TSSM_GAME_TITLE.
+target_compile_definitions(tssm_platform PRIVATE "TSSM_GAME_TITLE=\"${TSSM_PC_TITLE}\"")
 if(ANDROID)
   target_link_libraries(tssm_platform PUBLIC log)
 endif()
@@ -815,6 +1041,16 @@ set(TSSM_GAME_OPTIONS
 set_source_files_properties(${PC_DIR}/iWad.cpp ${PC_DIR}/common.cpp PROPERTIES
   COMPILE_OPTIONS "${TSSM_GAME_OPTIONS}"
   COMPILE_DEFINITIONS "NON_MATCHING")
+
+# The sound decoders (Xbox ADPCM, GameCube DSP-ADPCM) optimised in a Debug build
+# too. They run on the game thread when a sound or a stream starts -- a stream
+# decodes its first seconds at once -- and unoptimised that was 7 to 22 ms in one
+# frame, a visible hitch at 120 fps (docs/PACING.md). Integer code: the samples
+# are the same either way.
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  set_property(SOURCE ${PC_DIR}/iSndXbox.cpp ${PC_DIR}/iSndDsp.cpp APPEND PROPERTY
+    COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+endif()
 # The widening reads the game's asset structs, so it sees them as the game
 # code does: the game's flags and its prefix header.
 set_source_files_properties(${PC_DIR}/iAssetWiden.cpp ${PC_DIR}/iAssetHooks.cpp PROPERTIES
@@ -846,14 +1082,35 @@ list(LENGTH TSSM_GC_UNITS _n_gc)
 message(STATUS "tssm: ${_n_game} game units from configure.py (+ ${_n_gc} gc units, replaced by src/SB/Core/pc)")
 
 add_library(tssm_game STATIC ${TSSM_GAME_SOURCES}
-  # Port-only, but it calls game code, so it is compiled as a game unit: the
-  # debug events of unattended runs (iTestEvents.h).
-  ${PC_DIR}/iTestEvents.cpp)
+  # Port-only, but they call game code, so they are compiled as game units: the
+  # debug events of unattended runs (iTestEvents.h), the mouse's camera orbit
+  # (iCameraOrbit.h) and its pointer in the game's menus (iMenuMouse.h).
+  ${PC_DIR}/iTestEvents.cpp ${PC_DIR}/iCameraOrbit.cpp ${PC_DIR}/iMenuMouse.cpp)
 target_link_libraries(tssm_game PUBLIC tssm_platform tssm_rw)
+# The platform layer calls back into this library too: iCapture.cpp calls
+# iTestEventsFrame and iTestSendFrame, which are game units. lld and link.exe
+# find a symbol in any archive on the line; GNU ld (MinGW, Linux) reads each
+# archive once, in order. Declaring the cycle makes CMake repeat the two.
+target_link_libraries(tssm_platform INTERFACE tssm_game)
 target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
 # unit too, for the same reason.
 target_sources(tssm_game PRIVATE ${PC_DIR}/iTestSend.cpp)
+# The HUD at the screen's real edges (iHudAnchor.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iHudAnchor.cpp)
+# The Xbox release's water (iXboxWater.h): a game unit too. Its arithmetic
+# (iXboxWaterGrid.h, no game code) is in tssm_rw with the surface draw that uses it
+# (rw/xboxwater.cpp). Without it, the Xbox files' water bodies look as the GameCube
+# files' water does (iWaterBody.h), a game unit as well.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iXboxWater.cpp ${PC_DIR}/iXboxWaterPass.cpp
+  ${PC_DIR}/iWaterBody.cpp)
+# The Xbox extras from a level's GameCube files (iExtrasGC.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iExtrasGC.cpp)
+# The Cheats tab's game side (iCheats.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iCheatsGame.cpp)
+# The Sonic Wave Guitar's screen distortion (iXboxDistort.h): the amount and the
+# swirl map's lookup, a game unit; the pass is rw/xboxdistort.cpp in tssm_rw.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iXboxDistort.cpp)
 # SBPrefix.h is the console's precompiled prefix (-prefix SBPrefix.mch): every
 # game unit sees it first.
 target_compile_options(tssm_game PRIVATE ${TSSM_NO_WARNINGS} ${TSSM_GAME_OPTIONS}
@@ -893,7 +1150,7 @@ else()
   add_executable(tssm ${TSSM_EXE_SOURCES})
   set(TSSM_GAME_TARGET tssm)
 endif()
-target_link_libraries(${TSSM_GAME_TARGET} PRIVATE tssm_game tssm_platform tssm_rw)
+target_link_libraries(${TSSM_GAME_TARGET} PRIVATE tssm_game tssm_platform tssm_rw tssm_buildinfo)
 if(TSSM_SWITCH)
   # The platform layer calls back into the game library (iCapture ->
   # iTestEvents), and GNU ld reads each archive once, in order. Declaring the
@@ -923,47 +1180,143 @@ if(WIN32)
   endif()
 
   # FFmpeg's and SDL's DLLs beside the executable.
-  if(FMV_INCLUDES)
-    file(GLOB FMV_RUNTIME_DLLS "${FFMPEG_INCLUDE_DIR}/../bin/*.dll")
-    if(FMV_RUNTIME_DLLS)
-      add_custom_command(TARGET tssm POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FMV_RUNTIME_DLLS} $<TARGET_FILE_DIR:tssm>
-        COMMENT "Staging the movie decoder's DLLs")
+  if(MINGW)
+    # Under MinGW those come from a folder of every package's DLLs (MSYS2's
+    # /mingw64/bin), so only the ones tssm.exe imports, directly or through
+    # another DLL, are copied (tools/mingw/stage_dlls.cmake). -static above
+    # already links in the GCC runtime; a static FFmpeg and the vendored SDL
+    # need nothing.
+    set(_tssm_dll_dirs)
+    if(FMV_INCLUDES AND NOT TSSM_FFMPEG_STATIC)
+      get_filename_component(_ffmpeg_bin "${FFMPEG_INCLUDE_DIR}/../bin" ABSOLUTE)
+      list(APPEND _tssm_dll_dirs "${_ffmpeg_bin}")
     endif()
-  endif()
-  if(TSSM_SDL_RUNTIME_DLL)
-    add_custom_command(TARGET tssm POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TSSM_SDL_RUNTIME_DLL} $<TARGET_FILE_DIR:tssm>
-      COMMENT "Staging SDL")
+    if(TSSM_SDL_RUNTIME_DLL)
+      list(APPEND _tssm_dll_dirs "$<TARGET_FILE_DIR:${_sdl_aliased}>")
+    endif()
+    if(_tssm_dll_dirs)
+      string(REPLACE ";" "|" _tssm_dll_dirs "${_tssm_dll_dirs}")
+      add_custom_command(TARGET tssm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} "-DEXE=$<TARGET_FILE:tssm>" "-DDIRS=${_tssm_dll_dirs}"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}" -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/mingw/stage_dlls.cmake
+        COMMENT "Staging the DLLs tssm.exe imports"
+        VERBATIM)
+    endif()
+  else()
+    if(FMV_INCLUDES)
+      file(GLOB FMV_RUNTIME_DLLS "${FFMPEG_INCLUDE_DIR}/../bin/*.dll")
+      if(FMV_RUNTIME_DLLS)
+        add_custom_command(TARGET tssm POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FMV_RUNTIME_DLLS} $<TARGET_FILE_DIR:tssm>
+          COMMENT "Staging the movie decoder's DLLs")
+      endif()
+    endif()
+    if(TSSM_SDL_RUNTIME_DLL)
+      add_custom_command(TARGET tssm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TSSM_SDL_RUNTIME_DLL} $<TARGET_FILE_DIR:tssm>
+        COMMENT "Staging SDL")
+    endif()
   endif()
 endif()
 
+# --- tssm.exe's version information ----------------------------------------------
+# The name and version Windows shows for tssm.exe (Explorer's Properties,
+# Task Manager, the volume mixer): TSSM_PC_TITLE and TSSM_PC_VERSION, above.
+# The resource script is written into the build directory.
+if(WIN32 AND NOT ANDROID)
+  enable_language(RC)
+  string(REPLACE "." ";" _tssm_version_numbers "${TSSM_PC_VERSION}")
+  list(LENGTH _tssm_version_numbers _tssm_version_count)
+  while(_tssm_version_count LESS 4)
+    list(APPEND _tssm_version_numbers 0)
+    list(LENGTH _tssm_version_numbers _tssm_version_count)
+  endwhile()
+  string(REPLACE ";" "," _tssm_version_numbers "${_tssm_version_numbers}")
+  set(TSSM_VERSION_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_version")
+  file(GENERATE OUTPUT "${TSSM_VERSION_BUILD}/tssm_version.rc" CONTENT
+"1 VERSIONINFO
+FILEVERSION ${_tssm_version_numbers}
+PRODUCTVERSION ${_tssm_version_numbers}
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0x0
+FILEOS 0x40004
+FILETYPE 0x1
+FILESUBTYPE 0x0
+BEGIN
+  BLOCK \"StringFileInfo\"
+  BEGIN
+    BLOCK \"040904B0\"
+    BEGIN
+      VALUE \"FileDescription\", \"${TSSM_PC_TITLE}\"
+      VALUE \"FileVersion\", \"${TSSM_PC_VERSION}\"
+      VALUE \"InternalName\", \"tssm\"
+      VALUE \"OriginalFilename\", \"tssm.exe\"
+      VALUE \"ProductName\", \"${TSSM_PC_TITLE}\"
+      VALUE \"ProductVersion\", \"${TSSM_PC_VERSION}\"
+    END
+  END
+  BLOCK \"VarFileInfo\"
+  BEGIN
+    VALUE \"Translation\", 0x409, 1200
+  END
+END
+")
+  target_sources(tssm PRIVATE "${TSSM_VERSION_BUILD}/tssm_version.rc")
+  set_source_files_properties("${TSSM_VERSION_BUILD}/tssm_version.rc" PROPERTIES GENERATED ON)
+endif()
+
 # --- the app icon ----------------------------------------------------------------
-# The repository carries no icon art. TSSM_ICON_DIR names a folder that
-# tools/make_icons.ps1 made from a picture, outside the repository
-# (docs/ICON.md). On Windows, tssm.exe then carries its tssm.ico. SDL registers
-# its window class with the executable's first icon, so the game's window and
-# the launcher's use it too (title bar, taskbar, Alt+Tab), at the size the
-# display's DPI asks for. Left empty, nothing changes: no icon resource.
+# By default the sponge block drawn for the port, the release builds' icon:
+# dist/pc/default_icon.ico and default_icon-64.png, which tools/make_icons.ps1
+# made from dist/switch/default_icon.jpg (docs/ICON.md). TSSM_ICON_DIR names a
+# folder of your own that tools/make_icons.ps1 made from a picture, outside
+# the repository, and wins. The icon goes to two places:
+#  * Windows: tssm.exe carries the .ico as its first icon resource, which
+#    Explorer shows, and iWindowSetIcon sends each window its sizes for the
+#    title bar, the taskbar and Alt+Tab.
+#  * Every SDL window, on every platform: the 64-pixel PNG is compiled in
+#    (tssm_window_icon.inc) and set with SDL_SetWindowIcon, on the launcher's
+#    window and the game's.
 set(TSSM_ICON_DIR "" CACHE PATH
-  "Folder made by tools/make_icons.ps1 (docs/ICON.md); empty keeps the default icon")
-if(TSSM_ICON_DIR AND WIN32 AND NOT ANDROID)
-  if(NOT EXISTS "${TSSM_ICON_DIR}/tssm.ico")
+  "Folder made by tools/make_icons.ps1 (docs/ICON.md); empty uses the sponge block in dist/pc")
+if(TSSM_ICON_DIR)
+  if(WIN32 AND NOT ANDROID AND NOT EXISTS "${TSSM_ICON_DIR}/tssm.ico")
     message(FATAL_ERROR "TSSM_ICON_DIR is ${TSSM_ICON_DIR}, which has no tssm.ico. "
       "Make the folder with tools/make_icons.ps1 (docs/ICON.md).")
   endif()
+  set(TSSM_ICON_ICO "${TSSM_ICON_DIR}/tssm.ico")
+  set(TSSM_ICON_PNG "${TSSM_ICON_DIR}/icon-64.png")
+  message(STATUS "App icon: ${TSSM_ICON_DIR}")
+else()
+  set(TSSM_ICON_ICO "${CMAKE_CURRENT_SOURCE_DIR}/dist/pc/default_icon.ico")
+  set(TSSM_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/dist/pc/default_icon-64.png")
+  message(STATUS "App icon: the default (dist/pc)")
+endif()
+set(TSSM_ICON_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_icon")
+if(WIN32 AND NOT ANDROID)
   enable_language(RC)
   # Copied into the build directory (a changed icon reconfigures), and the
   # resource script is written there too: neither enters the source tree.
-  set(TSSM_ICON_BUILD "${CMAKE_CURRENT_BINARY_DIR}/tssm_icon")
-  configure_file("${TSSM_ICON_DIR}/tssm.ico" "${TSSM_ICON_BUILD}/tssm.ico" COPYONLY)
+  configure_file("${TSSM_ICON_ICO}" "${TSSM_ICON_BUILD}/tssm.ico" COPYONLY)
   file(GENERATE OUTPUT "${TSSM_ICON_BUILD}/tssm_icon.rc"
     CONTENT "1 ICON \"${TSSM_ICON_BUILD}/tssm.ico\"\n")
   target_sources(tssm PRIVATE "${TSSM_ICON_BUILD}/tssm_icon.rc")
   set_source_files_properties("${TSSM_ICON_BUILD}/tssm_icon.rc" PROPERTIES
     GENERATED ON OBJECT_DEPENDS "${TSSM_ICON_BUILD}/tssm.ico")
-  message(STATUS "App icon: ${TSSM_ICON_DIR}/tssm.ico")
 endif()
+# The window icon's PNG as bytes. A folder of your own without icon-64.png
+# gives the windows none of their own (on Windows they still get the .ico).
+set(_tssm_icon_bytes "")
+if(EXISTS "${TSSM_ICON_PNG}")
+  file(READ "${TSSM_ICON_PNG}" _tssm_icon_hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _tssm_icon_bytes "${_tssm_icon_hex}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TSSM_ICON_PNG}")
+endif()
+file(GENERATE OUTPUT "${TSSM_ICON_BUILD}/tssm_window_icon.inc" CONTENT
+  "// Generated by CMakeLists.txt (\"the app icon\") from ${TSSM_ICON_PNG}.\n\
+static const unsigned char kWindowIconPng[] = { ${_tssm_icon_bytes} 0 };\n\
+static const unsigned kWindowIconPngSize = (unsigned)sizeof(kWindowIconPng) - 1;\n")
+target_include_directories(tssm_rw PRIVATE "${TSSM_ICON_BUILD}")
 
 # --- the Switch package -------------------------------------------------------------
 # tssm.elf -> tssm.nro: the executable, the NACP (the name and version hbmenu
@@ -1029,7 +1382,7 @@ if(TSSM_SWITCH)
   set(TSSM_SWITCH_NAME "The SpongeBob SquarePants Movie Video Game" CACHE STRING
     "The name the Switch's NACP shows")
   set(TSSM_SWITCH_AUTHOR "TSSM port" CACHE STRING "The author the Switch's NACP shows")
-  set(TSSM_SWITCH_VERSION "0.9.2" CACHE STRING "The version the Switch's NACP shows")
+  set(TSSM_SWITCH_VERSION "0.9.5" CACHE STRING "The version the Switch's NACP shows")
   message(STATUS "Switch: NACP \"${TSSM_SWITCH_NAME}\", \"${TSSM_SWITCH_AUTHOR}\", ${TSSM_SWITCH_VERSION}")
   nx_generate_nacp(tssm.nacp NAME "${TSSM_SWITCH_NAME}" AUTHOR "${TSSM_SWITCH_AUTHOR}"
                    VERSION "${TSSM_SWITCH_VERSION}")
@@ -1087,7 +1440,7 @@ option(TSSM_BUILD_TESTS "Build the platform layer's unit tests" ${_tssm_tests_de
 # tssm_input_test drives SDL's virtual controllers and a stand-in keyboard
 # through the game's own xPadUpdate (src/SB/Core/x/xPad.cpp, compiled in with
 # the game's flags) and checks what the game sees. No game data, no window.
-#   build-*/tssm_input_test [scratch folder]
+#   build-*/tssm_input_test [scratch folder]      (or `ctest -R input`)
 if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND TSSM_INPUT_BACKEND STREQUAL "sdl")
   # gui/iGuiNull.cpp stands in for the overlay: iPad.cpp asks it for the input
   # filter, and the real one would bring the GUI's RenderWare self-test (and
@@ -1102,6 +1455,9 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND TSSM_INPUT_BACKEND STREQUAL "sdl")
   if(WIN32)
     target_link_libraries(tssm_input_test PRIVATE user32 gdi32 ole32 dbghelp)
   endif()
+  enable_testing()
+  add_test(NAME tssm_input_test
+           COMMAND tssm_input_test ${CMAKE_CURRENT_BINARY_DIR}/tssm_input_test_run)
 endif()
 
 # --- save_selftest ---------------------------------------------------------------
@@ -1134,7 +1490,14 @@ if(TSSM_HOST_TOOLS)
     ${PC_DIR}/isavegame.cpp
     ${PC_DIR}/iSaveCLI.cpp
     ${PC_DIR}/iSaveFormat.cpp
+    ${PC_DIR}/iSaveAES.cpp
+    ${PC_DIR}/iSaveLE.cpp
+    ${PC_DIR}/iSaveSHA1.cpp
     ${PC_DIR}/iSaveStore.cpp
+    ${PC_DIR}/iSavePS2.cpp
+    ${PC_DIR}/iSaveStorePS2.cpp
+    ${PC_DIR}/iSaveStoreXbox.cpp
+    ${PC_DIR}/iSaveXbox.cpp
     ${PC_DIR}/iSaveZip.cpp
     ${HOST_SOURCES}
     $<TARGET_OBJECTS:save_selftest_game>
@@ -1149,6 +1512,64 @@ if(TSSM_HOST_TOOLS)
   endif()
   add_test(NAME save_selftest
            COMMAND save_selftest ${CMAKE_CURRENT_BINARY_DIR}/save_selftest_run)
+endif()
+
+# --- xsave_selftest ----------------------------------------------------------------
+# The other consoles' saves (docs/SAVES.md sections 6 to 8), without the game:
+# SHA-1 and HMAC known answers, the Xbox folder names, the signature with a
+# made-up keys file against an independent computation, the little-endian
+# conversion against a reference encoder on made-up saves and packages, and
+# Xbox export and import through the store and the command line. Everything it
+# reads is made in the test; with the Xbox and GameCube folders
+# (TSSM_TEST_ASSETS, TSSM_TEST_GC_ASSETS) it also reads the player's own XBE
+# and packages, and with a folder of real saves (TSSM_TEST_SAVES) converts
+# each there and back. The PlayStation 2 side is in it too: the card's
+# error-correcting code, .psu files and a card image formatted by the test;
+# with a PlayStation 2 disc's files (TSSM_TEST_PS2_ASSETS) the game's icon is
+# found in its PLAT.HIP. And the PlayStation 3's: AES-128, the .psv's layout
+# and its two signatures with made-up key files, .VM2 cards, and a real .psv
+# among the saves written again byte for byte but for its signature.
+#   build-*/xsave_selftest <scratch folder> [<Xbox files> [<GameCube files> [<saves>
+#                          [<PlayStation 2 files>]]]]
+if(TSSM_HOST_TOOLS)
+  add_executable(xsave_selftest
+    ${PC_DIR}/tests/xsave_selftest.cpp
+    ${PC_DIR}/iSaveCLI.cpp
+    ${PC_DIR}/iSaveFormat.cpp
+    ${PC_DIR}/iSaveAES.cpp
+    ${PC_DIR}/iSaveLE.cpp
+    ${PC_DIR}/iSaveSHA1.cpp
+    ${PC_DIR}/iSaveStore.cpp
+    ${PC_DIR}/iSavePS2.cpp
+    ${PC_DIR}/iSaveStorePS2.cpp
+    ${PC_DIR}/iSaveStoreXbox.cpp
+    ${PC_DIR}/iSaveXbox.cpp
+    ${PC_DIR}/iSaveZip.cpp
+    ${HOST_SOURCES}
+  )
+  target_include_directories(xsave_selftest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(xsave_selftest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(xsave_selftest PRIVATE dbghelp)
+  elseif(NOT ANDROID)
+    find_package(Threads REQUIRED)
+    target_link_libraries(xsave_selftest PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  endif()
+  enable_testing()
+  add_test(NAME xsave_selftest
+           COMMAND xsave_selftest ${CMAKE_CURRENT_BINARY_DIR}/xsave_selftest_run
+                   "${TSSM_TEST_ASSETS}" "${TSSM_TEST_GC_ASSETS}" "${TSSM_TEST_SAVES}"
+                   "${TSSM_TEST_PS2_ASSETS}")
+
+  # The PlayStation 3 .psv's signature and layout against an implementation of
+  # their public description in tests/psv_sign_check.py (its own AES-128 and
+  # Python's HMAC), with made-up keys only; when there is a Python 3.7 or later.
+  find_package(Python3 3.7 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME psv_sign_check
+             COMMAND ${Python3_EXECUTABLE} -I ${PC_DIR}/tests/psv_sign_check.py
+                     $<TARGET_FILE:xsave_selftest> ${CMAKE_CURRENT_BINARY_DIR}/psv_sign_check_run)
+  endif()
 endif()
 
 # --- tssm_widentest -----------------------------------------------------------------
@@ -1172,27 +1593,193 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   endif()
 endif()
 
+# --- tssm_watertest ---------------------------------------------------------------
+# The Xbox water's tiles, strips and bump clock (iXboxWaterGrid.h) on made-up
+# meshes: no game, no data. Run it as `tssm_watertest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_watertest ${PC_DIR}/tests/watertest.cpp ${PC_DIR}/iXboxWaterGrid.cpp)
+  target_include_directories(tssm_watertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_watertest COMMAND tssm_watertest)
+endif()
+
+# --- tssm_steadyframetest ---------------------------------------------------------
+# The game's steady frame time (iSteadyFrame.h) on made-up frame times: the
+# enemies' end-of-animation check at 60, 120 and the GameCube's 30, the clock
+# against the wall clock, late frames, scenes over budget; no game, no data.
+# Run it as `tssm_steadyframetest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_steadyframetest ${PC_DIR}/tests/steadyframetest.cpp)
+  target_include_directories(tssm_steadyframetest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_steadyframetest COMMAND tssm_steadyframetest)
+endif()
+
+# --- tssm_hudtest -----------------------------------------------------------------
+# The HUD at the screen's edges ([video] ui, iScreen.h's anchor and safe margin) on
+# made-up screen shapes: no game, no data. Run it as `tssm_hudtest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_hudtest ${PC_DIR}/tests/hudtest.cpp ${PC_DIR}/iScreen.cpp)
+  target_include_directories(tssm_hudtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_hudtest COMMAND tssm_hudtest)
+endif()
+
+# --- tssm_savetexttest ---------------------------------------------------------------
+# The save screens' warning as a setting ([game] save_text, iSaveText.h): every
+# line of both discs with every choice, and what is never rewritten; no game.
+# With the Xbox and GameCube folders (TSSM_TEST_ASSETS, TSSM_TEST_GC_ASSETS)
+# every TEXT asset of both discs is checked against the table too.
+#   build-*/tssm_savetexttest [<Xbox files> [<GameCube files>]]
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_savetexttest ${PC_DIR}/tests/savetexttest.cpp ${PC_DIR}/iSaveTextTable.cpp)
+  target_include_directories(tssm_savetexttest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  enable_testing()
+  add_test(NAME tssm_savetexttest COMMAND tssm_savetexttest "${TSSM_TEST_ASSETS}"
+    "${TSSM_TEST_GC_ASSETS}")
+endif()
+
+# --- tssm_gcswaptest -------------------------------------------------------------
+# tssm_gcswaptest: the GameCube byte swaps (src/SB/Core/pc/iGCSwap.h) run over
+# every package of an extracted GameCube disc, without the game: each package's
+# platform, each asset swapped in a buffer that ends at an inaccessible page (so
+# an overrun stops the test where it happens), cut-short and damaged copies, and
+# with an Xbox folder each result against the Xbox asset of the same id.
+#   build-*/tssm_gcswaptest <GameCube files> [<Xbox files>] [--fuzz N] [--type XXXX]
+# tools/gcswap/README.md says how to read its report.
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcswaptest ${PC_DIR}/tests/gcswaptest.cpp ${PC_DIR}/iGCSwap.cpp
+    ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcswaptest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_options(tssm_gcswaptest PRIVATE ${TSSM_NO_WARNINGS})
+  # TSSM_TEST_GC_ASSETS (an extracted GameCube disc's files/ folder) registers
+  # it with ctest, against TSSM_TEST_ASSETS (the Xbox folder) when that is set.
+  set(TSSM_TEST_GC_ASSETS "" CACHE PATH "An extracted GameCube disc, for tssm_gcswaptest")
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcswaptest COMMAND tssm_gcswaptest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_ordertest --------------------------------------------------------------
+# The creation numbers on RenderWare's atomics that put the opaque models in the
+# console's draw order (iModelOrder.h, rw/atomic_order.cpp), over librw's NULL
+# platform: no game, no data, no device. Run it as `tssm_ordertest`.
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_ordertest ${PC_DIR}/tests/ordertest.cpp ${PC_DIR}/rw/atomic_order.cpp)
+  target_include_directories(tssm_ordertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tssm_ordertest PRIVATE librw)
+  target_compile_options(tssm_ordertest PRIVATE ${TSSM_NO_WARNINGS})
+  enable_testing()
+  add_test(NAME tssm_ordertest COMMAND tssm_ordertest)
+endif()
+
+# --- tssm_gcrwtest ---------------------------------------------------------------
+# tssm_gcrwtest: the GameCube RenderWare data -- native textures, geometry and
+# skins -- read with the port's librw (tools/librw/gc_*.patch) over every package
+# of an extracted GameCube disc, without the game or a render device, and each
+# compared with the Xbox texture or atomic of the same id (tests/gcrwtest.cpp).
+#   build-*/tssm_gcrwtest <GameCube files> [<Xbox files>] [--fuzz N] [--only tex|geo]
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcrwtest ${PC_DIR}/tests/gcrwtest.cpp ${PC_DIR}/iGCPackage.cpp
+    ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcrwtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tssm_gcrwtest PRIVATE librw)
+  target_compile_options(tssm_gcrwtest PRIVATE ${TSSM_NO_WARNINGS})
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcrwtest COMMAND tssm_gcrwtest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_gcsndtest --------------------------------------------------------------
+# tssm_gcsndtest: the GameCube sound data -- the sound tables, their FSB3 banks
+# of DSP-ADPCM and the cutscene tracks -- read and decoded with the code the
+# game uses (iSndGC.cpp, iSndDsp.cpp) over every package of an extracted
+# GameCube disc, and each sound compared with the Xbox sound of the same id
+# (tests/gcsndtest.cpp).
+#   build-*/tssm_gcsndtest <GameCube files> [<Xbox files>] [--fuzz N] [--dump DIR]
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_gcsndtest ${PC_DIR}/tests/gcsndtest.cpp ${PC_DIR}/iSndGC.cpp
+    ${PC_DIR}/iSndDsp.cpp ${PC_DIR}/iSndXbox.cpp ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iModPackage.cpp)
+  target_include_directories(tssm_gcsndtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_options(tssm_gcsndtest PRIVATE ${TSSM_NO_WARNINGS})
+  if(TSSM_TEST_GC_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_gcsndtest COMMAND tssm_gcsndtest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
+  endif()
+endif()
+
+# --- tssm_extrastest ----------------------------------------------------------------
+# tssm_extrastest: the Xbox extras' decisions (src/SB/Core/pc/iExtras.h) and
+# their [extras] settings through the real config layer, without the game; the
+# pacer, the renderer and the pad table are stand-ins in the test itself.
+#   build-*/tssm_extrastest <scratch folder>
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_extrastest ${PC_DIR}/tests/extrastest.cpp ${PC_DIR}/iExtras.cpp
+    ${PC_DIR}/iConfig.cpp ${PC_DIR}/iConfigEdit.cpp ${PC_DIR}/iConfigTable.cpp ${HOST_SOURCES})
+  target_include_directories(tssm_extrastest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(tssm_extrastest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(tssm_extrastest PRIVATE dbghelp)
+  endif()
+  enable_testing()
+  add_test(NAME tssm_extrastest
+           COMMAND tssm_extrastest ${CMAKE_CURRENT_BINARY_DIR}/tssm_extrastest_run)
+endif()
+
+# --- tssm_cheattest -----------------------------------------------------------------
+# tssm_cheattest: the Cheats tab's tables and state (src/SB/Core/pc/iCheats.h)
+# and the [cheats] settings through the real config layer, without the game.
+#   build-*/tssm_cheattest <scratch folder>
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_cheattest ${PC_DIR}/tests/cheattest.cpp ${PC_DIR}/iCheats.cpp
+    ${PC_DIR}/iConfig.cpp ${PC_DIR}/iConfigEdit.cpp ${PC_DIR}/iConfigTable.cpp ${HOST_SOURCES})
+  target_include_directories(tssm_cheattest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(tssm_cheattest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(tssm_cheattest PRIVATE dbghelp)
+  endif()
+  enable_testing()
+  add_test(NAME tssm_cheattest
+           COMMAND tssm_cheattest ${CMAKE_CURRENT_BINARY_DIR}/tssm_cheattest_run
+                   ${CMAKE_CURRENT_SOURCE_DIR}/src/SB/Game/zGameExtras.cpp)
+endif()
+
 # --- tssm_modtest ----------------------------------------------------------------
 # tssm_modtest: the mod system run on its own -- INI overlays, sound decoding,
-# package views checked against real packages, the mod manager. No game code,
-# renderer or window. Run it as `tssm_modtest <asset folder> <scratch folder>`
-# (src/SB/Core/pc/tests/modtest.cpp, docs/MODDING.md).
+# package views checked against real packages, tables of contents, GameCube
+# packages, the mod manager. No game code, renderer or window. Run it as
+# `tssm_modtest <asset folder> <scratch folder> [<GameCube files>]`
+# (src/SB/Core/pc/tests/modtest.cpp, docs/MODDING.md). TSSM_TEST_ASSETS
+# registers it with ctest, with TSSM_TEST_GC_ASSETS when that is set.
 if(TSSM_BUILD_TESTS AND NOT ANDROID AND NOT TSSM_SWITCH)
   add_executable(tssm_modtest ${PC_DIR}/tests/modtest.cpp
     ${PC_DIR}/iMod.cpp ${PC_DIR}/iModAudio.cpp ${PC_DIR}/iModIni.cpp ${PC_DIR}/iModPackage.cpp
-    ${HOST_SOURCES})
+    ${PC_DIR}/iGCPackage.cpp ${PC_DIR}/iGCSwap.cpp ${HOST_SOURCES})
   target_include_directories(tssm_modtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   if(FMV_INCLUDES)
     target_include_directories(tssm_modtest PRIVATE ${FMV_INCLUDES})
     target_compile_definitions(tssm_modtest PRIVATE ${FMV_DEFINES})
     target_link_libraries(tssm_modtest PRIVATE ${FFMPEG_AVFORMAT_LIBRARY}
-      ${FFMPEG_AVCODEC_LIBRARY} ${FFMPEG_SWRESAMPLE_LIBRARY} ${FFMPEG_AVUTIL_LIBRARY})
+      ${FFMPEG_AVCODEC_LIBRARY} ${FFMPEG_SWRESAMPLE_LIBRARY} ${FFMPEG_AVUTIL_LIBRARY}
+      ${FFMPEG_SYSTEM_LIBS})
   endif()
   if(WIN32)
     target_link_libraries(tssm_modtest PRIVATE user32 dbghelp)
   elseif(NOT APPLE)
     target_link_libraries(tssm_modtest PRIVATE dl)
+  endif()
+  if(TSSM_TEST_ASSETS)
+    enable_testing()
+    add_test(NAME tssm_modtest COMMAND tssm_modtest ${TSSM_TEST_ASSETS}
+      ${CMAKE_CURRENT_BINARY_DIR}/modtest-scratch ${TSSM_TEST_GC_ASSETS})
   endif()
 endif()
 

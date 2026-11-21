@@ -4,6 +4,9 @@
 #include "xMathInlines.h"
 
 #include <rwcore.h>
+#ifdef PLATFORM_PC
+#include "iHudAnchor.h"
+#endif
 
 void NMEHealthMeter::MeterData::Render()
 {
@@ -248,7 +251,13 @@ void NMEHealthMeter::MeterData::RenderBar(RwRaster* rast, F32 xoffset, const F32
         drawflag = rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA;
     }
 
+#ifdef PLATFORM_PC
+    // PC: down to the bottom edge of a screen taller than 4:3 with the HUD at the
+    // screen's edges (iHudAnchor.h); NULL, as here, otherwise.
+    RwIm3DTransform(vtxbuf, 4, iHudAnchorBossMeter(), drawflag);
+#else
     RwIm3DTransform(vtxbuf, 4, NULL, drawflag);
+#endif
     RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
     RwIm3DEnd();
 }

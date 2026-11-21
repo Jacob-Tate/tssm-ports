@@ -120,9 +120,30 @@ S32 iWindowGetFrameRate();
 // is 30 frames a second or less, and above 60 the loop redrew the same picture.
 void iWindowSetFrameRateCeiling(S32 fps);
 
+// The GameCube release's 30 fps hold ([extras] frame_lock = gamecube;
+// iExtras.h): the game's own retrace count, held as one frame every `count`
+// NTSC retraces, 59.94/count frames a second, the console's own rate. 0 or 1 is
+// no hold. A third limit beside the cap and the ceiling, and the pacer holds the
+// lowest of the three, except that a movie's ceiling lifts the hold: movies
+// play at 60 either way. Cheap to call every frame: the deadline is dropped
+// only when what the pacer holds changes.
+void iWindowSetFrameLock(S32 count);
+
+// The count the pacer is holding to now, or 0 when the hold is not what paces
+// the frame (none set, a movie's ceiling, or a cap below it).
+S32 iWindowGetFrameLock();
+
 // The rate the pacer holds now: the cap, lowered to a ceiling while one is
-// set. 0 is no cap. For the frame metrics (iPerf.h).
+// set and to the GameCube's hold (rounded, 30 for 29.97) while that is. 0 is
+// no cap. For the frame metrics (iPerf.h).
 S32 iWindowGetPacedRate();
+
+// The frame time the game loop runs on (zGameLoop), from the measured one: for
+// a frame within a quarter of the period that paced it, the same steady time
+// every frame (the on-time frames' average, a ten-thousandth long), with what
+// that gives too much or too little paid back at three eighths of a period;
+// otherwise the measured time. Why: iSteadyFrame.h.
+F32 iWindowGameFrameTime(F32 measured);
 
 // The monitor's refresh rate in Hz, or 0 if it cannot be determined. This is
 // what video.framerate = display resolves to.
@@ -234,5 +255,15 @@ void iWindowDeferredCreated();
 
 // Names the implementation that was linked in, for the startup log.
 const char* iWindowBackendName();
+
+// The program's icon on an SDL window: the game's (every backend; the GL3 one
+// once librw has made it) and the launcher's. The picture is the one the build
+// was given (CMakeLists.txt, "the app icon": the sponge block in dist/pc, or
+// TSSM_ICON_DIR's), set with SDL_SetWindowIcon; on Windows the executable's
+// own icon is then sent to the window at the sizes its title bar and the
+// taskbar ask for, which is sharper than one picture scaled. Nothing without
+// SDL windows.
+struct SDL_Window;
+void iWindowSetIcon(SDL_Window* window);
 
 #endif

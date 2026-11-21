@@ -14,6 +14,29 @@
 // folder, and exports go into the export folder under a name made here
 // (iGuiFilePicker.h); the status line says where each one went.
 //
+// Xbox saves go both ways too (docs/SAVES.md section 7). One is a folder, so
+// importing picks a folder (or a zip of one) and exporting writes one. An
+// exported save has to be signed, and the tab offers the two signatures there
+// are: for Cxbx-Reloaded and other copies of this port, which needs only the
+// player's DEFAULT.XBE; or for a real Xbox or xemu, which also needs the
+// keys.bin made from the player's own Xbox. Both files are picked, never typed,
+// and their paths kept in config.ini ([game] xbox_xbe, xbox_keys). The game
+// holds no key and shows none.
+//
+// PlayStation 2 saves too (docs/SAVES.md section 8): Import takes a .psu, .max
+// or .psv file or a memory card file, and the folder import takes PCSX2's
+// folder-type card; "Export to a PlayStation 2" writes a .psu, or into a card
+// file (which is copied first) or a folder card. The icon is the game's own
+// when the player points at their PlayStation 2 disc's PLAT.HIP or a save the
+// game made ([game] ps2_icon), else the port's.
+//
+// A PlayStation 3's .psv too (docs/SAVES.md section 9), in the Xbox export's
+// shape: "Export to a PlayStation 3" signs it with the stand-in signature
+// (other copies of this port and PC save tools; a PS3 needs it re-signed) or
+// with the PS3's own, made from a key file the player picks ([game]
+// psv_keys), which is not yet confirmed on a PS3. A PS3's virtual memory card
+// (.VM2) is a memory card file to the PlayStation 2 export.
+//
 // The game in progress keeps writing to the slot it last saved to or loaded
 // from -- its autosave. Importing or restoring over that slot is allowed, but
 // only after saying that the next autosave will write over it again.
@@ -25,8 +48,10 @@
 #include "gui/iGuiFilePicker.h"
 #include "gui/iGuiInternal.h"
 
+#include "iConfig.h"
 #include "iHost.h"
 #include "iSaveFormat.h"
+#include "iSavePS2.h"
 #include "iSaveStore.h"
 
 #include <float.h>
@@ -45,11 +70,26 @@ namespace
     const ImVec4 kGreen(0.55f, 0.85f, 0.55f, 1.0f);
 
     const iGui::FileFilter kImportFilters[] = {
-        { "GameCube saves, memory cards and save zips", "gci;gcs;raw;gcp;zip" },
+        { "GameCube, PlayStation 2 and Xbox saves, memory cards and save zips",
+          "gci;gcs;raw;gcp;zip;xsv;psu;max;psv;ps2;vm2" },
         { "All files", "*" },
     };
     const iGui::FileFilter kGciFilter[] = { { "GameCube save (.gci)", "gci" } };
     const iGui::FileFilter kZipFilter[] = { { "Zip of saves", "zip" } };
+    const iGui::FileFilter kXbeFilter[] = { { "Xbox program (DEFAULT.XBE)", "xbe" },
+                                            { "All files", "*" } };
+    const iGui::FileFilter kKeysFilter[] = { { "Xbox keys file (keys.bin)", "bin" },
+                                             { "All files", "*" } };
+    const iGui::FileFilter kPsuFilter[] = { { "PlayStation 2 save (.psu)", "psu" } };
+    const iGui::FileFilter kCardFilter[] = { { "PlayStation 2 memory card (.ps2, or a PS3's .VM2)",
+                                               "ps2;vm2" },
+                                             { "All files", "*" } };
+    const iGui::FileFilter kPsvFilter[] = { { "PlayStation 3 export (.psv)", "psv" } };
+    const iGui::FileFilter kPsvKeysFilter[] = { { "PS3 key file (32 bytes)", "bin" },
+                                                { "All files", "*" } };
+    const iGui::FileFilter kPs2IconFilter[] = {
+        { "PLAT.HIP, or a PlayStation 2 save", "hip;psu;max;psv;ps2;ico" }, { "All files", "*" }
+    };
 
     // --- the listing ---------------------------------------------------------------
 
@@ -335,6 +375,492 @@ namespace
         iHostRemoveDir(dir);
     }
 
+    // --- export to an Xbox -------------------------------------------------------------
+
+    // 0: Cxbx-Reloaded and other copies of this port, 1: a real Xbox or xemu.
+    int sXboxFor;
+    bool sXboxReplace;
+    int sXboxFolder; // which save folder "every save" takes: 0 is A
+    S32 sXboxTarget = -1; // the one slot being exported, or -1 for a folder's saves
+    S32 sXboxGame = -1;
+
+    void XboxOptions(iSaveXboxExportOptions* o)
+    {
+        iSaveXboxExportDefaults(o);
+        o->signature = (sXboxFor == 1) ? ISS_XBOX_REAL : ISS_XBOX_EMULATOR;
+        o->replace = sXboxReplace;
+    }
+
+    const char* XboxForWhat()
+    {
+        return sXboxFor == 1 ? "a real Xbox or xemu" :
+                               "Cxbx-Reloaded and other copies of this port";
+    }
+
+    // Where the two files an Xbox export reads would come from, looked up
+    // once a second while the tab is shown (and at once after one is chosen),
+    // not every frame: each look is a few file-system calls.
+    struct XboxFiles
+    {
+        U64 at;
+        bool valid;
+        char xbe[600]; // "" when there is none
+        bool xbeBad; // there, but not this game's Xbox program
+        char xbeWhy[768];
+        char keys[600];
+        bool keysBad; // there, but not a keys.bin
+        char keysWhy[768];
+    };
+    XboxFiles sXboxFiles;
+
+    // Whether a file found is one an export can use, kept until the file
+    // changes: the program is a few megabytes, too much to read every second.
+    struct XboxChecked
+    {
+        char path[600];
+        U64 size;
+        S64 mtime;
+        bool ok;
+        char why[768];
+    };
+    XboxChecked sXbeChecked;
+    XboxChecked sKeysChecked;
+
+    typedef bool (*XboxUsable)(const char*, char*, size_t, char*, size_t);
+
+    void XboxCheck(XboxChecked& c, const char* path, XboxUsable usable, bool* bad, char* why,
+                   size_t whySize)
+    {
+        iHostFileInfo st;
+        memset(&st, 0, sizeof(st));
+        if (!iHostStat(path, &st))
+        {
+            st.size = 0;
+            st.mtime = 0;
+        }
+
+        if (strcmp(c.path, path) != 0 || c.size != st.size || c.mtime != st.mtime)
+        {
+            char found[600];
+            snprintf(c.path, sizeof(c.path), "%s", path);
+            c.size = st.size;
+            c.mtime = st.mtime;
+            c.why[0] = '\0';
+            c.ok = usable(path, found, sizeof(found), c.why, sizeof(c.why));
+        }
+
+        *bad = !c.ok;
+        if (!c.ok)
+        {
+            snprintf(why, whySize, "%s", c.why);
+        }
+    }
+
+    const XboxFiles& XboxLook()
+    {
+        const U64 now = SDL_GetTicks();
+        if (!sXboxFiles.valid || now - sXboxFiles.at > 1000)
+        {
+            sXboxFiles.at = now;
+            sXboxFiles.valid = true;
+            sXboxFiles.xbeWhy[0] = '\0';
+            sXboxFiles.keysWhy[0] = '\0';
+            sXboxFiles.xbeBad = false;
+            sXboxFiles.keysBad = false;
+            if (!iSaveStoreXboxProgram(NULL, sXboxFiles.xbe, sizeof(sXboxFiles.xbe),
+                                       sXboxFiles.xbeWhy, sizeof(sXboxFiles.xbeWhy)))
+            {
+                sXboxFiles.xbe[0] = '\0';
+            }
+            else
+            {
+                XboxCheck(sXbeChecked, sXboxFiles.xbe, iSaveStoreXboxProgramUsable,
+                          &sXboxFiles.xbeBad, sXboxFiles.xbeWhy, sizeof(sXboxFiles.xbeWhy));
+            }
+            if (!iSaveStoreXboxKeys(NULL, sXboxFiles.keys, sizeof(sXboxFiles.keys),
+                                    sXboxFiles.keysWhy, sizeof(sXboxFiles.keysWhy)))
+            {
+                sXboxFiles.keys[0] = '\0';
+            }
+            else
+            {
+                XboxCheck(sKeysChecked, sXboxFiles.keys, iSaveStoreXboxKeysUsable,
+                          &sXboxFiles.keysBad, sXboxFiles.keysWhy, sizeof(sXboxFiles.keysWhy));
+            }
+        }
+        return sXboxFiles;
+    }
+
+    // Whether the files the chosen signature needs are there and are what
+    // they should be; `why` says what is missing or wrong.
+    bool XboxReady(char* why, size_t whySize)
+    {
+        const XboxFiles& f = XboxLook();
+        if (f.xbe[0] == '\0' || f.xbeBad)
+        {
+            snprintf(why, whySize, "%s", f.xbeWhy);
+            return false;
+        }
+        if (sXboxFor == 1 && (f.keys[0] == '\0' || f.keysBad))
+        {
+            snprintf(why, whySize, "%s", f.keysWhy);
+            return false;
+        }
+        return true;
+    }
+
+    void FinishExportXbox(const char* dir)
+    {
+        iSaveXboxExportOptions o;
+        XboxOptions(&o);
+        char err[768] = "";
+
+        if (sXboxTarget >= 0)
+        {
+            char slot[4];
+            SlotName(sXboxTarget, sXboxGame, slot, sizeof(slot));
+            std::string where;
+            if (iSaveStoreExportXbox(sXboxTarget, sXboxGame, &o, dir, &where, err, sizeof(err)))
+            {
+                Say(false, "%s exported as an Xbox save for %s: %s", slot, XboxForWhat(),
+                    where.c_str());
+            }
+            else
+            {
+                Say(true, "%s was not exported: %s", slot, err);
+            }
+            sXboxTarget = -1;
+            return;
+        }
+
+        std::vector<iSaveExportItem> items;
+        const S32 n = iSaveStoreExportXboxFolder(sXboxFolder, &o, dir, items);
+        std::string skipped;
+        for (size_t i = 0; i < items.size(); i++)
+        {
+            if (!items[i].ok)
+            {
+                skipped += std::string(skipped.empty() ? "" : "; ") + items[i].name + ": " +
+                           items[i].message;
+            }
+        }
+
+        if (items.empty())
+        {
+            Say(true, "Folder %c has no saves to export.", 'A' + sXboxFolder);
+        }
+        else if (skipped.empty())
+        {
+            Say(false, "%d save%s exported to %s as Xbox saves for %s.", (int)n, n == 1 ? "" : "s",
+                dir, XboxForWhat());
+        }
+        else
+        {
+            Say(n <= 0, "%d save%s exported to %s; not exported: %s", (int)n, n == 1 ? "" : "s",
+                dir, skipped.c_str());
+        }
+    }
+
+    // --- export to a PlayStation 2 -------------------------------------------------------
+
+    // 0: a .psu file, 1: into a memory card file, 2: into PCSX2's folder card.
+    int sPS2As;
+    bool sPS2Replace;
+    bool sPS2Pal;
+    int sPS2Folder;
+    S32 sPS2Target = -1; // the one slot being exported, or -1 for a folder's saves
+    S32 sPS2Game = -1;
+
+    // Which icon an export would write: looked up when the setting changes,
+    // not every frame (the place named may be a whole memory card).
+    struct PS2Icon
+    {
+        bool valid;
+        std::string setting;
+        std::string from; // "" for the port's own
+        char why[512];
+    };
+    PS2Icon sPS2Icon;
+
+    const PS2Icon& PS2IconLook()
+    {
+        const char* setting = iConfigGetString("game.ps2_icon", "");
+        if (!sPS2Icon.valid || sPS2Icon.setting != setting)
+        {
+            sPS2Icon.valid = true;
+            sPS2Icon.setting = setting;
+            sPS2Icon.why[0] = '\0';
+            std::vector<U8> icon;
+            if (!iSaveStorePS2Icon(NULL, icon, &sPS2Icon.from, sPS2Icon.why, sizeof(sPS2Icon.why)))
+            {
+                sPS2Icon.from.clear();
+            }
+        }
+        return sPS2Icon;
+    }
+
+    void StartExportPS2(S32 target, S32 game)
+    {
+        sPS2Target = target;
+        sPS2Game = game;
+        if (sPS2As == 0)
+        {
+            iGui::PickSaveFile("save-export-ps2-psu",
+                               sPS2Pal ? "BESLES-52895SBMovie.psu" : "BASLUS-20904SBMovie.psu",
+                               kPsuFilter, 1);
+        }
+        else if (sPS2As == 1)
+        {
+            iGui::PickOpenFile("save-export-ps2-card", NULL, kCardFilter, 2);
+        }
+        else
+        {
+            iGui::PickFolder("save-export-ps2-folder", NULL);
+        }
+    }
+
+    void FinishExportPS2(const char* dest, S32 kind)
+    {
+        iSavePS2ExportOptions o;
+        iSavePS2ExportDefaults(&o);
+        o.kind = kind;
+        o.pal = sPS2Pal;
+        o.replace = sPS2Replace;
+
+        char err[768] = "";
+        std::string where;
+
+        if (sPS2Target >= 0)
+        {
+            char slot[4];
+            SlotName(sPS2Target, sPS2Game, slot, sizeof(slot));
+            if (iSaveStoreExportPS2(sPS2Target, sPS2Game, &o, dest, &where, err, sizeof(err)))
+            {
+                Say(false, "%s exported as a PlayStation 2 save: %s", slot, where.c_str());
+            }
+            else
+            {
+                Say(true, "%s was not exported: %s", slot, err);
+            }
+            sPS2Target = -1;
+            return;
+        }
+
+        std::vector<iSaveExportItem> items;
+        const S32 n = iSaveStoreExportPS2Folder(sPS2Folder, &o, dest, items, &where, err,
+                                                sizeof(err));
+        std::string skipped;
+        for (size_t i = 0; i < items.size(); i++)
+        {
+            if (!items[i].ok)
+            {
+                skipped += std::string(skipped.empty() ? "" : "; ") + items[i].name + ": " +
+                           items[i].message;
+            }
+        }
+
+        if (items.empty())
+        {
+            Say(true, "Folder %c has no saves to export.", 'A' + sPS2Folder);
+        }
+        else if (skipped.empty())
+        {
+            Say(false, "%d save%s exported as PlayStation 2 saves: %s", (int)n, n == 1 ? "" : "s",
+                where.c_str());
+        }
+        else
+        {
+            Say(true, "%d save%s exported; not exported: %s", (int)n, n == 1 ? "" : "s",
+                skipped.c_str());
+        }
+    }
+
+    // --- export to a PlayStation 3 ---------------------------------------------------------
+
+    // 0: the stand-in signature, 1: the real one, from the player's key file.
+    int sPsvFor;
+    bool sPsvReplace;
+    bool sPsvPal;
+    int sPsvFolder;
+    S32 sPsvTarget = -1; // the one slot being exported, or -1 for a folder's saves
+    S32 sPsvGame = -1;
+
+    const char* PsvForWhat()
+    {
+        return sPsvFor == 1 ? "the PS3's own signature from your key file (not yet confirmed on "
+                              "a PS3)" :
+                              "the stand-in signature (a PS3 needs it re-signed first)";
+    }
+
+    // Where the key file is and whether it serves, looked up once a second
+    // as the Xbox files are.
+    struct PsvFiles
+    {
+        U64 at;
+        bool valid;
+        char keys[600]; // "" when there is none
+        bool keysBad;
+        char keysWhy[768];
+    };
+    PsvFiles sPsvFiles;
+    XboxChecked sPsvKeysChecked;
+
+    const PsvFiles& PsvLook()
+    {
+        const U64 now = SDL_GetTicks();
+        if (!sPsvFiles.valid || now - sPsvFiles.at > 1000)
+        {
+            sPsvFiles.at = now;
+            sPsvFiles.valid = true;
+            sPsvFiles.keysWhy[0] = '\0';
+            sPsvFiles.keysBad = false;
+            if (!iSaveStorePsvKeys(NULL, sPsvFiles.keys, sizeof(sPsvFiles.keys), sPsvFiles.keysWhy,
+                                   sizeof(sPsvFiles.keysWhy)))
+            {
+                sPsvFiles.keys[0] = '\0';
+            }
+            else
+            {
+                XboxCheck(sPsvKeysChecked, sPsvFiles.keys, iSaveStorePsvKeysUsable,
+                          &sPsvFiles.keysBad, sPsvFiles.keysWhy, sizeof(sPsvFiles.keysWhy));
+            }
+        }
+        return sPsvFiles;
+    }
+
+    // Whether the chosen signature has what it needs; `why` says what not.
+    bool PsvReady(char* why, size_t whySize)
+    {
+        const PS2Icon& icon = PS2IconLook();
+        if (icon.why[0] != '\0')
+        {
+            snprintf(why, whySize, "%s", icon.why);
+            return false;
+        }
+        if (sPsvFor == 1)
+        {
+            const PsvFiles& f = PsvLook();
+            if (f.keys[0] == '\0' || f.keysBad)
+            {
+                snprintf(why, whySize, "%s", f.keysWhy);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void StartExportPsv(S32 target, S32 game)
+    {
+        sPsvTarget = target;
+        sPsvGame = game;
+        const std::string name = iSavePS2PsvName(sPsvPal ? IPS2_FOLDER_PAL : IPS2_FOLDER_NTSC);
+        iGui::PickSaveFile("save-export-psv", name.c_str(), kPsvFilter, 1);
+    }
+
+    void FinishExportPsv(const char* dest)
+    {
+        iSavePS2ExportOptions o;
+        iSavePS2ExportDefaults(&o);
+        o.kind = ISS_PS2_PSV;
+        o.pal = sPsvPal;
+        o.replace = sPsvReplace;
+        o.psvSignature = sPsvFor == 1 ? ISS_PSV_REAL : ISS_PSV_STANDIN;
+
+        char err[768] = "";
+        std::string where;
+
+        if (sPsvTarget >= 0)
+        {
+            char slot[4];
+            SlotName(sPsvTarget, sPsvGame, slot, sizeof(slot));
+            if (iSaveStoreExportPS2(sPsvTarget, sPsvGame, &o, dest, &where, err, sizeof(err)))
+            {
+                Say(false, "%s exported as a PlayStation 3 save with %s: %s", slot, PsvForWhat(),
+                    where.c_str());
+            }
+            else
+            {
+                Say(true, "%s was not exported: %s", slot, err);
+            }
+            sPsvTarget = -1;
+            return;
+        }
+
+        std::vector<iSaveExportItem> items;
+        const S32 n =
+            iSaveStoreExportPS2Folder(sPsvFolder, &o, dest, items, &where, err, sizeof(err));
+        std::string skipped;
+        for (size_t i = 0; i < items.size(); i++)
+        {
+            if (!items[i].ok)
+            {
+                skipped += std::string(skipped.empty() ? "" : "; ") + items[i].name + ": " +
+                           items[i].message;
+            }
+        }
+
+        if (items.empty())
+        {
+            Say(true, "Folder %c has no saves to export.", 'A' + sPsvFolder);
+        }
+        else if (skipped.empty())
+        {
+            Say(false, "%d save%s exported as a PlayStation 3 save with %s: %s", (int)n,
+                n == 1 ? "" : "s", PsvForWhat(), where.c_str());
+        }
+        else
+        {
+            Say(true, "%d save%s exported; not exported: %s", (int)n, n == 1 ? "" : "s",
+                skipped.c_str());
+        }
+    }
+
+    // A file the Xbox export reads, as a row like the Settings tab's folders:
+    // where it is, Browse... and Clear. `found` is where it would be read from
+    // now ("" for nowhere).
+    void XboxFileRow(const char* tag, const char* key, const char* found, const char* emptyText,
+                     const iGui::FileFilter* filters, int filterCount)
+    {
+        const char* value = iConfigGetString(key, "");
+
+        ImGui::PushID(tag);
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float buttons = ImGui::CalcTextSize("Browse...").x + ImGui::CalcTextSize("Clear").x +
+                              style.FramePadding.x * 4.0f + style.ItemSpacing.x * 2.0f;
+
+        char shown[1024];
+        snprintf(shown, sizeof(shown), "%s", found[0] != '\0' ? found : emptyText);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - buttons);
+        ImGui::BeginDisabled(found[0] == '\0');
+        ImGui::InputText("##path", shown, sizeof(shown), ImGuiInputTextFlags_ReadOnly);
+        ImGui::EndDisabled();
+        if (found[0] != '\0' && ImGui::BeginItemTooltip())
+        {
+            ImGui::TextUnformatted(found);
+            ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(iGui::PickingFolder());
+        if (ImGui::Button("Browse..."))
+        {
+            iGui::PickOpenFile(tag, value[0] != '\0' ? value : NULL, filters, filterCount);
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(value[0] == '\0');
+        if (ImGui::Button("Clear"))
+        {
+            iGui::Commit(key, "");
+            sXboxFiles.valid = false;
+            sPS2Icon.valid = false;
+            sPsvFiles.valid = false;
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+
     // --- import ----------------------------------------------------------------------
 
     struct ImportRow
@@ -373,22 +899,52 @@ namespace
         return (target >= 0 && game >= 0 && i < sImport.slots.size()) ? &sImport.slots[i] : NULL;
     }
 
-    void StartImport(const char* path)
+    // `folder`: an Xbox save's folder (or one holding several: the game's,
+    // a UDATA, an emulator's data folder) or a PlayStation 2 one (PCSX2's
+    // folder-type card, or the game's folder), whose saves are gathered into one
+    // bundle; the same when the file picked is a save's GameData.xsv, so that
+    // the SaveMeta.xbx beside it says which save it is.
+    void StartImport(const char* path, bool folder = false)
     {
         sImport = ImportState();
         sImport.name = BaseName(path);
         iSaveStoreList(sImport.slots, true);
 
+        std::string parent;
+        if (!folder && iHostStrCaseCmp(BaseName(path), "GameData.xsv") == 0 &&
+            BaseName(path) != path && strstr(path, "://") == NULL)
+        {
+            parent.assign(path, (size_t)(BaseName(path) - path) - 1);
+        }
+
         char why[512] = "";
-        if (!iGui::ReadWholeFile(path, sImport.data, why, sizeof(why)))
+        std::vector<U8> bundle;
+        if (folder)
+        {
+            if (iSaveStoreReadFolder(path, bundle, why, sizeof(why)))
+            {
+                sImport.data.assign(bundle.begin(), bundle.end());
+            }
+            else
+            {
+                sImport.error = why;
+            }
+        }
+        else if (!parent.empty() &&
+                 iSaveStoreReadFolder(parent.c_str(), bundle, NULL, 0, false))
+        {
+            sImport.data.assign(bundle.begin(), bundle.end());
+        }
+        else if (!iGui::ReadWholeFile(path, sImport.data, why, sizeof(why)))
         {
             sImport.error = why;
         }
-        else if (sImport.data.empty())
+
+        if (sImport.error.empty() && sImport.data.empty())
         {
             sImport.error = sImport.name + " is empty.";
         }
-        else
+        else if (sImport.error.empty())
         {
             // Look only, as if everything may be replaced: where each save in
             // the file would go, and whether it is one the game loads.
@@ -983,6 +1539,50 @@ namespace
         {
             FinishExportFolder(picked);
         }
+        if (iGui::PollFolder("save-import-xbox", picked, sizeof(picked)))
+        {
+            StartImport(picked, true);
+        }
+        if (iGui::PollFolder("save-export-xbox", picked, sizeof(picked)))
+        {
+            FinishExportXbox(picked);
+        }
+        if (iGui::PollFolder("save-xbox-xbe", picked, sizeof(picked)))
+        {
+            iGui::Commit("game.xbox_xbe", picked);
+            sXboxFiles.valid = false;
+        }
+        if (iGui::PollFolder("save-xbox-keys", picked, sizeof(picked)))
+        {
+            iGui::Commit("game.xbox_keys", picked);
+            sXboxFiles.valid = false;
+        }
+        if (iGui::PollFolder("save-export-ps2-psu", picked, sizeof(picked)))
+        {
+            FinishExportPS2(picked, ISS_PS2_PSU);
+        }
+        if (iGui::PollFolder("save-export-ps2-card", picked, sizeof(picked)))
+        {
+            FinishExportPS2(picked, ISS_PS2_CARD);
+        }
+        if (iGui::PollFolder("save-export-ps2-folder", picked, sizeof(picked)))
+        {
+            FinishExportPS2(picked, ISS_PS2_FOLDER_CARD);
+        }
+        if (iGui::PollFolder("save-ps2-icon", picked, sizeof(picked)))
+        {
+            iGui::Commit("game.ps2_icon", picked);
+            sPS2Icon.valid = false;
+        }
+        if (iGui::PollFolder("save-export-psv", picked, sizeof(picked)))
+        {
+            FinishExportPsv(picked);
+        }
+        if (iGui::PollFolder("save-psv-keys", picked, sizeof(picked)))
+        {
+            iGui::Commit("game.psv_keys", picked);
+            sPsvFiles.valid = false;
+        }
     }
 
     // --- the slot table ----------------------------------------------------------------------
@@ -1095,14 +1695,72 @@ namespace
                 ImGui::BeginDisabled(!s.valid || iGui::PickingFolder());
                 if (ImGui::SmallButton(iGui::UseBuiltinPicker() ? "Export" : "Export..."))
                 {
-                    StartExportGCI(s);
+                    ImGui::OpenPopup("export-as");
                 }
                 ImGui::EndDisabled();
                 if (ImGui::BeginItemTooltip())
                 {
                     ImGui::TextUnformatted("This save as a .gci, for Dolphin's Import or a "
-                                           "console's memory card manager.");
+                                           "console's memory card manager; or as an Xbox, "
+                                           "PlayStation 2 or PlayStation 3 save.");
                     ImGui::EndTooltip();
+                }
+                if (ImGui::BeginPopup("export-as"))
+                {
+                    if (ImGui::MenuItem("GameCube save (.gci)..."))
+                    {
+                        StartExportGCI(s);
+                    }
+                    char why[768] = "";
+                    const bool ready = XboxReady(why, sizeof(why));
+                    if (ImGui::MenuItem("Xbox save, into a folder...", NULL, false, ready))
+                    {
+                        sXboxTarget = s.target;
+                        sXboxGame = s.game;
+                        iGui::PickFolder("save-export-xbox", NULL);
+                    }
+                    if (!ready)
+                    {
+                        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                        ImGui::TextDisabled("Xbox: not ready (%s). See \"Export to an Xbox\" "
+                                            "below.",
+                                            why);
+                        ImGui::PopTextWrapPos();
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("Xbox: signed for %s.", XboxForWhat());
+                    }
+                    static const char* const kPS2Item[] = {
+                        "PlayStation 2 save, as a .psu file...",
+                        "PlayStation 2 save, into a memory card file...",
+                        "PlayStation 2 save, into PCSX2's folder card..."
+                    };
+                    if (ImGui::MenuItem(kPS2Item[sPS2As]))
+                    {
+                        StartExportPS2(s.target, s.game);
+                    }
+                    ImGui::TextDisabled("PlayStation 2: see \"Export to a PlayStation 2\" "
+                                        "below.");
+                    char psvWhy[768] = "";
+                    const bool psvReady = PsvReady(psvWhy, sizeof(psvWhy));
+                    if (ImGui::MenuItem("PlayStation 3 save (.psv)...", NULL, false, psvReady))
+                    {
+                        StartExportPsv(s.target, s.game);
+                    }
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    if (!psvReady)
+                    {
+                        ImGui::TextDisabled("PlayStation 3: not ready (%s). See \"Export to a "
+                                            "PlayStation 3\" below.",
+                                            psvWhy);
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("PlayStation 3: with %s.", PsvForWhat());
+                    }
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndPopup();
                 }
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Delete"))
@@ -1156,9 +1814,23 @@ void iGui::DrawSaves()
         PickOpenFile("save-import", NULL, kImportFilters, 2);
     }
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(PickingFolder());
+    if (ImGui::Button("Import a save folder (Xbox, PCSX2)..."))
+    {
+        PickFolder("save-import-xbox", NULL);
+    }
+    ImGui::EndDisabled();
     Note("Import takes a Dolphin .gci, a GameShark .gcs, a memory card image (.raw, .gcp), a "
-         ".zip from Export, or a save file from another install. Every save replaced is kept "
-         "as a backup.");
+         ".zip from Export, or a save file from another install. An Xbox save is a folder: "
+         "pick the save's own folder (it holds GameData.xsv), the game's (UDATA\\54510027), a "
+         "whole UDATA or Cxbx-Reloaded's data folder, or a .zip of one. Xbox saves are read "
+         "whatever their signature. A PlayStation 2 save is a .psu, an Action Replay .max, a "
+         "PlayStation 3's .psv or a memory card file (PCSX2's .ps2, a PS3's .VM2), which is "
+         "only read; or, "
+         "as a folder, PCSX2's folder-type card or the game's folder inside it. Xbox and "
+         "PlayStation 2 saves need the game's own files to convert. Every save replaced is "
+         "kept as a backup.");
     if (builtin)
     {
         char importDir[1024];
@@ -1248,6 +1920,252 @@ void iGui::DrawSaves()
          "for slot. A GCI folder is the folder Dolphin keeps a memory card in when it uses GCI "
          "folders (Card A): folder A's saves go in %s, folder B's in B/ inside it.",
          builtin ? "a new gci-<date> folder in the export folder" : "the folder chosen");
+
+    ImGui::SeparatorText("Export to an Xbox");
+    {
+        static const char* const kFor[] = {
+            "Cxbx-Reloaded and other copies of this port",
+            "A real Xbox or xemu (needs your keys.bin from your own Xbox)"
+        };
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("For");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize(kFor[1]).x + ImGui::GetFrameHeight() +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##xboxfor", &sXboxFor, kFor, 2);
+        ImGui::SameLine();
+        HelpMarker("An Xbox save is signed, and a console only loads a save whose signature it "
+                   "can make itself. The first choice is the signature Cxbx-Reloaded makes when "
+                   "it has no keys.bin: it needs nothing but the Xbox game's program. The second "
+                   "is the one a real Xbox makes, and needs the keys.bin from your own Xbox as "
+                   "well (the same 32-byte file Cxbx-Reloaded reads). The game has no key of "
+                   "its own, and nothing is typed in: both are files you choose.");
+
+        const XboxFiles files = XboxLook();
+        ImGui::TextUnformatted("The Xbox game's program (DEFAULT.XBE, from your own copy)");
+        XboxFileRow("save-xbox-xbe", "game.xbox_xbe", files.xbe,
+                    "(not found: choose your DEFAULT.XBE)", kXbeFilter, 2);
+        bool said = false; // the reason is under its row already
+        if (files.xbeBad ||
+            (files.xbe[0] == '\0' && iConfigGetString("game.xbox_xbe", "")[0] != '\0'))
+        {
+            said = true;
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(kRed, "%s.", files.xbeWhy);
+            ImGui::PopTextWrapPos();
+        }
+
+        if (sXboxFor == 1)
+        {
+            ImGui::TextUnformatted("Your keys.bin (made from your own Xbox)");
+            XboxFileRow("save-xbox-keys", "game.xbox_keys", files.keys,
+                        "(none: choose your keys.bin)", kKeysFilter, 2);
+            if (files.keysBad ||
+                (files.keys[0] == '\0' && iConfigGetString("game.xbox_keys", "")[0] != '\0'))
+            {
+                said = true;
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(kRed, "%s.", files.keysWhy);
+                ImGui::PopTextWrapPos();
+            }
+        }
+
+        ImGui::Checkbox("Replace a save of the same name already in the folder", &sXboxReplace);
+
+        static const char* const kFolders[] = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J" };
+        const int folders = sAllFolders ? ISS_MAX_TARGETS : 2;
+        if (sXboxFolder >= folders)
+        {
+            sXboxFolder = 0;
+        }
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Save folder");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("A").x + ImGui::GetFrameHeight() * 2.0f +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##xboxfolder", &sXboxFolder, kFolders, folders);
+        ImGui::SameLine();
+
+        char missing[768] = "";
+        const bool ready = XboxReady(missing, sizeof(missing));
+        ImGui::BeginDisabled(!ready || PickingFolder());
+        if (ImGui::Button("Its saves as Xbox saves..."))
+        {
+            sXboxTarget = -1;
+            PickFolder("save-export-xbox", NULL);
+        }
+        ImGui::EndDisabled();
+        if (!ready && !said)
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(kYellow, "%s.", missing);
+            ImGui::PopTextWrapPos();
+        }
+    }
+    Note("An Xbox holds three saves, as one save folder does; a slot's own Export... writes "
+         "one. Pick Cxbx-Reloaded's data folder (the one holding EmuDisk) and the saves go "
+         "where it keeps them; pick any other folder and it gets UDATA\\54510027 with the "
+         "saves inside, ready to copy to an Xbox's E: drive. The title's own files there are "
+         "made from your DEFAULT.XBE when they are missing.");
+
+    ImGui::SeparatorText("Export to a PlayStation 2");
+    {
+        static const char* const kAs[] = {
+            "A .psu file (uLaunchELF on a console, or mymc)",
+            "Into a memory card file (PCSX2's .ps2, a PS3's .VM2; it is copied first)",
+            "Into PCSX2's folder-type memory card"
+        };
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("As");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize(kAs[1]).x + ImGui::GetFrameHeight() +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##ps2as", &sPS2As, kAs, 3);
+        ImGui::SameLine();
+        HelpMarker("A .psu file is what uLaunchELF on a PlayStation 2 and tools like mymc take. "
+                   "A memory card file is PCSX2's .ps2 card, or a PS3's virtual memory card "
+                   "for PlayStation 2 games (.VM2): the save is added to it, "
+                   "everything else on the card stays, and before anything is written the "
+                   "card is copied beside itself as .bak. A card PCSX2 has just made is blank "
+                   "until a game or the console's browser formats it. PCSX2's folder-type card "
+                   "is a folder named like a card file. Close PCSX2 first, or it will not see "
+                   "the change.");
+
+        const PS2Icon& icon = PS2IconLook();
+        ImGui::TextUnformatted("The game's own icon (PLAT.HIP from your own PlayStation 2 disc, "
+                               "or a save the game made)");
+        XboxFileRow("save-ps2-icon", "game.ps2_icon", icon.from.c_str(),
+                    "(none chosen: the port's own icon is written)", kPs2IconFilter, 2);
+        if (icon.why[0] != '\0')
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(kRed, "%s.", icon.why);
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Checkbox("Replace a save of the same number already there", &sPS2Replace);
+        ImGui::SameLine();
+        ImGui::Checkbox("For the European (PAL) game", &sPS2Pal);
+
+        static const char* const kFolders[] = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J" };
+        const int folders = sAllFolders ? ISS_MAX_TARGETS : 2;
+        if (sPS2Folder >= folders)
+        {
+            sPS2Folder = 0;
+        }
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Save folder");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("A").x + ImGui::GetFrameHeight() * 2.0f +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##ps2folder", &sPS2Folder, kFolders, folders);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(icon.why[0] != '\0' || PickingFolder());
+        if (ImGui::Button("Its saves as PlayStation 2 saves..."))
+        {
+            StartExportPS2(-1, -1);
+        }
+        ImGui::EndDisabled();
+    }
+    Note("A PlayStation 2 card keeps the game's saves in one folder, three at most, as one "
+         "save folder here does; a slot's own Export... writes one. With the save go the "
+         "files the game keeps beside it when they are not there yet: icon.sys, the icon "
+         "and a filler file. A save for a real console goes over as a .psu with uLaunchELF.");
+
+    ImGui::SeparatorText("Export to a PlayStation 3");
+    {
+        static const char* const kFor[] = {
+            "Stand-in signature (this port and PC save tools; a PS3 needs it re-signed)",
+            "Real signature from your own file (not yet confirmed on a PS3)"
+        };
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Signature");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize(kFor[0]).x + ImGui::GetFrameHeight() +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##psvfor", &sPsvFor, kFor, 2);
+        ImGui::SameLine();
+        HelpMarker("A PlayStation 3 keeps PlayStation 2 saves on virtual memory cards and moves "
+                   "them in and out as .psv files, which it signs; it only takes a .psv whose "
+                   "signature it can make itself. The stand-in signature makes a valid file that "
+                   "other copies of this port and PC tools that read .psv files take, but a PS3 "
+                   "needs it re-signed first, for example by a save tool on a modded PS3. The "
+                   "real signature is the PS3's own, made from a key file you provide (32 "
+                   "bytes; docs/SAVES.md says what it holds). The port follows the public "
+                   "description of how a PS3 signs, which has not yet been tried on a PS3. The "
+                   "game has no key of its own, and nothing is typed in.");
+
+        bool said = false;
+        if (sPsvFor == 1)
+        {
+            const PsvFiles files = PsvLook();
+            ImGui::TextUnformatted("Your PS3 key file (32 bytes: the key, then its IV)");
+            XboxFileRow("save-psv-keys", "game.psv_keys", files.keys,
+                        "(none: choose your PS3 key file)", kPsvKeysFilter, 2);
+            if (files.keysBad ||
+                (files.keys[0] == '\0' && iConfigGetString("game.psv_keys", "")[0] != '\0'))
+            {
+                said = true;
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(kRed, "%s.", files.keysWhy);
+                ImGui::PopTextWrapPos();
+            }
+        }
+
+        ImGui::Checkbox("Replace a save of the same number already in the .psv", &sPsvReplace);
+        ImGui::SameLine();
+        ImGui::Checkbox("For the European (PAL) game##psvpal", &sPsvPal);
+
+        static const char* const kFolders[] = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J" };
+        const int folders = sAllFolders ? ISS_MAX_TARGETS : 2;
+        if (sPsvFolder >= folders)
+        {
+            sPsvFolder = 0;
+        }
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Save folder");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("A").x + ImGui::GetFrameHeight() * 2.0f +
+                                ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::Combo("##psvfolder", &sPsvFolder, kFolders, folders);
+        ImGui::SameLine();
+
+        char missing[768] = "";
+        const bool ready = PsvReady(missing, sizeof(missing));
+        ImGui::BeginDisabled(!ready || PickingFolder());
+        if (ImGui::Button("Its saves as one .psv..."))
+        {
+            StartExportPsv(-1, -1);
+        }
+        ImGui::EndDisabled();
+        if (!ready && !said)
+        {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(kYellow, "%s.", missing);
+            ImGui::PopTextWrapPos();
+        }
+    }
+    Note("A .psv holds the game's folder as the PlayStation 3 exports it from a virtual "
+         "memory card: up to three saves, with icon.sys, the icon (the one chosen under "
+         "\"Export to a PlayStation 2\") and the filler. Choosing an existing .psv adds to it. "
+         "A PS3's virtual memory card itself (.VM2) is written to as a memory card file, "
+         "above.");
+
+    // TSSM_GUI_SAVES_SCROLL=<0..1>: how far down the tab is scrolled, for a
+    // capture of what is below the first screenful (docs/GUI.md, debug
+    // switches).
+    {
+        static float sDebugScroll = -1.0f;
+        if (sDebugScroll < 0.0f)
+        {
+            const char* scroll = getenv("TSSM_GUI_SAVES_SCROLL");
+            sDebugScroll = (scroll != NULL && scroll[0] != '\0') ? (float)atof(scroll) : 0.0f;
+        }
+        if (sDebugScroll > 0.0f)
+        {
+            ImGui::SetScrollY(ImGui::GetScrollMaxY() * (sDebugScroll > 1.0f ? 1.0f : sDebugScroll));
+        }
+    }
 
     if (sOpenImport)
     {

@@ -215,6 +215,13 @@ static void* Model_Read(void* userdata, U32 assetid, void* indata, U32 insize, U
     }
 
     RpAtomic* model = iModelFileNew(indata, insize);
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: damaged model data reads as no model, which retail reads through.
+    if (model == NULL)
+    {
+        iModelReportUnreadable(assetid);
+    }
+#endif
     *outsize = sizeof(RpAtomic);
 
     RwFrameSetIdentity(RpClumpGetFrame(RpAtomicGetClump(model)));

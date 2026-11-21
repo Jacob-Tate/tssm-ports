@@ -190,8 +190,6 @@ namespace
         // 720x480 and 720x486 are 4:3 content in non-square pixels; displaying
         // them at their pixel dimensions is the stretch, not the fix. Every
         // movie in this game is 4:3, so that is what they are fitted to.
-        (void)vw;
-        (void)vh;
         const F32 aspect = 4.0f / 3.0f;
 
         F32 w = sw;
@@ -204,6 +202,19 @@ namespace
 
         *x0 = 0.5f * (sw - w);
         *y0 = 0.5f * (sh - h);
+
+        // The GameCube's movies are 512 wide, made for its 512x480 frame
+        // buffer, which the console shows as the whole 4:3 screen: the console
+        // copies a movie into it one to one, centred (gc/iFMV.cpp). So a
+        // 512x480 one fills the box, and 512x448 (LogoHI) keeps the black
+        // bands it has there, 16 lines above and below.
+        if (vw == 512 && vh > 0 && vh < 480)
+        {
+            const F32 inner = h * (F32)vh / 480.0f;
+            *y0 += 0.5f * (h - inner);
+            h = inner;
+        }
+
         *x1 = *x0 + w;
         *y1 = *y0 + h;
     }
@@ -478,7 +489,8 @@ U32 iFMVPlay(const char* filename, U32 buttons, F32 time, U32 uSubtitlesAID, boo
     {
         while (true)
         {
-            iWindowPump();
+            // The window was pumped by the last pass's present
+            // (rw/camera.cpp).
             if (iWindowShouldClose())
             {
                 break;

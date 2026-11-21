@@ -69,29 +69,10 @@ namespace
     }
 } // namespace
 
-S32 iFrameGrabWrite(const char* path, S32 maxWidth)
+// `img` as an RGB PNG at `path`, area-averaged down to at most `maxWidth`
+// pixels wide (0: the full size). Destroys `img`.
+static S32 WriteImage(const char* path, rw::Image* img, S32 maxWidth)
 {
-    // Kept between calls; the copy target is a render target, not worth
-    // making per shot.
-    static RwRaster* sFrame;
-
-    if (path == NULL)
-    {
-        return FALSE;
-    }
-
-    RwRaster* frame = iSnapshotCopyFrame(sFrame);
-    sFrame = frame;
-    if (frame == NULL)
-    {
-        return FALSE;
-    }
-
-    rw::Image* img = reinterpret_cast<rw::Raster*>(frame)->toImage();
-    if (img == NULL)
-    {
-        return FALSE;
-    }
     if (img->depth != 32 || img->width <= 0 || img->height <= 0)
     {
         img->destroy();
@@ -233,4 +214,47 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth)
     free(z);
     ok = fclose(f) == 0 && ok;
     return ok ? TRUE : FALSE;
+}
+
+S32 iFrameGrabWrite(const char* path, S32 maxWidth)
+{
+    // Kept between calls; the copy target is a render target, not worth
+    // making per shot.
+    static RwRaster* sFrame;
+
+    if (path == NULL)
+    {
+        return FALSE;
+    }
+
+    RwRaster* frame = iSnapshotCopyFrame(sFrame);
+    sFrame = frame;
+    if (frame == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::Image* img = reinterpret_cast<rw::Raster*>(frame)->toImage();
+    if (img == NULL)
+    {
+        return FALSE;
+    }
+
+    return WriteImage(path, img, maxWidth);
+}
+
+S32 iFrameGrabWriteRaster(const char* path, RwRaster* raster)
+{
+    if (path == NULL || raster == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::Image* img = reinterpret_cast<rw::Raster*>(raster)->toImage();
+    if (img == NULL)
+    {
+        return FALSE;
+    }
+
+    return WriteImage(path, img, 0);
 }

@@ -299,4 +299,11 @@ extern F32 BOOST_DURATION;
 
 zCar* zEntPlayerCarGetCar();
 
+#ifdef PLATFORM_PC
+// PLATFORM_PC: the share of a 60 fps step this frame's car update is (iTimeFrameShare), set by
+// zEntPlayerCarUpdate before its steps; 1 at 60 fps and below.
+void zCarSetStepShare(F32 share);
+F32 zCarGetStepShare();
+#endif
+
 #endif

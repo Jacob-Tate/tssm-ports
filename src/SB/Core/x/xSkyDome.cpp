@@ -123,3 +123,68 @@ void xSkyDome_Render()
     RwCameraSetFarClipPlane(cam, far_clip);
     RwCameraBeginUpdateWrapper(cam);
 }
+
+#ifdef PLATFORM_PC
+// PC: xSkyDome_BeginRenderSingle, xSkyDome_RenderSingle and
+// xSkyDome_EndRenderSingle (PS2 DWARF), dead-stripped from the GameCube build,
+// written from the Xbox executable's (0x19BDB0, 0x19BE20, 0x19BDF0).
+static F32 sSingleFarClip;
+
+void xSkyDome_BeginRenderSingle()
+{
+    // The far plane out to 10000 for the domes, as in xSkyDome_Render, but
+    // nothing is cleared.
+    RwCamera* cam = RwCameraGetCurrentCamera();
+
+    sSingleFarClip = RwCameraGetFarClipPlane(cam);
+    RwCameraEndUpdate(cam);
+    RwCameraSetFarClipPlane(cam, 10000.0f);
+    RwCameraBeginUpdateWrapper(cam);
+}
+
+void xSkyDome_RenderSingle(xEnt* ent)
+{
+    // Held over the camera as in xSkyDome_Render, and drawn with no visibility
+    // test: the domes the water draws are hidden from the scene.
+    RwCamera* cam = RwCameraGetCurrentCamera();
+    RwMatrix* cammat = RwFrameGetMatrix(RwCameraGetFrame(cam));
+    RwMatrix* mat = ent->model->Mat;
+    RwV3d oldpos = mat->pos;
+
+    // The Xbox takes user_data as the dome's index unchecked; a stale one here
+    // only loses the hold.
+    S32 index = (S32)(intptr_t)ent->user_data;
+
+    if (index >= 0 && index < sSkyCount && sSkyList[index].ent == ent)
+    {
+        const SkyDomeInfo& info = sSkyList[index];
+
+        if (info.lockXZ)
+        {
+            mat->pos.x = cammat->pos.x;
+            mat->pos.z = cammat->pos.z;
+        }
+
+        if (info.lockY)
+        {
+            mat->pos.y = cammat->pos.y;
+        }
+    }
+
+    if (!xModelCullSingle(ent->model))
+    {
+        iModelRender(ent->model->Data, ent->model->Mat);
+    }
+
+    mat->pos = oldpos;
+}
+
+void xSkyDome_EndRenderSingle()
+{
+    RwCamera* cam = RwCameraGetCurrentCamera();
+
+    RwCameraEndUpdate(cam);
+    RwCameraSetFarClipPlane(cam, sSingleFarClip);
+    RwCameraBeginUpdateWrapper(cam);
+}
+#endif

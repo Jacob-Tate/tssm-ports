@@ -5,7 +5,7 @@ libraries the program is built from (licenses/). It never holds any of the
 game's data. The game's files are the player's own, copied to the SD card:
 
   /switch/tssm/tssm.nro      this program
-  /switch/tssm/assets/       the game's Xbox files (as the Android port's assets folder)
+  /switch/tssm/assets/       the game's files, from an Xbox or a GameCube disc
   /switch/tssm/config.ini    settings, written on the first run
   /switch/tssm/saves/        saves
   /switch/tssm/mods/         mods

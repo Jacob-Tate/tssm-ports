@@ -150,8 +150,15 @@ bool iModResolveFile(const char* rel, char* out, size_t outsize);
 
 // The modded view of the package at `path` (iModPackage.h), with a reference
 // for the caller, or NULL when no enabled mod replaces anything in it.
+//
+// `gamecube`: the package is from the GameCube release (iFilePackagePlatform).
+// Its view is then made whether or not mods are on: every asset the port reads
+// in the Xbox layout is converted to it, and mods' replacements are applied on
+// top. *failed (when not NULL) says the package cannot be converted -- an
+// asset with no rule, or one that does not fit its own counts -- and the
+// result is then NULL; the reason has been printed.
 struct iModPkg;
-iModPkg* iModOpenPackage(const char* path);
+iModPkg* iModOpenPackage(const char* path, bool gamecube = false, bool* failed = NULL);
 
 // The replacement image for the texture called `name`, or NULL.
 const char* iModFindTexture(const char* name);

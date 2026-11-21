@@ -11,6 +11,7 @@
 #include <rpworld.h>
 
 #include "rw.h"
+#include "iLoadFrame.h"
 #include "iPerf.h"
 #include "iWindow.h"
 #include "iSnapshot.h"
@@ -182,8 +183,12 @@ RwCamera* RwCameraBeginUpdate(RwCamera* camera)
     }
 
     // The frame metrics' render phase starts at the frame's first camera
-    // (iPerf.h); nothing unless TSSM_PERF is set.
-    iPerfRenderBegin();
+    // (iPerf.h); nothing unless TSSM_PERF is set. A loading frame is not one of
+    // the frames it measures (iLoadFrame.h).
+    if (!iLoadFrameDrawing())
+    {
+        iPerfRenderBegin();
+    }
 
     asCamera(camera)->beginUpdate();
 
@@ -248,6 +253,32 @@ RwCamera* RwCameraShowRaster(RwCamera* camera, void* pDev, RwUInt32 flags)
     // that can act on it rather than a cast.
     (void)pDev;
 
+    // **A loading frame, drawn by the game thread in the middle of a load
+    // (iAsync.cpp), is shown and nothing more.**
+    //
+    // The window is still pumped, so it answers the system and its close button
+    // through a load. Everything else below belongs to the game's own frames:
+    // the wait for the display and the pacer's sleep would be time taken from
+    // the load; the frame hook counts frames for the test scripts and the
+    // metrics, whose numbering a load must not move; and the snapshot is the
+    // last frame of the level, which this is not.
+    if (iLoadFrameDrawing())
+    {
+        iWindowPump();
+        if (iWindowShouldClose())
+        {
+            printf("tssm: window closed during a load -- exiting.\n");
+            fflush(stdout);
+            exit(0);
+        }
+        iLoadFrameShow();
+        // Dropping the wait is free on Direct3D and OpenGL. A backend that
+        // rebuilds something when the wait changes (Vulkan's swap chain) must
+        // keep its wait as it is on a loading frame instead.
+        asCamera(camera)->showRaster(flags & ~(RwUInt32)rwRASTERFLIPWAITVSYNC);
+        return camera;
+    }
+
     // The frame metrics (iPerf.h): each call below marks a phase of the frame,
     // and does nothing unless TSSM_PERF is set.
     iPerfPresentBegin();
@@ -306,9 +337,10 @@ RwCamera* RwCameraShowRaster(RwCamera* camera, void* pDev, RwUInt32 flags)
     // the difference between a torn picture and a whole one, so it is a setting
     // rather than retail's constant.
     //
-    // librw resets the D3D9 device when the interval changes and not otherwise
-    // (d3ddevice.cpp:1633), so passing the same answer every frame costs one
-    // reset at startup and nothing after it.
+    // The flag costs nothing to change: this librw's D3D9 keeps one
+    // presentation interval and never resets for it (d3ddevice.cpp), D3D11
+    // takes the flag as Present's argument and OpenGL 3 as a swap interval it
+    // remembers.
     U32 flipFlags = flags;
     if (iWindowGetVSync())
     {

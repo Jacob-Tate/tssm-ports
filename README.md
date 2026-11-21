@@ -14,14 +14,15 @@ through OpenGL on the console's Mesa driver.
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.2
-  for the Switch: `TSSM-Dehydrated-0.9.2-Switch.nro`. It is this branch, built under that
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.5
+  for the Switch: `TSSM-Dehydrated-0.9.5-Switch.nro`. It is this branch, built under that
   neutral name with the port's own icon, and has no game data. Copy it as
-  `/switch/tssm/tssm.nro` (below). Install 0.9.2 by hand once; from then on it can update
-  itself when you ask: settings window (hold -, press +), Settings tab, *Updates*, *Check
-  for updates* (it needs Wi-Fi and system version 10.1.0 or newer). `docs/SWITCH.md`
-  ("Updates", and "Building the TSSM Dehydrated release" for the exact commands) has the
-  details.
+  `/switch/tssm/tssm.nro` (below). 0.9.2 and later update themselves when you ask:
+  settings window (hold -, press +), Settings tab, *Updates*, *Check for updates* (it needs
+  Wi-Fi and system version 10.1.0 or newer). Coming from 0.9.2: if its check cannot
+  connect, copy the new `.nro` over your old `tssm.nro` once; settings and saves stay.
+  `docs/SWITCH.md` ("Updates", and "Building the TSSM Dehydrated release" for the exact
+  commands) has the details.
 - **Build it yourself** from this source, as below. A build of your own is called *The
   SpongeBob SquarePants Movie Video Game* in the Homebrew Menu, and can have an icon made
   from a picture of your choice (`docs/ICON.md`). It has no updater unless you turn one on.
@@ -52,9 +53,9 @@ You need your own copy of the game
 ----------------------------------
 
 This repository contains **no game data**, and neither does `tssm.nro`. It reads the files
-of the **Xbox** release of *The SpongeBob SquarePants Movie*, so you need your own copy of
-that disc and its files copied off it (about 1 GB). Never put those files in the
-repository.
+of the **Xbox** or the **GameCube** release of *The SpongeBob SquarePants Movie*, so you
+need your own copy of one of those discs and its files copied off it (about 1 GB). Never
+put those files in the repository.
 
 Building
 --------
@@ -91,8 +92,10 @@ with `DEVKITPRO` set on Linux or macOS.
 Playing
 -------
 
-1. Copy `tssm.nro` to `/switch/tssm/tssm.nro` on the SD card, and your Xbox game files to
-   `/switch/tssm/assets/` (the folder with `boot.HIP`, `FMV/` and the level folders).
+1. Copy `tssm.nro` to `/switch/tssm/tssm.nro` on the SD card, and your game files to
+   `/switch/tssm/assets/`: from an Xbox disc, the folder with `boot.HIP`, `FMV/` and the
+   level folders; from a GameCube disc extracted with Dolphin, its `files` folder (or the
+   folder holding `files` and `sys`).
 2. Start the Homebrew Menu **with full memory**: hold R while you start any game from the
    HOME menu, then pick the game (*TSSM Dehydrated*, or *The SpongeBob SquarePants Movie
    Video Game* for a build of your own). (From the Album it gets too little memory, and says so.)
@@ -104,7 +107,8 @@ More documentation:
 |---|---|
 | `docs/SWITCH.md` | building, playing, controls, testing on a console, how the Switch layer works |
 | `docs/CONTROLS.md` | the controls |
-| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube |
+| `docs/SAVES.md` | save files, and moving them to and from the PC, Dolphin or a GameCube; Xbox, PlayStation 2 and PlayStation 3 saves |
+| `docs/EXTRAS.md`, `docs/CHEATS.md` | the Xbox release's extras; the Cheats tab |
 | `docs/MODDING.md` | mods |
 | `docs/ICON.md` | using your own picture as the program's icon |
 | `src/SB/Core/pc/README.md`, `src/SB/Core/pc/PORTING.md` | the platform layer, and where each file came from |

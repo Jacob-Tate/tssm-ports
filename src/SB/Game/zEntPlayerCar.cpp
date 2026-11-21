@@ -12,6 +12,11 @@
 #include "zGlobals.h"
 #include "zMain.h"
 
+#ifdef PLATFORM_PC
+#include "iExtras.h"
+#include "iTime.h"
+#endif
+
 #include <math.h>
 
 WAD_STATIC zCar playerCar;
@@ -167,6 +172,17 @@ U8 zEntPlayerCarUpdate(xEnt* ent, xScene* sc, F32 dt)
     {
         numSteps = std::ceilf(dt / perfectStep);
     }
+
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: under the GameCube's 30 fps hold ([extras] frame_lock), one step per 1/60 s,
+    // so the car drives as at 60 rather than getting 2 or 3 steps a frame by chance (iExtras.h).
+    numSteps = iExtrasHeldCarSteps(dt, numSteps);
+
+    // PLATFORM_PC: a frame shorter than a 60 fps one (above a cap of 60) is one step of less
+    // than 1/60 s, and the car's per-step amounts are scaled to it (zCar.cpp). Frames of several
+    // steps, and every frame at a cap of 60 or below, get exactly the original steps.
+    zCarSetStepShare(numSteps == 1 ? iTimeFrameShare(dt) : 1.0f);
+#endif
 
     for (i = 0; i < numSteps; i++)
     {

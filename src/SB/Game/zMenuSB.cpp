@@ -371,6 +371,18 @@ U32 zMenuSB_IsTaskUnlocked(U32 sceneID, U32 taskID)
     // 'world' is not a DWARF local (it may belong to an inline helper); folding the '- 1' into the
     // index lets CW merge it into the load offset, which the target does not do.
     U32 world = GetWorldNumber(sceneID) - 1;
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: a scene with no TaskStatus line makes world -1. The GameCube then reads the
+    // 16 bytes in front of the table, the end of zMenu's corruptFiles (zeroed .bss), so the task
+    // reads as locked. A 64-bit build indexes 4G entries past the table and crashes instead.
+    // zDispatcher_FindNextValidWorld asks for such scenes (Menu13's WM01, whose TaskStatus line
+    // is GG01; a mod's own level in Menu01) on a portal whose world is locked, when every world
+    // between it and them is locked too, as a mod's ini can have them.
+    if (world == (U32)-1)
+    {
+        return 0;
+    }
+#endif
     return sDefaultWorldTasks[world].taskStatus[taskID] != 0;
 }
 
@@ -1765,3 +1777,61 @@ static void __deadstripped_zMenuSB(F32* out)
     out[0] = 3.0f;
     out[1] = 100000.0f;
 }
+
+#ifdef PLATFORM_PC
+// PC: the Cheats tab (iCheats.h) reads the Extras screen's list and switches its costumes and
+// functions without the screen.
+
+S32 zMenuSB_PCExtraCount()
+{
+    return (S32)sNumExtras;
+}
+
+bool zMenuSB_PCExtra(S32 index, S32* type, S32* id, S32* chestsNeeded, S32* status)
+{
+    if (index < 0 || index >= (S32)sNumExtras)
+    {
+        return false;
+    }
+    *type = sExtrasList[index].type;
+    *id = sExtrasList[index].id;
+    *chestsNeeded = sExtrasList[index].chestsNeeded;
+    *status = sExtrasList[index].status;
+    return true;
+}
+
+// What zUICustomExtrasManager::SelectCurrentIcon does to a costume (type 4) or a function
+// (type 5), less the icon's animation, which EnterScreen starts from the status.
+void zMenuSB_PCToggleExtra(S32 index)
+{
+    if (index < 0 || index >= (S32)sNumExtras)
+    {
+        return;
+    }
+
+    extraEntry& currentIcon = sExtrasList[index];
+    switch (currentIcon.type)
+    {
+    case 4:
+        currentIcon.status = 1 - currentIcon.status;
+        if (currentIcon.status != 0)
+        {
+            ClearAllButThisCostume(currentIcon.id);
+        }
+        break;
+    case 5:
+        currentIcon.status = 1 - currentIcon.status;
+        break;
+    }
+}
+
+// A co-op joiner takes the host's status of a costume or function (iCheatsShared).
+void zMenuSB_PCSetExtraStatus(S32 index, S32 status)
+{
+    if (index >= 0 && index < (S32)sNumExtras &&
+        (sExtrasList[index].type == 4 || sExtrasList[index].type == 5))
+    {
+        sExtrasList[index].status = status != 0;
+    }
+}
+#endif

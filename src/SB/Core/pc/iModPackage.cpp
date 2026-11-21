@@ -48,6 +48,8 @@ namespace
     const U32 kMinAlign = 16;
 
     const U32 kSNDI = 0x534E4449; // 'SNDI'
+    const U32 kSND = 0x534E4420; // 'SND '
+    const U32 kSNDS = 0x534E4453; // 'SNDS'
     const U32 kSNDIHeader = 12;
     const U32 kSNDIEntry = 44;
 
@@ -91,6 +93,13 @@ namespace
     std::string FourCC(U32 t)
     {
         char s[5] = { (char)(t >> 24), (char)(t >> 16), (char)(t >> 8), (char)t, 0 };
+        for (int i = 0; i < 4; i++)
+        {
+            if ((U8)s[i] < 0x20 || (U8)s[i] >= 0x7F)
+            {
+                s[i] = '?';
+            }
+        }
         return s;
     }
 
@@ -144,12 +153,16 @@ namespace
 
     // The chunks one level down from [begin, end) of `head`, calling `fn` with
     // each one's id, payload offset and payload size. Stops at anything that
-    // does not fit.
+    // does not fit. True when the chunks fill [begin, end) exactly.
     template <class Fn>
-    void Walk(const std::vector<U8>& head, U32 begin, U32 end, Fn fn)
+    bool Walk(const std::vector<U8>& head, U32 begin, U32 end, Fn fn)
     {
+        if (end > head.size() || begin > end)
+        {
+            return false;
+        }
         U32 pos = begin;
-        while (pos + 8 <= end && pos + 8 <= head.size())
+        while (end - pos >= 8)
         {
             U32 id = RdBE(&head[pos]);
             U32 size = RdBE(&head[pos + 4]);
@@ -161,7 +174,16 @@ namespace
             fn(id, body, size);
             pos = body + size;
         }
+        return pos == end;
     }
+
+    // Parse's checks (iModPkgCheck).
+    enum
+    {
+        PARSE_STRICT = 1, // the table of contents must hold together
+        PARSE_EXACT = 2, // and the AHDR and LHDR counts equal PCNT's
+        PARSE_EMPTY_OK = 4 // a package with no assets is one
+    };
 
     // A NUL-terminated string at head[off], bounded by `end`.
     std::string ReadString(const std::vector<U8>& head, U32 off, U32 end)
@@ -174,18 +196,26 @@ namespace
         return s;
     }
 
-    bool Parse(const Source& src, Parsed* out)
+    bool Parse(const Source& src, Parsed* out, U32 checks = 0, std::string* why = NULL)
     {
         out->fileSize = src.size;
         out->strmHdr = 0;
         out->dpakHdr = 0;
+
+        std::string scratch;
+        std::string& reason = why != NULL ? *why : scratch;
+        reason.clear();
+        auto fail = [&](const std::string& r) {
+            reason = r;
+            return false;
+        };
 
         // HIPA holds no payload of its own: the other chunks follow it as
         // siblings (xpkrsvc.cpp PKR_parse_TOC, and pc/iFile.cpp iHipPlatform).
         U8 h[8];
         if (!src.Read(0, h, 8) || RdBE(h) != 0x48495041) // 'HIPA'
         {
-            return false;
+            return fail(src.size == 0 ? "the file is empty" : "it is not a HIP/HOP package");
         }
 
         // The top level, header by header, until the DPAK payload: everything
@@ -196,13 +226,14 @@ namespace
         {
             if (!src.Read(pos, h, 8))
             {
-                return false;
+                return fail("its chunks cannot be read");
             }
             U32 id = RdBE(h);
             U32 size = RdBE(h + 4);
             if (size > src.size - pos - 8)
             {
-                return false;
+                return fail(Format("its %s chunk at 0x%X runs past the end of the file (cut short?)",
+                                   FourCC(id).c_str(), pos));
             }
             if (id == 0x44494354) // 'DICT'
             {
@@ -213,107 +244,179 @@ namespace
                 out->strmHdr = pos;
                 U32 sub = pos + 8;
                 U32 end = pos + 8 + size;
-                while (sub + 8 <= end)
+                while (end - sub >= 8)
                 {
                     if (!src.Read(sub, h, 8))
                     {
-                        return false;
+                        return fail("its STRM chunk cannot be read");
                     }
                     if (RdBE(h) == 0x4450414B) // 'DPAK'
                     {
                         out->dpakHdr = sub;
                         break;
                     }
-                    sub += 8 + RdBE(h + 4);
+                    U32 subSize = RdBE(h + 4);
+                    if (subSize > end - sub - 8)
+                    {
+                        break;
+                    }
+                    sub += 8 + subSize;
                 }
                 if (out->dpakHdr == 0)
                 {
-                    return false;
+                    return fail("its STRM chunk holds no DPAK");
                 }
             }
             pos += 8 + size;
         }
         if (!sawDict || out->dpakHdr == 0)
         {
-            return false;
+            return fail("it has no DICT or no DPAK before its data");
         }
 
         U32 headLen = out->dpakHdr + 8;
         out->head.resize(headLen);
         if (!src.Read(0, &out->head[0], headLen))
         {
-            return false;
+            return fail("its header cannot be read");
         }
+
+        const bool strict = (checks & PARSE_STRICT) != 0;
+        std::string bad; // strict: the first thing that does not hold together
+        auto note = [&](const std::string& r) {
+            if (bad.empty())
+            {
+                bad = r;
+            }
+        };
 
         std::map<U32, S32> byId;
         std::vector<std::pair<U32, std::vector<U32> > > lhdr;
+        bool sawPcnt = false;
+        U32 asscnt = 0;
+        U32 laycnt = 0;
+        U32 ahdrs = 0;
+        U32 lhdrs = 0;
 
         Walk(out->head, 8, headLen, [&](U32 id, U32 body, U32 size) {
+            if (id == 0x5041434B) // 'PACK'
+            {
+                if (!Walk(out->head, body, body + size, [&](U32 id2, U32 body2, U32 size2) {
+                        if (id2 == 0x50434E54 && size2 >= 8) // 'PCNT'
+                        {
+                            sawPcnt = true;
+                            asscnt = RdBE(&out->head[body2]);
+                            laycnt = RdBE(&out->head[body2 + 4]);
+                        }
+                    }))
+                {
+                    note("its PACK chunk does not hold together");
+                }
+                return;
+            }
             if (id != 0x44494354) // 'DICT'
             {
                 return;
             }
-            Walk(out->head, body, body + size, [&](U32 id2, U32 body2, U32 size2) {
-                if (id2 == 0x41544F43) // 'ATOC'
-                {
-                    Walk(out->head, body2, body2 + size2, [&](U32 id3, U32 b3, U32 s3) {
-                        if (id3 != 0x41484452 || s3 < 24) // 'AHDR'
+            if (!Walk(out->head, body, body + size, [&](U32 id2, U32 body2, U32 size2) {
+                    if (id2 == 0x41544F43) // 'ATOC'
+                    {
+                        if (!Walk(out->head, body2, body2 + size2, [&](U32 id3, U32 b3, U32 s3) {
+                                if (id3 != 0x41484452) // 'AHDR'
+                                {
+                                    return;
+                                }
+                                ahdrs++;
+                                if (s3 < 24)
+                                {
+                                    note(Format("an AHDR at 0x%X is %u bytes, too short", b3, s3));
+                                    return;
+                                }
+                                const U8* p = &out->head[b3];
+                                iModPkgTocAsset a;
+                                a.id = RdBE(p);
+                                a.type = RdBE(p + 4);
+                                a.off = RdBE(p + 8);
+                                a.size = RdBE(p + 12);
+                                a.pad = RdBE(p + 16);
+                                a.flags = RdBE(p + 20);
+                                a.align = 0;
+                                a.layer = -1;
+                                if ((S32)a.size < 0 || (S32)a.pad < 0)
+                                {
+                                    note(Format("asset %08X has a negative size or pad", a.id));
+                                }
+                                if ((S32)a.size < 0)
+                                {
+                                    a.size = 0;
+                                }
+                                if ((S32)a.pad < 0)
+                                {
+                                    a.pad = 0;
+                                }
+                                if (!Walk(out->head, b3 + 24, b3 + s3, [&](U32 id4, U32 b4, U32 s4) {
+                                        if (id4 == 0x41444247 && s4 >= 4) // 'ADBG'
+                                        {
+                                            a.align = RdBE(&out->head[b4]);
+                                            a.name = ReadString(out->head, b4 + 4, b4 + s4);
+                                        }
+                                    }))
+                                {
+                                    note(Format("asset %08X's AHDR does not hold together", a.id));
+                                }
+                                if (byId.find(a.id) != byId.end())
+                                {
+                                    note(Format("asset %08X is listed twice", a.id));
+                                }
+                                byId[a.id] = (S32)out->assets.size();
+                                out->assets.push_back(a);
+                                out->ahdr.push_back(b3);
+                            }))
                         {
-                            return;
+                            note("its ATOC chunk does not hold together");
                         }
-                        const U8* p = &out->head[b3];
-                        iModPkgTocAsset a;
-                        a.id = RdBE(p);
-                        a.type = RdBE(p + 4);
-                        a.off = RdBE(p + 8);
-                        a.size = RdBE(p + 12);
-                        a.pad = RdBE(p + 16);
-                        a.flags = RdBE(p + 20);
-                        a.align = 0;
-                        a.layer = -1;
-                        if ((S32)a.size < 0)
+                    }
+                    else if (id2 == 0x4C544F43) // 'LTOC'
+                    {
+                        if (!Walk(out->head, body2, body2 + size2, [&](U32 id3, U32 b3, U32 s3) {
+                                if (id3 != 0x4C484452) // 'LHDR'
+                                {
+                                    return;
+                                }
+                                lhdrs++;
+                                if (s3 < 8)
+                                {
+                                    note(Format("an LHDR at 0x%X is %u bytes, too short", b3, s3));
+                                    return;
+                                }
+                                const U8* p = &out->head[b3];
+                                U32 type = RdBE(p);
+                                U32 count = RdBE(p + 4);
+                                if (count > (s3 - 8) / 4)
+                                {
+                                    note(Format("an LHDR at 0x%X names more assets than it holds", b3));
+                                    count = (s3 - 8) / 4;
+                                }
+                                else if (!Walk(out->head, b3 + 8 + 4 * count, b3 + s3,
+                                               [](U32, U32, U32) {}))
+                                {
+                                    note(Format("an LHDR at 0x%X does not hold together", b3));
+                                }
+                                std::vector<U32> ids;
+                                for (U32 i = 0; i < count; i++)
+                                {
+                                    ids.push_back(RdBE(p + 8 + 4 * i));
+                                }
+                                lhdr.push_back(std::make_pair(type, ids));
+                            }))
                         {
-                            a.size = 0;
+                            note("its LTOC chunk does not hold together");
                         }
-                        if ((S32)a.pad < 0)
-                        {
-                            a.pad = 0;
-                        }
-                        Walk(out->head, b3 + 24, b3 + s3, [&](U32 id4, U32 b4, U32 s4) {
-                            if (id4 == 0x41444247 && s4 >= 4) // 'ADBG'
-                            {
-                                a.align = RdBE(&out->head[b4]);
-                                a.name = ReadString(out->head, b4 + 4, b4 + s4);
-                            }
-                        });
-                        byId[a.id] = (S32)out->assets.size();
-                        out->assets.push_back(a);
-                        out->ahdr.push_back(b3);
-                    });
-                }
-                else if (id2 == 0x4C544F43) // 'LTOC'
-                {
-                    Walk(out->head, body2, body2 + size2, [&](U32 id3, U32 b3, U32 s3) {
-                        if (id3 != 0x4C484452 || s3 < 8) // 'LHDR'
-                        {
-                            return;
-                        }
-                        const U8* p = &out->head[b3];
-                        U32 type = RdBE(p);
-                        U32 count = RdBE(p + 4);
-                        if (count > (s3 - 8) / 4)
-                        {
-                            count = (s3 - 8) / 4;
-                        }
-                        std::vector<U32> ids;
-                        for (U32 i = 0; i < count; i++)
-                        {
-                            ids.push_back(RdBE(p + 8 + 4 * i));
-                        }
-                        lhdr.push_back(std::make_pair(type, ids));
-                    });
-                }
-            });
+                    }
+                }))
+            {
+                note("its DICT chunk does not hold together");
+            }
         });
 
         // Layers after assets: the DICT holds ATOC before LTOC, but nothing
@@ -327,7 +430,13 @@ namespace
                 std::map<U32, S32>::const_iterator it = byId.find(lhdr[i].second[j]);
                 if (it == byId.end())
                 {
+                    note(Format("a layer names asset %08X, which is not in the package",
+                                lhdr[i].second[j]));
                     continue;
+                }
+                if (out->assets[it->second].layer >= 0)
+                {
+                    note(Format("asset %08X is in two layers", lhdr[i].second[j]));
                 }
                 layer.assets.push_back(it->second);
                 out->assets[it->second].layer = (S32)out->layers.size();
@@ -335,7 +444,77 @@ namespace
             out->layers.push_back(layer);
         }
 
-        return !out->assets.empty();
+        if (strict)
+        {
+            if (!sawPcnt)
+            {
+                note("it has no PCNT");
+            }
+            else if ((checks & PARSE_EXACT) ? (ahdrs != asscnt || lhdrs != laycnt)
+                                            : (ahdrs > asscnt || lhdrs > laycnt))
+            {
+                note(Format("it lists %u asset(s) and %u layer(s) where its PCNT says %u and %u",
+                            ahdrs, lhdrs, asscnt, laycnt));
+            }
+
+            for (size_t i = 0; i < out->assets.size() && bad.empty(); i++)
+            {
+                const iModPkgTocAsset& a = out->assets[i];
+                if (a.size > 0 && (a.off > src.size || a.size > src.size - a.off))
+                {
+                    note(Format("asset %08X '%s' runs past the end of the file", a.id,
+                                a.name.c_str()));
+                }
+            }
+
+            // The packer reads a layer from its first asset's offset, each
+            // asset's size and pad but the last's, plus the last's size
+            // (xpkrsvc.cpp LOD_r_LHDR), and finds every asset at its offset
+            // from the first.
+            for (size_t l = 0; l < out->layers.size() && bad.empty(); l++)
+            {
+                const std::vector<S32>& as = out->layers[l].assets;
+                if (as.empty())
+                {
+                    continue;
+                }
+                U64 first = out->assets[as[0]].off;
+                U64 span = 0;
+                for (size_t k = 0; k < as.size(); k++)
+                {
+                    span += out->assets[as[k]].size;
+                    if (k + 1 < as.size())
+                    {
+                        span += out->assets[as[k]].pad;
+                    }
+                }
+                if (first + span > src.size)
+                {
+                    note(Format("layer %u runs past the end of the file", (U32)l));
+                    break;
+                }
+                for (size_t k = 0; k < as.size(); k++)
+                {
+                    const iModPkgTocAsset& a = out->assets[as[k]];
+                    if (a.size > 0 && (a.off < first || (U64)a.off + a.size > first + span))
+                    {
+                        note(Format("asset %08X lies outside its layer", a.id));
+                        break;
+                    }
+                }
+            }
+
+            if (!bad.empty())
+            {
+                return fail(bad);
+            }
+        }
+
+        if (out->assets.empty() && !(checks & PARSE_EMPTY_OK))
+        {
+            return fail("it has no assets");
+        }
+        return true;
     }
 
     // The alignment a moved asset keeps: whatever its old offset had (so a
@@ -415,8 +594,12 @@ namespace
 } // namespace
 
 iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
-                      std::vector<std::string>* log)
+                      std::vector<std::string>* log, U32 flags, iModPkgStatus* status)
 {
+    iModPkgStatus scratch;
+    iModPkgStatus& result = status != NULL ? *status : scratch;
+    result = IMODPKG_UNREADABLE;
+
     FILE* fp = fopen(path, "rb");
     if (fp == NULL)
     {
@@ -424,17 +607,28 @@ iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
     }
     fseek(fp, 0, SEEK_END);
     long len = ftell(fp);
-    if (len <= 0)
+    if (len <= 0 || (unsigned long)len > 0xFFFFFFFFul)
     {
         fclose(fp);
+        if (log != NULL)
+        {
+            log->push_back(len == 0 ? "  the file is empty" : "  the file's size cannot be read");
+        }
         return NULL;
     }
 
     Source src = { fp, NULL, (U32)len };
     Parsed P;
-    if (!Parse(src, &P))
+    std::string why;
+    const U32 checks =
+        (flags & IMODPKG_GAMECUBE) ? (PARSE_STRICT | PARSE_EXACT | PARSE_EMPTY_OK) : 0;
+    if (!Parse(src, &P, checks, &why))
     {
         fclose(fp);
+        if (log != NULL && checks != 0)
+        {
+            log->push_back("  " + why);
+        }
         return NULL;
     }
 
@@ -451,10 +645,20 @@ iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
     for (S32 i = 0; i < n; i++)
     {
         const iModPkgTocAsset& a = P.assets[i];
-        iModPkgAsset q = { a.id, a.type, a.name.c_str(), a.size };
+        iModPkgAsset q = { a.id, a.type, a.name.c_str(), a.size, a.off };
         iModPkgReplacement r;
         if (!lookup(ctx, q, &r))
         {
+            continue;
+        }
+        if ((flags & IMODPKG_GAMECUBE) && (a.type == kSND || a.type == kSNDS || r.pcm))
+        {
+            if (log != NULL)
+            {
+                log->push_back(Format("  %08X '%s': %s replaces a sound in a GameCube sound "
+                                      "table, which is not supported yet; kept the original",
+                                      a.id, a.name.c_str(), r.source.c_str()));
+            }
             continue;
         }
         if (r.bytes.empty())
@@ -474,12 +678,13 @@ iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
     if (repls.empty())
     {
         fclose(fp);
+        result = IMODPKG_UNCHANGED;
         return NULL;
     }
 
     // SNDI tables describing replaced sounds. Taken after the lookups, so a
     // mod that replaces the table itself is patched too.
-    for (S32 i = 0; i < n; i++)
+    for (S32 i = 0; i < n && !(flags & IMODPKG_GAMECUBE); i++)
     {
         if (P.assets[i].type != kSNDI)
         {
@@ -787,7 +992,37 @@ iModPkg* iModPkgBuild(const char* path, iModPkgLookupFn lookup, void* ctx,
     }
     pkg->size = size;
 
+    result = IMODPKG_VIEW;
     return pkg;
+}
+
+bool iModPkgCheck(const char* path, bool exactCounts, std::string* why)
+{
+    std::string scratch;
+    std::string& reason = why != NULL ? *why : scratch;
+    reason.clear();
+
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL)
+    {
+        reason = "it cannot be opened";
+        return false;
+    }
+    fseek(fp, 0, SEEK_END);
+    long len = ftell(fp);
+    if (len < 0 || (unsigned long)len > 0xFFFFFFFFul)
+    {
+        fclose(fp);
+        reason = "its size cannot be read";
+        return false;
+    }
+
+    Source src = { fp, NULL, (U32)len };
+    Parsed P;
+    bool ok = Parse(src, &P, PARSE_STRICT | PARSE_EMPTY_OK | (exactCounts ? PARSE_EXACT : 0),
+                    &reason);
+    fclose(fp);
+    return ok;
 }
 
 void iModPkgRetain(iModPkg* pkg)
@@ -809,6 +1044,16 @@ void iModPkgRelease(iModPkg* pkg)
 U32 iModPkgSize(const iModPkg* pkg)
 {
     return pkg->size;
+}
+
+U64 iModPkgMemory(const iModPkg* pkg)
+{
+    U64 n = sizeof(*pkg) + pkg->extents.size() * sizeof(iModPkg::Extent);
+    for (size_t i = 0; i < pkg->bufs.size(); i++)
+    {
+        n += pkg->bufs[i].size();
+    }
+    return n;
 }
 
 S32 iModPkgReplacedCount(const iModPkg* pkg)

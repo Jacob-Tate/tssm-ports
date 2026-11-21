@@ -279,7 +279,10 @@ namespace
                 printf("tssm: update: switch: the ssl service handed back descriptor %d\n", given);
                 mGiven = given;
             }
-            rc = sslConnectionSetHostName(&mConnection, host, (u32)strlen(host) + 1);
+            // The name's length without the end-of-string byte, as devkitPro's
+            // libcurl passes it (proven on hardware): a counted end byte could
+            // end up in the name the service sends and checks.
+            rc = sslConnectionSetHostName(&mConnection, host, (u32)strlen(host));
             if (R_SUCCEEDED(rc))
             {
                 rc = sslConnectionSetVerifyOption(&mConnection, SslVerifyOption_PeerCa |

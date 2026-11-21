@@ -361,6 +361,22 @@ S32 iHostClaimInstance(const char* key, U32* holder)
     return iSwitchClaimFile(path);
 }
 
+bool iHostInstanceHeld(const char* key, U32* holder)
+{
+    if (holder != NULL)
+    {
+        *holder = 0;
+    }
+    char dir[512];
+    if (!iHostTempDir(dir, sizeof(dir)))
+    {
+        return false;
+    }
+    char path[700];
+    snprintf(path, sizeof(path), "%s/%s.lock", dir, key != NULL ? key : "tssm");
+    return iSwitchFileHeld(path);
+}
+
 S32 iHostRaiseProcessWindow(U32)
 {
     return 0;

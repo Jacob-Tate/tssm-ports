@@ -14,15 +14,18 @@ You need:
 1. a Switch running Atmosphere;
 2. `tssm.nro`: the prebuilt *TSSM Dehydrated* one from this repository's Releases
    page, or your own, built as described under *Building*;
-3. your own copy of the game's Xbox files (the same files the PC and Android
-   builds use).
+3. your own copy of the game's files, from an Xbox or a GameCube disc (the
+   same files the PC build uses). Extract them on a computer: an Xbox disc
+   image with an XISO extractor; a GameCube disc in Dolphin (right-click the
+   game, **Extract Entire Disc**). A disc image itself (`.iso`, `.rvz`) is not
+   read.
 
 Copy them to the SD card:
 
 | Path on the SD card | What |
 |---|---|
 | `/switch/tssm/tssm.nro` | the program |
-| `/switch/tssm/assets/` | the game's Xbox files, laid out as the Android build's `assets` folder (the folder with `boot.HIP`, `FMV/`, the level folders) |
+| `/switch/tssm/assets/` | the game's files: the folder with `boot.HIP`, `font.HIP`, `FMV/` (Xbox) and the level folders; from a GameCube disc, Dolphin's `files` folder, or the folder holding `files` and `sys` |
 
 The program writes everything else into the same folder:
 
@@ -63,8 +66,27 @@ game, as for any title.
 - What does nothing on the Switch is not shown: the window mode, the choice of
   renderer (it shows OpenGL 3), the Open with key (`[gui] key` stays in
   config.ini), buttons that would open a folder, a file or a web link, the
-  keyboard column of the Controls tab. Nothing in it types text either: that
-  would open the system keyboard.
+  keyboard column and the mouse settings of the Controls tab. Nothing in it
+  types text either: that would open the system keyboard.
+- **Xbox extras** (Settings, after Display): the Xbox release's glow,
+  spotlights, moving crowds, water and 60 fps levels, each with the GameCube's
+  version one choice away (docs/EXTRAS.md). They are the Xbox's by default, as
+  on PC.
+- **Save screen text** (Settings, Game): Automatic uses the Switch's own
+  words ("Please don't close the game or turn off the console."); any other platform's line
+  can be chosen.
+- **Cheats** (its own tab, docs/CHEATS.md): the game's nine button codes and
+  its Extras screen, and a few port cheats. Its text names ZL and ZR for the
+  button codes and L and R for flight, and shows the codes and flight's rise
+  button in the Switch's printed letters (X and Y are the other way round from
+  the Xbox's).
+- **The game's own menus in handheld mode**: touching an item gives it the
+  highlight and lifting the finger chooses it; a hint at the bottom of the
+  screen ("B Options") is a button. The controller works as always, and a
+  touch does nothing during play. `[input] mouse_menus = off` in config.ini
+  turns it off.
+- **Before the game** (only when the game's files are not found) the same
+  tabs show as a launcher, with **Play** and **Quit**.
 
 If a level runs below about 45 frames a second on the console, the SpongeBall
 still keeps its full speed: a change from the original game, which slows the
@@ -93,6 +115,12 @@ In the settings window, Settings tab, **Updates**:
 - **Check for updates when the game starts**: off unless you turn it on; then
   the game checks once at each start, and a line at the top of the settings
   window says when a new version is waiting.
+
+**Coming from 0.9.2:** 0.9.2 fetches 0.9.5 with its own updater, which does
+not have 0.9.5's host-name fix (`switch/iSwitchUpdate.cpp`). If its **Check
+for updates** cannot connect, get 0.9.5 by hand once: copy the new `.nro` over
+your old one on the SD card (such as `/switch/tssm/tssm.nro`). Your settings
+and saves stay. From 0.9.5 on, the check uses the fixed code.
 
 What it does and does not do:
 
@@ -236,11 +264,15 @@ NACP and a 256x256 icon. These CMake options set what the Homebrew Menu shows:
 |---|---|---|
 | `TSSM_SWITCH_NAME` | `The SpongeBob SquarePants Movie Video Game` | the program's name (the prebuilt release sets `TSSM Dehydrated`, below) |
 | `TSSM_SWITCH_AUTHOR` | `TSSM port` | the author line |
-| `TSSM_SWITCH_VERSION` | `0.9.2` | the version |
+| `TSSM_SWITCH_VERSION` | `0.9.5` | the version |
 | `TSSM_SWITCH_ICON` | empty | a 256x256 JPEG; empty uses `TSSM_ICON_DIR`'s `icon.jpg` when one was made (docs/ICON.md), otherwise `dist/switch/default_icon.jpg` (a plain sponge block drawn by `tools/switch/draw_default_icon.ps1`) |
 
 CMake caches them, so a build directory keeps what it was configured with
 (including an older default) until it is configured again with `-D...`.
+
+`TSSM_PC_TITLE` (the same default name) is what the program calls itself on
+screen, as on PC: the settings window's title, the launcher's heading, the
+About tab and the first line of config.ini.
 
 The updater (For players, "Updates") is off unless the build turns it on:
 
@@ -305,10 +337,11 @@ debug information clean as well. In devkitPro's MSYS2 shell:
     sh tools/switch/build_ffmpeg.sh $R/src/FFmpeg-n9.0.2 $R/ff-work $R/prefix
     sh tools/switch/build_port.sh $R/build $R/prefix \
         "-DTSSM_SWITCH_NAME=TSSM Dehydrated" \
+        "-DTSSM_PC_TITLE=TSSM Dehydrated" \
         -DTSSM_SWITCH_AUTHOR=aidp2 \
-        -DTSSM_SWITCH_VERSION=0.9.2 \
+        -DTSSM_SWITCH_VERSION=0.9.5 \
         -DTSSM_SWITCH_ICON=$R/src/tssm/dist/switch/default_icon.jpg \
-        "-DTSSM_VERSION_LINE=0.9.2 (TSSM Dehydrated)" \
+        "-DTSSM_VERSION_LINE=0.9.5 (TSSM Dehydrated)" \
         -DTSSM_UPDATE=ON
 
 `TSSM_VERSION_LINE` is the About tab's version line (docs/GUI.md). The
@@ -448,8 +481,27 @@ Notes:
   quit, and the quit would then have to end the process instead of returning.
 - **Touch.** SDL's Switch touch driver sent no finger-down or finger-up events;
   `tools/switch/sdl/0002-switch-touch-events.patch` fixes it. The port turns on
-  SDL's touch-to-mouse there, so a tap is a click in the settings window; the
-  game itself ignores that mouse.
+  SDL's touch-to-mouse there, so a tap is a click in the settings window. The
+  game does not take that mouse for a mouse (no mouse look, no keyboard
+  prompts); in its own menus the same events are a finger
+  (`iMouseLook.h`, "A finger"; `iPadKeyboardTouch`): a touch moves the
+  highlight through the menu's own links, as the PC's pointer does
+  (`iMenuMouse.h`), and the lift is the accept button. A finger that was
+  down before a menu came up, or while the settings window was open, is not
+  one. On a PC, `TSSM_TEST_MOUSE=<frame>:touch:x:y,<frame>:lift` plays one.
+- **The Xbox extras and the Xbox water** (docs/EXTRAS.md, docs/RENDERING.md,
+  "Water") are on, as on PC, through the same OpenGL 3 shaders. The water's
+  refraction and reflection targets are at most 1024 on a side, and all of
+  them draw with one depth buffer (`iXboxWaterPass.cpp`): each target is
+  cleared, drawn and finished before the next, and only its colour is read
+  afterwards, so a depth buffer each (two for every water area: eight in
+  SC02) would only hold memory. At 1280x720 a target is 1024x768: about 3 MB
+  of colour each, 25 MB for SC02's eight, plus the one 3 MB depth buffer
+  (about 50 MB before). Not yet run on a console: if SC02 or B301 are slow
+  there, **Water: GameCube** in Xbox extras is the way back, and the default
+  can follow a measurement.
+- **GameCube files** are read as on PC (`iGCPackage`, `iGCSwap`, librw's
+  GameCube texture and geometry readers), converted as each level loads.
 - **HOME and sleep.** SDL's Switch video driver sends no background or
   foreground events, so an applet hook stands in for them: the game clock stops
   (`iTimeSuspend`) and on return starts again and the audio devices restart
@@ -535,8 +587,25 @@ What is known not to work or not to exist yet, with the place to change it:
   the `widen: at exit` report, `closing sockets and the RomFS`, `releasing
   the save folder's claim`, two `low memory ... released` and `returning to
   the Homebrew Menu`.
-- **Touch** (the SDL patch, the settings window's taps and the three-finger
-  toggle) is untested on a console.
+- **Touch** (the SDL patch, the settings window's taps, the three-finger
+  toggle and the finger in the game's menus) is untested on a console.
+- **0.9.4's and 0.9.5's additions** have not been on a console (the Switch had
+  no 0.9.4 release: 0.9.5 is its first update from 0.9.2): the Xbox water and
+  extras on this GPU (speed in SC02, B301 and TT01's disco), a level loaded
+  from GameCube files (its load time), the launcher with every tab; the
+  loading screen (its frames are drawn between pieces of the load and do not
+  wait for the display), the Cheats tab (its text names ZL and ZR for the
+  button codes, L and R for flight, and shows the codes and flight's rise
+  button in the Switch's printed letters, X and Y the other way round from
+  the Xbox's), the HUD at the screen's edges, the Xbox,
+  PlayStation 2 and PlayStation 3 saves through the built-in browser, and the
+  updater's host-name fix (the ssl service is given the host name's length
+  without its end byte, `switch/iSwitchUpdate.cpp`). That fix is first used by
+  0.9.5's own **Check for updates**: the update from 0.9.2 runs 0.9.2's
+  updater, the old code (Updates above, "Coming from 0.9.2").
+- **The Sonic Wave Guitar's swirl** (`extras.guitar_distortion`) stays off
+  here until it has been seen on a console: its pass is written for OpenGL 3
+  but `iExtrasResolve` gives `gamecube` on the Switch, and the row says so.
 - **The exception handler** is libnx's documented hook; that hbloader's process
   reaches it is untested.
 - **Folder and file dialogs**: SDL has none; the built-in browser stands in
@@ -554,7 +623,8 @@ What is known not to work or not to exist yet, with the place to change it:
   off` a dock change may turn vsync back on until the next start. Harmless.
 - **The launcher** (`gui/iGuiLauncher.cpp`) shows only when the game files are
   not found (`[gui] launcher = always` counts as auto here), at the screen's
-  size; it draws with SDL_Renderer on Mesa, which is untested, and its folder
+  size, with every tab of the settings window (L and R change the tab there
+  too); it draws with SDL_Renderer on Mesa, which is untested, and its folder
   picker is the built-in browser (above).
 - **Prompts not checked on a console**: the Switch labels were checked on a
   PC with `TSSM_PAD_LABELS=switch` (Controls above).

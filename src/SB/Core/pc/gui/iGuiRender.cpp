@@ -80,6 +80,7 @@
 #include "rw/backend.h"
 
 #include "iDeviceReset.h"
+#include "iLoadFrame.h"
 #include "iTouchOverlay.h"
 
 #include "gui/iGuiInternal.h"
@@ -571,6 +572,15 @@ namespace
             return;
         }
 #endif
+
+        // A loading frame (iLoadFrame.h) is the game's picture alone: the overlay
+        // waits for the next frame of the game's own, and so does its count of
+        // presents, which the test scripts open it by.
+        if (iLoadFrameDrawing())
+        {
+            sLibrwShowRaster(raster, flags);
+            return;
+        }
 
         if (sFrame == NULL || !sFrame())
         {

@@ -162,4 +162,12 @@ void zMenuSB_InitPowerUpMenu();
 void zMenuSB_UpdatePowerUpMenu();
 void zMenuSB_UnlockAllTasks();
 
+#ifdef PLATFORM_PC
+// PC: for the Cheats tab (iCheats.h).
+S32 zMenuSB_PCExtraCount();
+bool zMenuSB_PCExtra(S32 index, S32* type, S32* id, S32* chestsNeeded, S32* status);
+void zMenuSB_PCToggleExtra(S32 index);
+void zMenuSB_PCSetExtraStatus(S32 index, S32 status);
+#endif
+
 #endif

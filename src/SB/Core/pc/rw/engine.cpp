@@ -21,6 +21,8 @@
 // linker.
 #include <rwsdk/driver/gcn/dlrendst.h>
 
+#include "iExtras.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,9 +130,13 @@ void RwGameCubeCameraTextureFlush(RwRaster* ras, RwUInt32 param)
     }
 }
 
-// Caps the frame rate by making the console wait for N video retraces. The
-// host paces frames in iVSync (iHostSleepUntilNs) instead, so this would be a
-// second, conflicting throttle if it did anything.
+// Caps the frame rate by making the console wait for N video retraces:
+// zSceneInit sets 2 for the six levels the GameCube release holds at 30, and
+// zGameLoop passes it here every frame. The host's pacer is iWindowPaceFrame;
+// the count goes to iExtras, which has the pacer hold it only with [extras]
+// frame_lock = gamecube (iExtras.h). With xbox, the default, the count does
+// nothing, as on the Xbox, whose own frame wait reads it and is never given
+// one above 0.
 //
 // **Linkage is not decoration here.** Unlike every other RenderWare function
 // in this directory, this one has no declaration in include/rwsdk -- zGame.cpp:78
@@ -142,6 +148,7 @@ void RwGameCubeCameraTextureFlush(RwRaster* ras, RwUInt32 param)
 // and has to stay. See TODO.md.
 extern "C" void RwGameCubeSetMinRetraceCount(RwUInt8 count)
 {
+    iExtrasSetRetraceCount(count);
 }
 
 // The two GameCube driver entry points that xModelBucket.cpp calls UNGUARDED.

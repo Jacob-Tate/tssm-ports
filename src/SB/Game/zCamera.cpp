@@ -8,6 +8,10 @@
 #include "zGlobals.h"
 #include "zMain.h"
 
+#ifdef PLATFORM_PC
+#include "iCameraOrbit.h"
+#endif
+
 F32 zcam_pad_pyaw_scale = 0.18124573f; // unknown math
 F32 zcam_pad_pitch_scale = 1.0f / 52;
 F32 zcam_near_d = 3.0f;
@@ -1040,6 +1044,15 @@ void zCameraUpdate(xCamera* cam, F32 dt)
             }
         }
 
+#ifdef PLATFORM_PC
+        // PC: no swing behind the player while the mouse steers, held off the way the stick
+        // holds it off.
+        if (iCameraOrbitSteering())
+        {
+            zcam_overrot_tmr = -zcam_overrot_tmanual;
+        }
+#endif
+
         if (zcam_overrot_tmr > zcam_overrot_tstart && cammag > 1.2f && velmag > zcam_overrot_velmin)
         {
             camz /= cammag;
@@ -1127,6 +1140,21 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     yaw_goal = xatan2(dirx, dirz);
 
+#ifdef PLATFORM_PC
+    // PC: the mouse owns the camera's two angles (iCameraOrbit.h). Its goals replace the ones
+    // made above and are reached at once: with the 0.1 s ease a mouse turns late and coasts.
+    F32 mvtm_was = mvtm;
+    F32 lktm_was = lktm;
+    if (iCameraOrbit(cam, dt,
+                     input_enabled && !changing_folcam_orientation &&
+                         wall_jump_enabled == WJVS_DISABLED && zcam_centering == 0,
+                     dgoal, hgoal, pgoal, yaw_goal, pitch_goal))
+    {
+        mvtm = 0.0f;
+        lktm = 0.0f;
+    }
+#endif
+
     if (changing_folcam_orientation)
     {
         change_folcam_timer -= dt;
@@ -1147,6 +1175,11 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     }
 
     xCameraLookYPR(cam, 0, yaw_goal, pitch_goal, 0.0f, lktm, 0.0f, 0.0f);
+
+#ifdef PLATFORM_PC
+    mvtm = mvtm_was;
+    lktm = lktm_was;
+#endif
 
     if (wall_jump_enabled == WJVS_ENABLED)
     {
@@ -1176,6 +1209,10 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     }
 
     xCameraUpdate(cam, dt);
+
+#ifdef PLATFORM_PC
+    iCameraOrbitCollided(cam);
+#endif
 
     if (lassocam_enabled && stop_track == 0)
     {

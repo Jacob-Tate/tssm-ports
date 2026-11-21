@@ -735,6 +735,7 @@ namespace
 {
     // iSwitchClaimFile's files, held open until the exit.
     FsFile sClaims[4];
+    char sClaimPaths[4][FS_MAX_PATH];
     int sClaimCount;
 
     void ReleaseClaims()
@@ -765,6 +766,7 @@ int iSwitchClaimFile(const char* path)
         fsFsOpenFile(fs, fsPath, FsOpenMode_Read | FsOpenMode_Write, &sClaims[sClaimCount]);
     if (R_SUCCEEDED(rc))
     {
+        snprintf(sClaimPaths[sClaimCount], FS_MAX_PATH, "%s", fsPath);
         sClaimCount++;
         printf("tssm: switch: claim: %s held open\n", path);
         return 1;
@@ -777,6 +779,33 @@ int iSwitchClaimFile(const char* path)
     }
     printf("tssm: switch: claim: %s could not be opened (%#x); going on without it\n", path, rc);
     return -1;
+}
+
+bool iSwitchFileHeld(const char* path)
+{
+    FsFileSystem* fs = NULL;
+    char fsPath[FS_MAX_PATH];
+    if (fsdevTranslatePath(path, &fs, fsPath) != 0 || fs == NULL)
+    {
+        return false;
+    }
+    for (int i = 0; i < sClaimCount; i++)
+    {
+        if (strcmp(sClaimPaths[i], fsPath) == 0)
+        {
+            return false;
+        }
+    }
+    // Opened, never created, and closed at once when nobody holds it.
+    FsFile file;
+    const Result rc = fsFsOpenFile(fs, fsPath, FsOpenMode_Read | FsOpenMode_Write, &file);
+    if (R_SUCCEEDED(rc))
+    {
+        fsFileClose(&file);
+        return false;
+    }
+    // TargetLocked (2002-0007), as in iSwitchClaimFile.
+    return R_MODULE(rc) == 2 && R_DESCRIPTION(rc) == 7;
 }
 
 uintptr_t iSwitchImageBase()

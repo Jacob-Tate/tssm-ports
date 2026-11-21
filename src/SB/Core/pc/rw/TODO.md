@@ -344,6 +344,14 @@ particle in the game was invisible, the bubbles most visibly. Covered by
 `test_ptank` in `tests/selftest.cpp`, which checks the four corners against
 exact coordinates for an identity camera.
 
+A tank with a matrix per particle and no positions (`rpPTANKDFLAGMATRIX`, the
+ptank pool's `PGT_COLOR_MAT` and `PGT_COLOR_MAT_UV2`) is built by
+`instancePTankMatrices` from each matrix's right, up and pos, with the corners
+and texture corners of the GameCube plugin's `_rpPTankGameCubeAsmVtxRender_CC_PPM`.
+*(was: skipped, so the Goofy Goober Token's coloured patches, sparks, fire,
+explosions and splash rings were missing)* Covered by `tools/regress.py`'s
+`bb03_token` run.
+
 Not covered: the billboards are built from `rw::engine->currentCamera`, so a
 ptank drawn outside a `BeginUpdate`/`EndUpdate` pair keeps the previous frame's
 vertices rather than getting new ones. Nothing in the game does that today.

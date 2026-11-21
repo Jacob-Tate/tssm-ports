@@ -81,6 +81,11 @@ void iSwitchQuitLine(const char* fmt, ...) __attribute__((format(printf, 1, 2)))
 // goes on as if claimed.
 int iSwitchClaimFile(const char* path);
 
+// iHostInstanceHeld: whether another program holds `path` open
+// (iSwitchClaimFile), without holding it. A file this program holds is not
+// another's.
+bool iSwitchFileHeld(const char* path);
+
 // iHostErrorBox: the system's error applet, where the program is an
 // application (title takeover); nothing in applet mode.
 void iSwitchErrorBox(const char* title, const char* message);

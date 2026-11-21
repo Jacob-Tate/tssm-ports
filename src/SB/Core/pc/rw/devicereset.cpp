@@ -34,6 +34,19 @@
 #include <string.h>
 
 #ifdef RW_D3D9
+// tools/librw/d3d9_exclusive_reset.patch: a reset at the size the device has,
+// for exclusive full screen.
+namespace rw
+{
+    namespace d3d
+    {
+        namespace impl9
+        {
+            bool32 resetDevice(void);
+        }
+    } // namespace d3d
+} // namespace rw
+
 namespace
 {
     // librw's own functions, as the device and the D3D9 driver had them when
@@ -76,6 +89,9 @@ namespace
     // reset releases objects that exist. That device is held like any lost one
     // and reset again once it can be.
     bool sBroken;
+
+    // iDeviceResetEpoch.
+    unsigned sEpoch;
 
     // An Im3D batch whose transform was skipped skips its draws as well, even
     // if the device came back in between.
@@ -369,10 +385,22 @@ namespace
         const UINT w = r.right > 0 ? (UINT)r.right : 0;
         const UINT h = r.bottom > 0 ? (UINT)r.bottom : 0;
 
-        const bool resize = !iconic && (w != pp.BackBufferWidth || h != pp.BackBufferHeight);
+        // Exclusive full screen is the display mode's size and never the
+        // window's: brought back from another program its window is, for a
+        // while, no longer minimised and still the size of a title bar, and a
+        // reset to that is refused. It is reset only when the device asks,
+        // at the size it has (tools/librw/d3d9_exclusive_reset.patch).
+        const bool exclusive = !pp.Windowed;
+        const bool resize =
+            !exclusive && !iconic && (w != pp.BackBufferWidth || h != pp.BackBufferHeight);
         const bool resettable = before == D3D_OK || before == D3DERR_DEVICENOTRESET;
         const bool reset = !sBroken && !iconic && w > 0 && h > 0 && resettable &&
                            (resize || before == D3DERR_DEVICENOTRESET);
+
+        if (before != D3D_OK || reset || resize)
+        {
+            sEpoch++;
+        }
 
         const UINT keptW = pp.BackBufferWidth;
         const UINT keptH = pp.BackBufferHeight;
@@ -392,16 +420,20 @@ namespace
                 sSim = SIM_NONE;
             }
 
+            if (exclusive)
+            {
+                rw::d3d::impl9::resetDevice();
+            }
             // A device that can be reset and has not been: librw resets on a
             // size mismatch and on nothing else, so it is given one. It then
             // takes the window's size, which is the size wanted anyway.
-            if (!resize)
+            else if (!resize)
             {
                 pp.BackBufferWidth = 0;
                 forced = true;
             }
         }
-        else if (w != pp.BackBufferWidth || h != pp.BackBufferHeight)
+        else if (!exclusive && (w != pp.BackBufferWidth || h != pp.BackBufferHeight))
         {
             // Including a minimised window's 0x0, so that librw reading the
             // window again halfway through a restore -- no longer minimised,
@@ -467,6 +499,7 @@ namespace
 
         if (sBroken || before != D3D_OK)
         {
+            sEpoch++;
             ReleaseVolatile();
             Settle(before, false);
             return;
@@ -478,7 +511,15 @@ namespace
 
         const Census census = Count();
         sLibrw.showRaster(raster, flags);
-        Settle(dev->TestCooperativeLevel(), Shrank(census));
+        const HRESULT after = dev->TestCooperativeLevel();
+
+        // Lost during Present: librw may have reset there and then.
+        if (after != D3D_OK)
+        {
+            sEpoch++;
+        }
+
+        Settle(after, Shrank(census));
     }
 
     // **A camera texture read back keeps a reference librw never gives back.**
@@ -683,6 +724,15 @@ void iDeviceResetSetReleaseHook(void (*release)())
     sRelease = release;
 #else
     (void)release;
+#endif
+}
+
+unsigned iDeviceResetEpoch()
+{
+#ifdef RW_D3D9
+    return sEpoch;
+#else
+    return 0;
 #endif
 }
 

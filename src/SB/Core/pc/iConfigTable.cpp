@@ -36,16 +36,25 @@ namespace
     const F32 kNone = 0.0f;
 }
 
+// The [extras] default: the Xbox release's version everywhere but the 3DS, where
+// each one waits until it has been timed on the console (docs/EXTRAS.md).
+#ifdef __3DS__
+#define TSSM_EXTRAS_DEFAULT "gamecube"
+#else
+#define TSSM_EXTRAS_DEFAULT "xbox"
+#endif
+
 const iConfigSetting kConfigSettings[] = {
     // TSSM-ADAPTED: treedome's table less the settings of BfBB features this
     // port did not import (toon, hipoly, world lighting, day/night, fonts,
-    // cheats, fixes, Xbox screen passes, menus, soundtrack, load-screen and
+    // its cheats, fixes, Xbox screen passes, menus, soundtrack, load-screen and
     // shadow tuning, button glyphs) and video.profile/draw_distance. A key that
     // nothing reads would be written into every config.ini as if it did
     // something. src/SB/Core/pc/PORTING.md lists what was removed.
     { "assets", "path", "",
-      "Folder containing boot.HIP, font.HIP and FMV/. Empty: the folder the game\n"
-      "; starts in. TSSM_ASSETS overrides this.",
+      "Folder containing boot.HIP, font.HIP and FMV/, from the Xbox or GameCube\n"
+      "; disc (for a Dolphin extraction, its files/ folder or the one above it).\n"
+      "; Empty: the folder the game starts in. TSSM_ASSETS overrides this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "assets", "mod", "",
       "Mod folder with the same layout as the asset folder. Its files replace the\n"
@@ -71,6 +80,36 @@ const iConfigSetting kConfigSettings[] = {
       "Folder for saves. Empty: the per-user data folder. TSSM_SAVE_DIR overrides\n"
       "; this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
+    // TSSM: the save screens' "Please don't turn off your Xbox console" (iSaveText.h).
+    { "game", "save_text", "auto",
+      "What the save screens ask you not to do: auto (this platform's own words),\n"
+      "; xbox or gamecube (that disc's own line, whichever disc's files you play),\n"
+      "; ps2, generic (no console named), pc, android, switch or 3ds.",
+      ICONFIG_ENUM, "auto|xbox|ps2|gamecube|generic|pc|android|switch|3ds", kNone, kNone },
+    // The Saves tab's Xbox export (iSaveStore.h, docs/SAVES.md section 7).
+    { "game", "xbox_xbe", "",
+      "The Xbox game's program, DEFAULT.XBE, from your own copy: an exported Xbox\n"
+      "; save is signed with it. Empty: the one beside the game's files, if they are\n"
+      "; the Xbox ones.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    { "game", "xbox_keys", "",
+      "Your keys.bin (32 bytes, made from your own Xbox; the file Cxbx-Reloaded\n"
+      "; reads). Only for exporting a save that a real Xbox or xemu will load. Empty:\n"
+      "; none. The game holds no key of its own.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    // The Saves tab's PlayStation 2 export (iSaveStore.h, docs/SAVES.md section 8).
+    { "game", "ps2_icon", "",
+      "Where the PlayStation 2 game's own save icon is, for exported PlayStation 2\n"
+      "; saves: PLAT.HIP from your own PlayStation 2 disc (or the folder it is in),\n"
+      "; or a save the game made. Empty: the port's own icon.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    // The Saves tab's PlayStation 3 export (.psv; docs/SAVES.md section 9).
+    { "game", "psv_keys", "",
+      "Your PS3 key file (32 bytes: the key a PS3 signs PlayStation 2 saves with,\n"
+      "; then its IV; docs/SAVES.md). For exporting a .psv with the PS3's own\n"
+      "; signature, and for saying which signature an imported .psv carries. Empty:\n"
+      "; none. The game holds no key of its own.",
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "video", "mode", "borderless",
 #ifdef __SWITCH__
       "Not used on the Switch: the picture always fills the screen.",
@@ -81,7 +120,7 @@ const iConfigSetting kConfigSettings[] = {
       ICONFIG_ENUM, "borderless|fullscreen|windowed", kNone, kNone },
     { "video", "aspect", "wide",
       "Picture shape: wide (the display's shape: more of the world at the sides,\n"
-      "; menus and HUD in a centered 4:3 area), 4:3 (the original picture) or custom\n"
+      "; menus in a centered 4:3 area, the HUD where ui says), 4:3 (the original picture) or custom\n"
       "; (exactly width x height).",
       ICONFIG_ENUM, "wide|4:3|custom", kNone, kNone },
     { "video", "width", "640",
@@ -92,6 +131,21 @@ const iConfigSetting kConfigSettings[] = {
       "Render height in pixels (lines). The picture is scaled to the window keeping\n"
       "; its shape.",
       ICONFIG_INT, NULL, 240.0f, 8640.0f },
+    { "video", "ui", "pillarbox",
+      "HUD position on a screen wider than 4:3: pillarbox (inside the centered 4:3\n"
+      "; area, where the original game draws it) or native (at the screen's real\n"
+      "; edges: health top left, manliness meter top right, chests bottom left,\n"
+      "; tokens and nitro bottom right). On a screen taller than 4:3 (a phone held\n"
+      "; upright, a tall window) the HUD is always at the top and bottom edges,\n"
+      "; whichever is set here. Menus and the pause screen stay in the 4:3 area\n"
+      "; either way.",
+      ICONFIG_ENUM, "pillarbox|native", kNone, kNone },
+    { "video", "ui_margin", "0",
+      "With ui = native, and on any screen taller than 4:3: how far short of the\n"
+      "; screen's edges the HUD stops, in percent of the screen's width (height, on\n"
+      "; a screen taller than 4:3), for a TV that cuts the edges of the picture\n"
+      "; off. 0 to 25.",
+      ICONFIG_FLOAT, NULL, 0.0f, 25.0f },
     { "video", "framerate", "60",
       "Frame rate cap: a number, display (the monitor's refresh rate), or 0 or off\n"
       "; for no cap. Above 60 the work per second, and a phone's heat, go up with\n"
@@ -128,12 +182,62 @@ const iConfigSetting kConfigSettings[] = {
     // TSSM: the console's screen passes, drawn by the port (src/SB/Core/pc/iHDRGlow.h,
     // iScreenWarp.h).
     { "video", "hdr_glow", "on",
-      "The glow around bright and glowing things, as on the GameCube. Off: no\n"
-      "; glow.",
+      "The glow around bright and glowing things: on (the glow [extras] glow picks,\n"
+      "; the Xbox's or the GameCube's) or off (no glow).",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "video", "screen_warp", "on",
       "The ripple of the picture around shockwaves, explosions and heat, as on the\n"
       "; GameCube. Off: none.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    // TSSM: features of the Xbox release, each beside the GameCube release's own
+    // (src/SB/Core/pc/iExtras.h, docs/EXTRAS.md).
+    { "extras", "glow", TSSM_EXTRAS_DEFAULT,
+      "The glow around bright things: xbox (the Xbox release's wide, soft glow,\n"
+      "; stronger in some levels) or gamecube (the GameCube release's tighter,\n"
+      "; fainter glow). video.hdr_glow = off turns either off.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "spotlights", TSSM_EXTRAS_DEFAULT,
+      "Spotlights: xbox (as the Xbox release: the moving spotlights of No Cheese!,\n"
+      "; Bubble Blowing Baby Hunt and Turn the Tables on Plankton are on, and every\n"
+      "; spotlight lights what it shines on and has a lamp flare) or gamecube (as\n"
+      "; the GameCube release: those lights are off, and a spotlight is its cone\n"
+      "; only). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "crowds", TSSM_EXTRAS_DEFAULT,
+      "The fish crowds in No Cheese! and Sandwich Driving 101: xbox (they move) or\n"
+      "; gamecube (they stand still, as on the GameCube). Applies when a level loads.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "water", TSSM_EXTRAS_DEFAULT,
+      "Water in the levels whose Xbox files have a water body (SC02's tanks and\n"
+      "; B301's sea): xbox (the Xbox release's water: reflections, refraction and\n"
+      "; moving ripples) or gamecube (the GameCube release's water). Without the\n"
+      "; Xbox files, on Direct3D 9's fixed path or on Vulkan, gamecube is used.\n"
+      "; Applies when a level loads. An older file's [video] water is read as this.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "frame_lock", TSSM_EXTRAS_DEFAULT,
+      "The driving levels, Bubble Blowing Baby Hunt and Google-Eyes and Smelly\n"
+      "; Knick Knacks: xbox (at the frame-rate cap, like every other level) or\n"
+      "; gamecube (held at 30 frames a second, as on the GameCube). In both, the\n"
+      "; Patty Wagon drives as it does at 60 frames a second, as on the Xbox.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "guitar_distortion", TSSM_EXTRAS_DEFAULT,
+      "The Sonic Wave Guitar: xbox (the screen swirls while you steer the wave, as\n"
+      "; on the Xbox) or gamecube (no swirl). Without the Xbox files, on Direct3D\n"
+      "; 9's fixed path or on Vulkan, gamecube is used.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    // TSSM: the port's own cheats (iCheats.h, docs/CHEATS.md). The game's own cheats
+    // are not settings: they are entered, and saved, as in the original.
+    { "cheats", "no_damage", "off",
+      "Hits knock you about but take no health. Not part of a save.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "cheats", "fly", "off",
+      "The developers' flight: hold white and press black to start and stop\n"
+      "; flying through the level. It can skip what a level expects, so a task\n"
+      "; may not start or finish: save first. Not part of a save.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "cheats", "unlock_extras", "off",
+      "The Cheats tab switches the Extras screen's costumes and functions on\n"
+      "; without the treasure chests they need. Not part of a save.",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "controller", "auto",
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
@@ -192,17 +296,59 @@ const iConfigSetting kConfigSettings[] = {
       "Right-stick camera speed. 1.0 is the original speed.",
       ICONFIG_FLOAT, NULL, 0.1f, 5.0f },
     { "input", "camera_invert_x", "off",
-      "Turn the camera the other way left and right (stick and mouse).",
+      "Turn the camera the other way left and right (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_x).",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "camera_invert_y", "off",
-      "Turn the camera the other way up and down (stick and mouse).",
+      "Turn the camera the other way up and down (the right stick and the\n"
+      "; camera keys; the mouse has mouse_invert_y).",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_camera", "on",
-      "Turn the camera with the mouse while the game window has focus.",
+    { "input", "mouse_look", "on",
+      "Mouse look: moving the mouse turns the camera, which stays where it is\n"
+      "; pointed. The game holds the mouse while you play and lets it go when\n"
+      "; Escape is pressed, in menus, in the settings window, when the window\n"
+      "; loses focus and on mouse_release_key. It takes it back when play goes\n"
+      "; on after a menu, or on a click in the window. (Was mouse_camera.)",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "input", "mouse_sensitivity", "1.0",
-      "Mouse camera speed. 1.0 is the default.",
+    { "input", "mouse_sensitivity_x", "1.0",
+      "Mouse look speed left and right. 1.0 is the default. (Was\n"
+      "; mouse_sensitivity.)",
       ICONFIG_FLOAT, NULL, 0.05f, 20.0f },
+    { "input", "mouse_sensitivity_y", "same",
+      "Mouse look speed up and down: same (as left and right) or a number.",
+      ICONFIG_FLOAT, "same", 0.05f, 20.0f },
+    { "input", "mouse_invert_x", "off",
+      "Mouse look left and right the other way. Off: mouse right looks right.\n"
+      "; (A file from before this setting starts it from camera_invert_x.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_invert_y", "off",
+      "Mouse look up and down the other way. Off: mouse forward looks up.\n"
+      "; (A file from before this setting starts it from camera_invert_y.)",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_raw", "on",
+      "Read the mouse's own movement, without the desktop's pointer speed and\n"
+      "; acceleration. Off: with them.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "input", "mouse_smoothing", "0",
+      "Smooths mouse look over this many milliseconds. 0 is none: the camera\n"
+      "; turns in the frame the mouse moved.",
+      ICONFIG_INT, NULL, 0.0f, 200.0f },
+    { "input", "mouse_release_key", "f2",
+      "The key that frees the mouse pointer while you play (to drag the window,\n"
+      "; say) and takes it back: f2 to f7, f9, f10, f12, tilde, or none. Escape\n"
+      "; always frees it as well.",
+      ICONFIG_ENUM, "f2|f3|f4|f5|f6|f7|f9|f10|f12|tilde|none", kNone, kNone },
+    { "input", "mouse_menus", "on",
+      "The mouse pointer in the game's own menus: pointing at an item highlights\n"
+      "; it, a click accepts it, a right click goes back, the wheel moves through\n"
+      "; a list. Off: the mouse is still let go in menus, and its buttons are the\n"
+#ifdef __SWITCH__
+      "; ones they are bound to. In handheld mode a finger works the same way:\n"
+      "; touching an item highlights it, lifting the finger accepts it.",
+#else
+      "; ones they are bound to.",
+#endif
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "rumble", "100",
       "Rumble strength in percent; 0 turns it off. The game's own vibration\n"
       "; option still applies.",

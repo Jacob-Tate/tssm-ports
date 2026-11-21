@@ -20,9 +20,11 @@
 #include "gui/iGuiInternal.h"
 
 #include "iConfig.h"
+#include "iExtras.h"
 #include "iHDRGlow.h"
 #include "iHost.h"
 #include "iPadTokens.h"
+#include "iSaveText.h"
 #include "iScreen.h"
 #include "iScreenWarp.h"
 #include "iWindow.h"
@@ -90,7 +92,7 @@ namespace
     // --- controls bound to a setting ------------------------------------------
 
     bool ChoiceCombo(const char* id, const char* key, const Choice* choices, S32 count,
-                     const char* def)
+                     const char* def, ImGuiComboFlags comboFlags = 0)
     {
         const char* current = iConfigGetString(key, def);
         S32 selected = -1;
@@ -104,7 +106,7 @@ namespace
 
         bool changed = false;
         ControlWidth();
-        if (ImGui::BeginCombo(id, selected >= 0 ? choices[selected].label : current))
+        if (ImGui::BeginCombo(id, selected >= 0 ? choices[selected].label : current, comboFlags))
         {
             for (S32 i = 0; i < count; i++)
             {
@@ -416,8 +418,24 @@ void iGui::SettingsGameFiles()
              env);
 #endif
     }
-    Note("The folder extracted from your own Xbox disc that directly holds boot.HIP, font.HIP "
-         "and FMV. No game files come with the port.");
+#ifdef __SWITCH__
+    // The extracting is done on a computer; the folder is what reaches the
+    // SD card.
+    Note("The files of your own Xbox or GameCube disc: both releases work. Extract them on a "
+         "computer and copy the folder to the SD card as /switch/tssm/assets. Xbox: an XISO "
+         "extractor gives the folder that directly holds boot.HIP, font.HIP and FMV. GameCube: "
+         "in Dolphin, right-click the game and choose Extract Entire Disc, then copy its files "
+         "folder, or the folder holding files and sys. A disc image (.iso, .rvz) is not read "
+         "directly. No game files come with the port.");
+#else
+    Note("The files of your own Xbox or GameCube disc: both releases work. Xbox: extract the "
+         "files from your Xbox disc image (XISO) with an XISO extractor and choose the folder "
+         "that directly holds boot.HIP, font.HIP and FMV. GameCube: in Dolphin, right-click the "
+         "game and choose "
+         "Extract Entire Disc, then choose its files folder, or the folder holding files and "
+         "sys. A disc image (.iso, .rvz) is not read directly. No game files come with the "
+         "port.");
+#endif
 }
 
 void iGui::SettingsDisplay()
@@ -497,9 +515,78 @@ void iGui::SettingsDisplay()
         ChoiceCombo("##aspect", "video.aspect", kAspects, 3, "wide");
         RestartTag("video.aspect");
         HelpMarker("Widescreen takes the display's shape and shows more of the world at the sides; "
-                   "the menus and the HUD stay in a centred 4:3 area. The shape is taken when the "
-                   "game starts: a window resized or switched afterwards shows bars until the next "
-                   "start.");
+                   "the menus stay in a centred 4:3 area, and the HUD goes where \"HUD position\" "
+                   "says. The shape is taken when the game starts: a window resized or switched "
+                   "afterwards shows bars until the next start.");
+    }
+
+    // Where the HUD goes on a screen wider than 4:3; on a taller one it is at the
+    // edges either way (iScreen.h, iHudAnchor.h). Read by every frame's draws, so
+    // both switch live.
+    {
+        static const Choice kUi[] = { { "pillarbox", "4:3 area (original)" },
+                                      { "native", "Screen edges" } };
+        Row("HUD position");
+        if (ChoiceCombo("##ui", "video.ui", kUi, 2, "pillarbox") && live)
+        {
+            iScreenSetUIMode(iScreenUIModeFromName(iConfigGetString("video.ui", "pillarbox")));
+        }
+        HelpMarker("On a screen wider than 4:3. Screen edges: the health goes to the top "
+                   "left corner of the screen, the manliness meter to the top right, the treasure "
+                   "chests to the bottom left, the tokens, the nitro and the guitar's countdown to "
+                   "the bottom right, each as far from its corner as on a 4:3 screen. On a screen "
+                   "taller than 4:3 (a phone held upright, a tall window) the HUD is always at the "
+                   "top and bottom edges, whichever is chosen here, and the bosses' health bar "
+                   "goes down with it. Menus, talk boxes and the pause screen stay in the 4:3 "
+                   "area; on a tall screen, what slides out of that area is not seen, as on a 4:3 "
+                   "TV.");
+
+        // The HUD is at the edges of a screen taller than 4:3 whatever is chosen
+        // above: the one drawn now, or in the launcher the size the game will
+        // start at (iSystem.cpp's ApplyConfig: wide takes the display's shape, so
+        // an upright display starts tall).
+        bool tall = live && iScreenUITall();
+        if (!live && aspect != iSCREENASPECT_4_3)
+        {
+            S32 shapeW = 0;
+            S32 shapeH = 0;
+            if (aspect == iSCREENASPECT_WIDE && !iWindowGetDisplaySize(&shapeW, &shapeH))
+            {
+                shapeW = 0;
+                shapeH = 0;
+            }
+            S32 startW = 0;
+            S32 startH = 0;
+            iScreenSizeForAspect(aspect, iConfigGetInt("video.width", 640),
+                                 iConfigGetInt("video.height", 480), shapeW, shapeH, &startW,
+                                 &startH);
+            tall = 4 * startH > 3 * startW;
+        }
+        if (tall)
+        {
+            Note("This screen is taller than 4:3: the HUD is at its top and bottom edges "
+                 "whichever is chosen.");
+        }
+
+        if (tall ||
+            iScreenUIModeFromName(iConfigGetString("video.ui", "pillarbox")) == iSCREENUI_NATIVE)
+        {
+            float margin = 0.0f;
+            Row("HUD edge margin");
+            const bool moved =
+                FloatSlider("##uimargin", "video.ui_margin", 0.0f, 0.0f, 25.0f, "%.0f%%", &margin);
+            if (moved && live)
+            {
+                iScreenSetUISafeMargin(0.01f * margin);
+            }
+            HelpMarker("How far short of the screen's edges the HUD stops, in percent of the "
+                       "screen's width (of its height, on a screen taller than 4:3), for a TV "
+                       "that cuts the edges of the picture off.");
+            if (live && !iScreenUIBoxed())
+            {
+                Note("This picture is 4:3: the HUD is already at its edges.");
+            }
+        }
     }
 
     // Render size for the two shapes: a height, and the width follows from it.
@@ -843,6 +930,193 @@ void iGui::SettingsAudio()
          "its options menu, still apply on top of these.");
 }
 
+// --- Xbox extras ------------------------------------------------------------------
+
+namespace
+{
+    const Choice kLooks[] = { { "xbox", "Xbox" }, { "gamecube", "GameCube" } };
+
+    // Whether a feature has a row here: this build has its Xbox version, and
+    // the platform has been measured with it (the 3DS not yet: docs/EXTRAS.md).
+    bool ExtrasRowShown(iExtrasFeature feature)
+    {
+#ifdef __3DS__
+        (void)feature;
+        return false;
+#else
+        return iExtrasBuilt(feature);
+#endif
+    }
+
+    // "next level" after the control while the setting differs from the one
+    // the current level loaded with; the RestartTag of a per-level feature.
+    void NextLevelTag(iExtrasFeature feature)
+    {
+        if (iGui::InLauncher() || iExtrasAtLevelLoad(feature) == iExtrasSetting(feature))
+        {
+            return;
+        }
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "next level");
+        if (ImGui::BeginItemTooltip())
+        {
+            ImGui::TextUnformatted("Saved. Takes effect when the next level loads.");
+            ImGui::EndTooltip();
+        }
+    }
+
+    // A row's reason lines: config.ini's value is not one of the two, or the
+    // current level cannot give what the setting asks for.
+    void ExtrasStatusNote(iExtrasFeature feature)
+    {
+        const char* bad = iExtrasBadValue(feature);
+        if (bad != NULL)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f),
+                               "config.ini has \"%s\" here, which is not xbox or gamecube: %s is "
+                               "used.",
+                               bad, iExtrasSetting(feature) == iEXTRAS_XBOX ? "Xbox" : "GameCube");
+        }
+
+        char why[256];
+        if (!iGui::InLauncher() && iExtrasStatus(feature, why, sizeof(why)))
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "%s", why);
+        }
+    }
+} // namespace
+
+void iGui::SettingsExtras()
+{
+    bool any = false;
+    for (S32 i = 0; i < iEXTRAS_FEATURE_COUNT; i++)
+    {
+        any = any || ExtrasRowShown((iExtrasFeature)i);
+    }
+    if (!any)
+    {
+        return;
+    }
+
+    ImGui::SeparatorText("Xbox extras");
+    Note("The Xbox release has a few things the GameCube release cut. Each one switches between "
+         "the two.");
+
+    const bool live = !InLauncher();
+    const char* all = NULL;
+    if (ImGui::Button("All Xbox"))
+    {
+        all = "xbox";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("All GameCube"))
+    {
+        all = "gamecube";
+    }
+    if (all != NULL)
+    {
+        for (S32 i = 0; i < iEXTRAS_FEATURE_COUNT; i++)
+        {
+            iConfigSet(iExtrasKey((iExtrasFeature)i), all);
+        }
+        SaveNow();
+        if (live)
+        {
+            iExtrasApply();
+        }
+    }
+
+    if (!BeginRows("extras"))
+    {
+        return;
+    }
+
+    if (ExtrasRowShown(iEXTRAS_GLOW))
+    {
+        // Read every frame, so it switches at once (iExtrasApply). video.hdr_glow
+        // is the switch for both glows.
+        const bool glowOn = iConfigGetBool("video.hdr_glow", TRUE) != 0;
+        Row("Glow");
+        ImGui::BeginDisabled(!glowOn);
+        if (ChoiceCombo("##xglow", "extras.glow", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        ImGui::EndDisabled();
+        Note("Xbox: a wide, soft glow, stronger in some levels. GameCube: the GameCube's "
+             "tighter, fainter glow.");
+        if (!glowOn)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f), "Glow is off (Display).");
+        }
+        ExtrasStatusNote(iEXTRAS_GLOW);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_SPOTLIGHTS))
+    {
+        Row("Spotlights");
+        ChoiceCombo("##spotlights", "extras.spotlights", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_SPOTLIGHTS);
+        Note("Xbox: the moving spotlights in No Cheese!, Bubble Blowing Baby Hunt and Turn the "
+             "Tables on Plankton are on, and every spotlight lights what it shines on and has a "
+             "lamp flare. GameCube: those lights are off, and a spotlight is its cone only.");
+        ExtrasStatusNote(iEXTRAS_SPOTLIGHTS);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_CROWDS))
+    {
+        Row("Fish crowds");
+        ChoiceCombo("##crowds", "extras.crowds", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_CROWDS);
+        Note("Xbox: the crowds in No Cheese! and Sandwich Driving 101 move. GameCube: they stand "
+             "still.");
+        ExtrasStatusNote(iEXTRAS_CROWDS);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_WATER))
+    {
+        // Not live: a level hides its GameCube or Xbox water models as it is
+        // built (iXboxWater.h).
+        Row("Water");
+        ChoiceCombo("##water", "extras.water", kLooks, 2, "xbox");
+        NextLevelTag(iEXTRAS_WATER);
+        Note("Xbox: the tanks in Google-Eyes and Smelly Knick Knacks and the sea in Dennis Strikes "
+             "Back have the Xbox release's water, with reflections, refraction and moving ripples "
+             "(two more pictures drawn each frame for each water area, as large as the render "
+             "size makes them). GameCube: the GameCube release's water. The Xbox water needs the "
+             "Xbox files, and shaders: Direct3D 9's fixed path and Vulkan use the GameCube water.");
+        ExtrasStatusNote(iEXTRAS_WATER);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_GUITAR_DISTORTION))
+    {
+        // Read every frame, so it switches at once (iExtrasApply).
+        Row("Sonic Wave Guitar");
+        if (ChoiceCombo("##guitar", "extras.guitar_distortion", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        Note("Xbox: the screen swirls while you steer the wave. GameCube: no swirl.");
+        ExtrasStatusNote(iEXTRAS_GUITAR_DISTORTION);
+    }
+
+    if (ExtrasRowShown(iEXTRAS_FRAME_LOCK))
+    {
+        Row("30 fps levels");
+        if (ChoiceCombo("##framelock", "extras.frame_lock", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        Note("Xbox: these levels run at your frame-rate cap. GameCube: the driving levels, Bubble "
+             "Blowing Baby Hunt and Google-Eyes and Smelly Knick Knacks run at 30 frames a "
+             "second. In both, the Patty Wagon drives as it does at 60 frames a second, as on the "
+             "Xbox.");
+        ExtrasStatusNote(iEXTRAS_FRAME_LOCK);
+    }
+
+    ImGui::EndTable();
+}
+
 void iGui::SettingsGame()
 {
     ImGui::SeparatorText("Game");
@@ -857,20 +1131,9 @@ void iGui::SettingsGame()
 
     // The camera, sticks, triggers, mouse and touch settings belong to the
     // input layer, which applies them live (iPadControlsSetSetting): they are
-    // on the Controls tab.
-    if (!InLauncher())
-    {
-        Row("Controls");
-        ImGui::TextDisabled("Camera speed, sticks, triggers, mouse and touch: the Controls tab.");
-    }
-    else
-    {
-        static const Choice kTouch[] = { { "auto", "Automatic (Android)" },
-                                         { "on", "On" },
-                                         { "off", "Off" } };
-        Row("Touch controls");
-        ChoiceCombo("##touch", "input.touch_controls", kTouch, 3, "auto");
-    }
+    // on the Controls tab, in the launcher too.
+    Row("Controls");
+    ImGui::TextDisabled("Camera speed, sticks, triggers, mouse and touch: the Controls tab.");
 
     Row("Save folder");
 #ifdef __SWITCH__
@@ -879,6 +1142,57 @@ void iGui::SettingsGame()
     FolderRow("saves", "game.save_folder", "(default: the per-user data folder)", "Default");
 #endif
     RestartTag("game.save_folder");
+
+    // The save screens' "Please don't turn off your Xbox console" (iSaveText.h).
+    // Live: a line already loaded changes at once.
+    {
+        Choice choices[ISAVETEXT_COUNT];
+        char autoLabel[96];
+        snprintf(autoLabel, sizeof(autoLabel), "Automatic (%s)",
+                 iSaveTextChoiceLabel(iSaveTextPlatform()));
+        for (S32 i = 0; i < ISAVETEXT_COUNT; i++)
+        {
+            choices[i].value = iSaveTextChoiceName((iSaveTextChoice)i);
+            choices[i].label = i == ISAVETEXT_AUTO ? autoLabel : iSaveTextChoiceLabel((iSaveTextChoice)i);
+        }
+
+        // More than a combo's usual 8 rows: all of them at once.
+        Row("Save screen text");
+        if (ChoiceCombo("##savetext", "game.save_text", choices, ISAVETEXT_COUNT, "auto",
+                        ImGuiComboFlags_HeightLarge))
+        {
+            iSaveTextApplyConfig();
+        }
+
+        bool ok = true;
+        const char* value = iConfigGetString("game.save_text", "auto");
+        const iSaveTextChoice choice = iSaveTextParse(value, &ok);
+        if (!ok)
+        {
+            ImGui::TextColored(ImVec4(0.98f, 0.82f, 0.31f, 1.0f),
+                               "config.ini has \"%s\" here, which is not one of these: Automatic "
+                               "is used.",
+                               value);
+        }
+        const iSaveTextChoice resolved = iSaveTextResolve(choice);
+        if (resolved == ISAVETEXT_XBOX || resolved == ISAVETEXT_GAMECUBE)
+        {
+            Note("While saving: \"%s\" On the %s disc's files, its own lines exactly; on the "
+                 "other disc's, these words in their place.",
+                 iSaveTextSentence(resolved),
+                 resolved == ISAVETEXT_XBOX ? "Xbox" : "GameCube");
+        }
+        else if (resolved == ISAVETEXT_PS2)
+        {
+            Note("While saving: \"Do not remove memory card (8MB) (for PlayStation 2) in MEMORY "
+                 "CARD slot 1, or the DUALSHOCK 2 analog controller, or reset/switch off the "
+                 "console.\" The US PS2 disc's own words, in place of either disc's.");
+        }
+        else
+        {
+            Note("While saving: \"%s\"", iSaveTextSentence(resolved));
+        }
+    }
 
     ImGui::EndTable();
 }
@@ -1010,17 +1324,34 @@ void iGui::SettingsInterface()
 
 void iGui::DrawSettings()
 {
+    // In the launcher the game's files come first: without them there is no
+    // Play, and on a first run they are the one thing to do.
+    if (InLauncher())
+    {
+        SettingsGameFiles();
+        ImGui::Spacing();
+    }
     SettingsDisplay();
+    ImGui::Spacing();
+    SettingsExtras();
     ImGui::Spacing();
     SettingsAudio();
     ImGui::Spacing();
     SettingsGame();
-    ImGui::Spacing();
-    SettingsGameFiles();
+    if (!InLauncher())
+    {
+        ImGui::Spacing();
+        SettingsGameFiles();
+    }
     ImGui::Spacing();
     SettingsInterface();
 #ifdef TSSM_UPDATE
-    ImGui::Spacing();
-    SettingsUpdates();
+    // Not before the game: the updater starts with the game's window, and
+    // its restart is the game's quit.
+    if (!InLauncher())
+    {
+        ImGui::Spacing();
+        SettingsUpdates();
+    }
 #endif
 }
