@@ -21,8 +21,8 @@ screen.
 Two ways to play
 ----------------
 
-- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.5
-  for the New 3DS: `TSSM-Dehydrated-0.9.5-3DS.3dsx` and `TSSM-Dehydrated-0.9.5-3DS.cia`.
+- **Download it ready-made.** This repository's Releases page has *TSSM Dehydrated* 0.9.6
+  for the New 3DS: `TSSM-Dehydrated-0.9.6-3DS.3dsx` and `TSSM-Dehydrated-0.9.6-3DS.cia`.
   They are this branch, built under that neutral name with the port's own icon, banner and
   chime, and have no game data. Install them as `tssm.3dsx` and `tssm.cia` below (the
   .3dsx renamed to `tssm.3dsx`). From 0.9.4 on it can update itself when you ask:

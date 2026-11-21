@@ -518,10 +518,11 @@ void iGui::SettingsDisplay()
     }
 #endif
 
-#ifndef __3DS__
     // The picture's shape (iScreen.h, iScreenSizeForAspect). Like the size, it
     // applies at the next start: every screen camera is made at the render size.
+    // The 3DS's is its top screen's, 400 x 240.
     const iScreenAspect aspect = iScreenAspectFromName(iConfigGetString("video.aspect", "wide"));
+#ifndef __3DS__
     {
         static const Choice kAspects[] = { { "wide", "Widescreen (match window)" },
                                            { "4:3", "4:3 (original)" },
@@ -534,6 +535,7 @@ void iGui::SettingsDisplay()
                    "says. The shape is taken when the game starts: a window resized or switched "
                    "afterwards shows bars until the next start.");
     }
+#endif
 
     // Where the HUD goes on a screen wider than 4:3; on a taller one it is at the
     // edges either way (iScreen.h, iHudAnchor.h). Read by every frame's draws, so
@@ -546,6 +548,13 @@ void iGui::SettingsDisplay()
         {
             iScreenSetUIMode(iScreenUIModeFromName(iConfigGetString("video.ui", "pillarbox")));
         }
+#ifdef __3DS__
+        HelpMarker("Screen edges: the health goes to the top left corner of the top screen, the "
+                   "manliness meter to the top right, the treasure chests to the bottom left, the "
+                   "tokens, the nitro and the guitar's countdown to the bottom right, each as far "
+                   "from its corner as on a 4:3 screen. Menus, talk boxes and the pause screen "
+                   "stay in the 4:3 area.");
+#else
         HelpMarker("On a screen wider than 4:3. Screen edges: the health goes to the top "
                    "left corner of the screen, the manliness meter to the top right, the treasure "
                    "chests to the bottom left, the tokens, the nitro and the guitar's countdown to "
@@ -555,6 +564,7 @@ void iGui::SettingsDisplay()
                    "goes down with it. Menus, talk boxes and the pause screen stay in the 4:3 "
                    "area; on a tall screen, what slides out of that area is not seen, as on a 4:3 "
                    "TV.");
+#endif
 
         // The HUD is at the edges of a screen taller than 4:3 whatever is chosen
         // above: the one drawn now, or in the launcher the size the game will
@@ -604,6 +614,7 @@ void iGui::SettingsDisplay()
         }
     }
 
+#ifndef __3DS__
     // Render size for the two shapes: a height, and the width follows from it.
     if (aspect != iSCREENASPECT_CUSTOM)
     {

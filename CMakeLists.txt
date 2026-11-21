@@ -1776,7 +1776,7 @@ if(TSSM_3DS)
     set(_3ds_own_art ON)
   endif()
 
-  set(TSSM_3DS_VERSION "0.9.5" CACHE STRING "The version in the 3DS's SMDH description")
+  set(TSSM_3DS_VERSION "0.9.6" CACHE STRING "The version in the 3DS's SMDH description")
   # The author the Homebrew Launcher shows (the .3dsx) and the publisher the
   # HOME Menu shows (the .cia).
   set(TSSM_3DS_AUTHOR "aidp2" CACHE STRING "The author and publisher in the 3DS's SMDH")

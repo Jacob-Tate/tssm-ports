@@ -151,8 +151,12 @@ takes no input from the buttons.
   crowds of No Cheese! and Sandwich Driving 101 stand still, and the water (the tanks in
   Google-Eyes and Smelly Knick Knacks, the sea in Dennis Strikes Back) is the GameCube's.
   The 3DS's renderer has no Xbox glow, light beams or Xbox water, so those stay `gamecube`
-  whatever `config.ini` says. The Sonic Wave Guitar's swirl and the HUD at the screen's
-  edges (0.9.5 on the other ports) are not on the 3DS either.
+  whatever `config.ini` says. The Sonic Wave Guitar's swirl (0.9.5 on the other ports) is
+  not on the 3DS either.
+- **HUD position** (since 0.9.6): Settings, *HUD position*, *Screen edges* puts the HUD at
+  the top screen's real edges (the health top left, the manliness meter top right, the
+  chests bottom left, the tokens and the nitro bottom right); *4:3 area* is the original
+  place. It switches at once (`[video] ui` in `config.ini`).
 - **Cheats** (since 0.9.5): the game's nine button codes and its Extras screen as switches
   and buttons, and a few port cheats (`docs/CHEATS.md`). Its text names ZL and ZR for the
   codes' buttons and L and R for flight, and shows the codes and flight's rise button in
@@ -452,8 +456,8 @@ At run time only where closing goes differs: libctru's exit returns an installed
 the HOME Menu and a .3dsx to the Homebrew Launcher. The log's start says which it is, and
 the settings menu's Quit names that menu.
 
-The title version follows `TSSM_3DS_VERSION`: 0.9.5 is the TMD's and the ticket's 0.9.5
-(`0 << 10 | 9 << 4 | 5`, 149; 0.9.4 was 148), which the system compares when one build is
+The title version follows `TSSM_3DS_VERSION`: 0.9.6 is the TMD's and the ticket's 0.9.6
+(`0 << 10 | 9 << 4 | 6`, 150; 0.9.5 was 149), which the system compares when one build is
 installed over another. makerom v0.19.0 loses the minor number, so CMake gives makerom the
 major and the micro and `tools/3ds/cia_version.py` then writes the whole version into the
 TMD and the ticket (no hash covers the field). Without Python the version stays `major.0.micro` (a
@@ -465,7 +469,7 @@ The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSS
 Dehydrated*, are this build with six settings: the name "TSSM Dehydrated"
 (`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
 Menu, the About tab's heading and the game-files screen), the release's version
-(`TSSM_3DS_VERSION`, 0.9.5 for TSSM Dehydrated 0.9.5), author "aidp2", the updater
+(`TSSM_3DS_VERSION`, 0.9.6 for TSSM Dehydrated 0.9.6), author "aidp2", the updater
 (`TSSM_UPDATE`), the port's own icon for both files (`dist/3ds/cia_icon.png`) and the
 banner picture
 `dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
@@ -490,7 +494,7 @@ bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work fold
     sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
     CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
       -DTSSM_PYTHON=/c/Python314/python.exe \
-      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.5 -DTSSM_3DS_AUTHOR=aidp2 \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.6 -DTSSM_3DS_AUTHOR=aidp2 \
       -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
       -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png \
       -DTSSM_UPDATE=ON
@@ -950,6 +954,8 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
 
 ## Known gaps
 
+- **0.9.6** is 0.9.5 with the *HUD position* row in the settings menu. It is checked in
+  Azahar.
 - **0.9.5 has not been played on a console yet.** It brings the Windows 0.9.5 work that
   fits the 3DS: the loading screen (the life preserver, drawn between pieces of each load
   as on the PC; its frames have not been seen on a 3DS or captured in an emulator yet),
