@@ -483,9 +483,78 @@ void iGui::SettingsDisplay()
         ChoiceCombo("##aspect", "video.aspect", kAspects, 3, "wide");
         RestartTag("video.aspect");
         HelpMarker("Widescreen takes the display's shape and shows more of the world at the sides; "
-                   "the menus and the HUD stay in a centred 4:3 area. The shape is taken when the "
-                   "game starts: a window resized or switched afterwards shows bars until the next "
-                   "start.");
+                   "the menus stay in a centred 4:3 area, and the HUD goes where \"HUD position\" "
+                   "says. The shape is taken when the game starts: a window resized or switched "
+                   "afterwards shows bars until the next start.");
+    }
+
+    // Where the HUD goes on a screen wider than 4:3; on a taller one it is at the
+    // edges either way (iScreen.h, iHudAnchor.h). Read by every frame's draws, so
+    // both switch live.
+    {
+        static const Choice kUi[] = { { "pillarbox", "4:3 area (original)" },
+                                      { "native", "Screen edges" } };
+        Row("HUD position");
+        if (ChoiceCombo("##ui", "video.ui", kUi, 2, "pillarbox") && live)
+        {
+            iScreenSetUIMode(iScreenUIModeFromName(iConfigGetString("video.ui", "pillarbox")));
+        }
+        HelpMarker("On a screen wider than 4:3. Screen edges: the health goes to the top "
+                   "left corner of the screen, the manliness meter to the top right, the treasure "
+                   "chests to the bottom left, the tokens, the nitro and the guitar's countdown to "
+                   "the bottom right, each as far from its corner as on a 4:3 screen. On a screen "
+                   "taller than 4:3 (a phone held upright, a tall window) the HUD is always at the "
+                   "top and bottom edges, whichever is chosen here, and the bosses' health bar "
+                   "goes down with it. Menus, talk boxes and the pause screen stay in the 4:3 "
+                   "area; on a tall screen, what slides out of that area is not seen, as on a 4:3 "
+                   "TV.");
+
+        // The HUD is at the edges of a screen taller than 4:3 whatever is chosen
+        // above: the one drawn now, or in the launcher the size the game will
+        // start at (iSystem.cpp's ApplyConfig: wide takes the display's shape, so
+        // an upright display starts tall).
+        bool tall = live && iScreenUITall();
+        if (!live && aspect != iSCREENASPECT_4_3)
+        {
+            S32 shapeW = 0;
+            S32 shapeH = 0;
+            if (aspect == iSCREENASPECT_WIDE && !iWindowGetDisplaySize(&shapeW, &shapeH))
+            {
+                shapeW = 0;
+                shapeH = 0;
+            }
+            S32 startW = 0;
+            S32 startH = 0;
+            iScreenSizeForAspect(aspect, iConfigGetInt("video.width", 640),
+                                 iConfigGetInt("video.height", 480), shapeW, shapeH, &startW,
+                                 &startH);
+            tall = 4 * startH > 3 * startW;
+        }
+        if (tall)
+        {
+            Note("This screen is taller than 4:3: the HUD is at its top and bottom edges "
+                 "whichever is chosen.");
+        }
+
+        if (tall ||
+            iScreenUIModeFromName(iConfigGetString("video.ui", "pillarbox")) == iSCREENUI_NATIVE)
+        {
+            float margin = 0.0f;
+            Row("HUD edge margin");
+            const bool moved =
+                FloatSlider("##uimargin", "video.ui_margin", 0.0f, 0.0f, 25.0f, "%.0f%%", &margin);
+            if (moved && live)
+            {
+                iScreenSetUISafeMargin(0.01f * margin);
+            }
+            HelpMarker("How far short of the screen's edges the HUD stops, in percent of the "
+                       "screen's width (of its height, on a screen taller than 4:3), for a TV "
+                       "that cuts the edges of the picture off.");
+            if (live && !iScreenUIBoxed())
+            {
+                Note("This picture is 4:3: the HUD is already at its edges.");
+            }
+        }
     }
 
     // Render size for the two shapes: a height, and the width follows from it.
@@ -974,6 +1043,18 @@ void iGui::SettingsExtras()
         ExtrasStatusNote(iEXTRAS_WATER);
     }
 
+    if (ExtrasRowShown(iEXTRAS_GUITAR_DISTORTION))
+    {
+        // Read every frame, so it switches at once (iExtrasApply).
+        Row("Sonic Wave Guitar");
+        if (ChoiceCombo("##guitar", "extras.guitar_distortion", kLooks, 2, "xbox") && live)
+        {
+            iExtrasApply();
+        }
+        Note("Xbox: the screen swirls while you steer the wave. GameCube: no swirl.");
+        ExtrasStatusNote(iEXTRAS_GUITAR_DISTORTION);
+    }
+
     if (ExtrasRowShown(iEXTRAS_FRAME_LOCK))
     {
         Row("30 fps levels");
@@ -1054,9 +1135,9 @@ void iGui::SettingsGame()
         }
         else if (resolved == ISAVETEXT_PS2)
         {
-            Note("While saving: \"Do not remove the memory card (8MB) (for PlayStation 2), or "
-                 "reset/switch off the console.\" The PS2 release's usual warning, until its own "
-                 "words are read from a PS2 disc.");
+            Note("While saving: \"Do not remove memory card (8MB) (for PlayStation 2) in MEMORY "
+                 "CARD slot 1, or the DUALSHOCK 2 analog controller, or reset/switch off the "
+                 "console.\" The US PS2 disc's own words, in place of either disc's.");
         }
         else
         {

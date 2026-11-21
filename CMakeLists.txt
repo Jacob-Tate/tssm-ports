@@ -585,6 +585,8 @@ target_link_libraries(tssm_rw PUBLIC librw ${WINDOW_LIBS})
 target_compile_options(tssm_rw PRIVATE ${TSSM_NO_WARNINGS})
 # TSSM_TEST_HANG_DUMP's heartbeat (iHangDump.h; the dump is in tssm_main.cpp).
 target_sources(tssm_rw PRIVATE ${PC_DIR}/iHangDump.cpp)
+# The loading screen's pump and its frame flag (iLoadFrame.h; drawn by iAsync.cpp).
+target_sources(tssm_rw PRIVATE ${PC_DIR}/iLoadFrame.cpp)
 # The Xbox water's tiles and strips (iXboxWaterGrid.h), for rw/xboxwater.cpp and the
 # game half alike.
 target_sources(tssm_rw PRIVATE ${PC_DIR}/iXboxWaterGrid.cpp)
@@ -601,10 +603,10 @@ target_sources(tssm_rw PRIVATE ${PC_DIR}/iXboxWaterGrid.cpp)
 # TSSM Dehydrated release").
 set(TSSM_PC_TITLE "The SpongeBob SquarePants Movie Video Game" CACHE STRING
   "The program's name: window titles, the launcher, the overlay, message boxes, tssm.exe's version information")
-set(TSSM_PC_VERSION "0.9.4" CACHE STRING
+set(TSSM_PC_VERSION "0.9.5" CACHE STRING
   "The version in tssm.exe's version information: up to four numbers, such as 0.9.1")
 set(TSSM_VERSION_LINE "" CACHE STRING
-  "The About tab's version line; empty: the branch and git describe")
+  "The About tab's version line; empty: the branch and the build's commit")
 if(TSSM_PC_TITLE STREQUAL "" OR TSSM_PC_TITLE MATCHES "[\"\\\\%]")
   message(FATAL_ERROR "TSSM_PC_TITLE is \"${TSSM_PC_TITLE}\": give a name without double quotes, "
     "backslashes or percent signs.")
@@ -616,6 +618,21 @@ if(TSSM_VERSION_LINE MATCHES "[\"\\\\]")
   message(FATAL_ERROR "TSSM_VERSION_LINE has a double quote or a backslash.")
 endif()
 message(STATUS "Program name: \"${TSSM_PC_TITLE}\", version ${TSSM_PC_VERSION}")
+
+# What this build is (src/SB/Core/pc/iBuildInfo.h): its time, version and git
+# commit, written by tools/build_info.cmake on every build, so crash.log's and
+# last_run.log's "built" stamp and the About tab name the build they are in.
+find_package(Git QUIET)
+set(TSSM_BUILD_INFO_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/iBuildInfo.cpp)
+add_custom_target(tssm_buildinfo_stamp
+  COMMAND ${CMAKE_COMMAND} "-DOUT=${TSSM_BUILD_INFO_SOURCE}" "-DSRC=${CMAKE_CURRENT_SOURCE_DIR}"
+          "-DVERSION=${TSSM_PC_VERSION}" "-DGIT=${GIT_EXECUTABLE}"
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_info.cmake
+  BYPRODUCTS ${TSSM_BUILD_INFO_SOURCE}
+  VERBATIM)
+add_library(tssm_buildinfo STATIC ${TSSM_BUILD_INFO_SOURCE})
+add_dependencies(tssm_buildinfo tssm_buildinfo_stamp)
+target_include_directories(tssm_buildinfo PRIVATE ${PC_DIR})
 
 # --- Dear ImGui and the GUI -----------------------------------------------------------
 # third_party/imgui is Dear ImGui (MIT), pinned to a release tag. One library
@@ -661,6 +678,7 @@ if(TSSM_GUI)
 
   set(GUI_SOURCES
     ${PC_DIR}/gui/iGui.cpp
+    ${PC_DIR}/gui/iGuiCheats.cpp
     ${PC_DIR}/gui/iGuiControls.cpp
     ${PC_DIR}/gui/iGuiLauncher.cpp
     ${PC_DIR}/gui/iGuiMods.cpp
@@ -673,27 +691,21 @@ if(TSSM_GUI)
   )
 
   # The About tab's version line: TSSM_VERSION_LINE when given (a release
-  # build's version), else the branch and `git describe` at configure time
-  # (re-run CMake for a newer one).
+  # build's version), else the branch at configure time and the build stamp's
+  # commit (iBuildCommit), so it matches the "Built ... from" line under it.
   if(TSSM_VERSION_LINE)
-    set(TSSM_GUI_VERSION "${TSSM_VERSION_LINE}")
+    set_source_files_properties(${PC_DIR}/gui/iGuiTabs.cpp PROPERTIES
+      COMPILE_DEFINITIONS "TSSM_GUI_VERSION=\"${TSSM_VERSION_LINE}\"")
   else()
-    execute_process(COMMAND git describe --always --dirty --abbrev=10
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    OUTPUT_VARIABLE _tssm_describe OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(COMMAND git rev-parse --abbrev-ref HEAD
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                     OUTPUT_VARIABLE _tssm_branch OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    if(NOT _tssm_describe)
-      set(_tssm_describe "unknown")
+    if(_tssm_branch MATCHES "[\"\\\\]")
+      set(_tssm_branch "")
     endif()
-    set(TSSM_GUI_VERSION "${_tssm_describe}")
-    if(_tssm_branch)
-      set(TSSM_GUI_VERSION "${_tssm_branch} ${_tssm_describe}")
-    endif()
+    set_source_files_properties(${PC_DIR}/gui/iGuiTabs.cpp PROPERTIES
+      COMPILE_DEFINITIONS "TSSM_GUI_BRANCH=\"${_tssm_branch}\"")
   endif()
-  set_source_files_properties(${PC_DIR}/gui/iGuiTabs.cpp PROPERTIES
-    COMPILE_DEFINITIONS "TSSM_GUI_VERSION=\"${TSSM_GUI_VERSION}\"")
 
   # The About tab's third-party notices, each component's own license file
   # embedded as written, so what the game shows cannot drift from what ships.
@@ -820,6 +832,18 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iSaveCLI.cpp
   ${PC_DIR}/iSaveFormat.cpp
   ${PC_DIR}/iSaveStore.cpp
+  # The other consoles' saves: the little-endian payload the PlayStation 2 and
+  # Xbox share, the Xbox's save folders and their signature, and the
+  # PlayStation 2's folder in a .psu, a memory card image or PCSX2's folder
+  # card (docs/SAVES.md sections 6 to 8), and a PlayStation 3's .psv with its
+  # signature (AES-128 for that).
+  ${PC_DIR}/iSaveAES.cpp
+  ${PC_DIR}/iSaveLE.cpp
+  ${PC_DIR}/iSaveSHA1.cpp
+  ${PC_DIR}/iSavePS2.cpp
+  ${PC_DIR}/iSaveStorePS2.cpp
+  ${PC_DIR}/iSaveStoreXbox.cpp
+  ${PC_DIR}/iSaveXbox.cpp
   # The load screen's "no saves" message, made to name the slot, and the save
   # screens' warning as a setting ([game] save_text): game only, it rewrites
   # loaded TEXT assets. The table of lines and words is on its own, for
@@ -837,6 +861,8 @@ add_library(tssm_platform STATIC
   ${PC_DIR}/iTime.cpp
   # The Xbox release's features beside the GameCube's ([extras], iExtras.h).
   ${PC_DIR}/iExtras.cpp
+  # The Cheats tab's tables and the port's own cheats ([cheats], iCheats.h).
+  ${PC_DIR}/iCheats.cpp
 
   # The host layer under them (treedome).
   ${PC_DIR}/iBoot.cpp
@@ -888,6 +914,8 @@ add_library(tssm_platform STATIC
 target_include_directories(tssm_platform PUBLIC ${TSSM_INCLUDES})
 target_link_libraries(tssm_platform PUBLIC tssm_rw ${INPUT_LIBS} ${AUDIO_LIBS})
 target_link_libraries(tssm_platform PRIVATE ${FMV_LIBRARIES})
+# The About tab's build stamp (iBuildInfo.h).
+target_link_libraries(tssm_platform PRIVATE tssm_buildinfo)
 if(TSSM_GUI)
   target_link_libraries(tssm_platform PRIVATE tssm_imgui)
   target_include_directories(tssm_platform PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gui)
@@ -985,6 +1013,8 @@ target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game
 # unit too, for the same reason.
 target_sources(tssm_game PRIVATE ${PC_DIR}/iTestSend.cpp)
+# The HUD at the screen's real edges (iHudAnchor.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iHudAnchor.cpp)
 # The Xbox release's water (iXboxWater.h): a game unit too. Its arithmetic
 # (iXboxWaterGrid.h, no game code) is in tssm_rw with the surface draw that uses it
 # (rw/xboxwater.cpp). Without it, the Xbox files' water bodies look as the GameCube
@@ -993,6 +1023,11 @@ target_sources(tssm_game PRIVATE ${PC_DIR}/iXboxWater.cpp ${PC_DIR}/iXboxWaterPa
   ${PC_DIR}/iWaterBody.cpp)
 # The Xbox extras from a level's GameCube files (iExtrasGC.h): a game unit too.
 target_sources(tssm_game PRIVATE ${PC_DIR}/iExtrasGC.cpp)
+# The Cheats tab's game side (iCheats.h): a game unit too.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iCheatsGame.cpp)
+# The Sonic Wave Guitar's screen distortion (iXboxDistort.h): the amount and the
+# swirl map's lookup, a game unit; the pass is rw/xboxdistort.cpp in tssm_rw.
+target_sources(tssm_game PRIVATE ${PC_DIR}/iXboxDistort.cpp)
 # SBPrefix.h is the console's precompiled prefix (-prefix SBPrefix.mch): every
 # game unit sees it first.
 target_compile_options(tssm_game PRIVATE ${TSSM_NO_WARNINGS} ${TSSM_GAME_OPTIONS}
@@ -1032,7 +1067,7 @@ else()
   add_executable(tssm ${TSSM_EXE_SOURCES})
   set(TSSM_GAME_TARGET tssm)
 endif()
-target_link_libraries(${TSSM_GAME_TARGET} PRIVATE tssm_game tssm_platform tssm_rw)
+target_link_libraries(${TSSM_GAME_TARGET} PRIVATE tssm_game tssm_platform tssm_rw tssm_buildinfo)
 target_compile_options(${TSSM_GAME_TARGET} PRIVATE ${TSSM_NO_WARNINGS})
 target_compile_definitions(${TSSM_GAME_TARGET} PRIVATE ${FMV_DEFINES})
 
@@ -1201,7 +1236,7 @@ option(TSSM_BUILD_TESTS "Build the platform layer's unit tests" ON)
 # tssm_input_test drives SDL's virtual controllers and a stand-in keyboard
 # through the game's own xPadUpdate (src/SB/Core/x/xPad.cpp, compiled in with
 # the game's flags) and checks what the game sees. No game data, no window.
-#   build-*/tssm_input_test [scratch folder]
+#   build-*/tssm_input_test [scratch folder]      (or `ctest -R input`)
 if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND TSSM_INPUT_BACKEND STREQUAL "sdl")
   # gui/iGuiNull.cpp stands in for the overlay: iPad.cpp asks it for the input
   # filter, and the real one would bring the GUI's RenderWare self-test (and
@@ -1216,6 +1251,9 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS AND TSSM_INPUT_BACKEND STREQUAL "sdl")
   if(WIN32)
     target_link_libraries(tssm_input_test PRIVATE user32 gdi32 ole32 dbghelp)
   endif()
+  enable_testing()
+  add_test(NAME tssm_input_test
+           COMMAND tssm_input_test ${CMAKE_CURRENT_BINARY_DIR}/tssm_input_test_run)
 endif()
 
 # --- save_selftest ---------------------------------------------------------------
@@ -1248,7 +1286,14 @@ if(TSSM_HOST_TOOLS)
     ${PC_DIR}/isavegame.cpp
     ${PC_DIR}/iSaveCLI.cpp
     ${PC_DIR}/iSaveFormat.cpp
+    ${PC_DIR}/iSaveAES.cpp
+    ${PC_DIR}/iSaveLE.cpp
+    ${PC_DIR}/iSaveSHA1.cpp
     ${PC_DIR}/iSaveStore.cpp
+    ${PC_DIR}/iSavePS2.cpp
+    ${PC_DIR}/iSaveStorePS2.cpp
+    ${PC_DIR}/iSaveStoreXbox.cpp
+    ${PC_DIR}/iSaveXbox.cpp
     ${PC_DIR}/iSaveZip.cpp
     ${HOST_SOURCES}
     $<TARGET_OBJECTS:save_selftest_game>
@@ -1263,6 +1308,64 @@ if(TSSM_HOST_TOOLS)
   endif()
   add_test(NAME save_selftest
            COMMAND save_selftest ${CMAKE_CURRENT_BINARY_DIR}/save_selftest_run)
+endif()
+
+# --- xsave_selftest ----------------------------------------------------------------
+# The other consoles' saves (docs/SAVES.md sections 6 to 8), without the game:
+# SHA-1 and HMAC known answers, the Xbox folder names, the signature with a
+# made-up keys file against an independent computation, the little-endian
+# conversion against a reference encoder on made-up saves and packages, and
+# Xbox export and import through the store and the command line. Everything it
+# reads is made in the test; with the Xbox and GameCube folders
+# (TSSM_TEST_ASSETS, TSSM_TEST_GC_ASSETS) it also reads the player's own XBE
+# and packages, and with a folder of real saves (TSSM_TEST_SAVES) converts
+# each there and back. The PlayStation 2 side is in it too: the card's
+# error-correcting code, .psu files and a card image formatted by the test;
+# with a PlayStation 2 disc's files (TSSM_TEST_PS2_ASSETS) the game's icon is
+# found in its PLAT.HIP. And the PlayStation 3's: AES-128, the .psv's layout
+# and its two signatures with made-up key files, .VM2 cards, and a real .psv
+# among the saves written again byte for byte but for its signature.
+#   build-*/xsave_selftest <scratch folder> [<Xbox files> [<GameCube files> [<saves>
+#                          [<PlayStation 2 files>]]]]
+if(TSSM_HOST_TOOLS)
+  add_executable(xsave_selftest
+    ${PC_DIR}/tests/xsave_selftest.cpp
+    ${PC_DIR}/iSaveCLI.cpp
+    ${PC_DIR}/iSaveFormat.cpp
+    ${PC_DIR}/iSaveAES.cpp
+    ${PC_DIR}/iSaveLE.cpp
+    ${PC_DIR}/iSaveSHA1.cpp
+    ${PC_DIR}/iSaveStore.cpp
+    ${PC_DIR}/iSavePS2.cpp
+    ${PC_DIR}/iSaveStorePS2.cpp
+    ${PC_DIR}/iSaveStoreXbox.cpp
+    ${PC_DIR}/iSaveXbox.cpp
+    ${PC_DIR}/iSaveZip.cpp
+    ${HOST_SOURCES}
+  )
+  target_include_directories(xsave_selftest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(xsave_selftest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(xsave_selftest PRIVATE dbghelp)
+  elseif(NOT ANDROID)
+    find_package(Threads REQUIRED)
+    target_link_libraries(xsave_selftest PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  endif()
+  enable_testing()
+  add_test(NAME xsave_selftest
+           COMMAND xsave_selftest ${CMAKE_CURRENT_BINARY_DIR}/xsave_selftest_run
+                   "${TSSM_TEST_ASSETS}" "${TSSM_TEST_GC_ASSETS}" "${TSSM_TEST_SAVES}"
+                   "${TSSM_TEST_PS2_ASSETS}")
+
+  # The PlayStation 3 .psv's signature and layout against an implementation of
+  # their public description in tests/psv_sign_check.py (its own AES-128 and
+  # Python's HMAC), with made-up keys only; when there is a Python 3.7 or later.
+  find_package(Python3 3.7 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME psv_sign_check
+             COMMAND ${Python3_EXECUTABLE} -I ${PC_DIR}/tests/psv_sign_check.py
+                     $<TARGET_FILE:xsave_selftest> ${CMAKE_CURRENT_BINARY_DIR}/psv_sign_check_run)
+  endif()
 endif()
 
 # --- tssm_widentest -----------------------------------------------------------------
@@ -1294,6 +1397,28 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   target_include_directories(tssm_watertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
   add_test(NAME tssm_watertest COMMAND tssm_watertest)
+endif()
+
+# --- tssm_steadyframetest ---------------------------------------------------------
+# The game's steady frame time (iSteadyFrame.h) on made-up frame times: the
+# enemies' end-of-animation check at 60, 120 and the GameCube's 30, the clock
+# against the wall clock, late frames, scenes over budget; no game, no data.
+# Run it as `tssm_steadyframetest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_steadyframetest ${PC_DIR}/tests/steadyframetest.cpp)
+  target_include_directories(tssm_steadyframetest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_steadyframetest COMMAND tssm_steadyframetest)
+endif()
+
+# --- tssm_hudtest -----------------------------------------------------------------
+# The HUD at the screen's edges ([video] ui, iScreen.h's anchor and safe margin) on
+# made-up screen shapes: no game, no data. Run it as `tssm_hudtest`.
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_hudtest ${PC_DIR}/tests/hudtest.cpp ${PC_DIR}/iScreen.cpp)
+  target_include_directories(tssm_hudtest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(NAME tssm_hudtest COMMAND tssm_hudtest)
 endif()
 
 # --- tssm_savetexttest ---------------------------------------------------------------
@@ -1332,6 +1457,20 @@ if(TSSM_BUILD_TESTS AND NOT ANDROID)
     enable_testing()
     add_test(NAME tssm_gcswaptest COMMAND tssm_gcswaptest ${TSSM_TEST_GC_ASSETS} ${TSSM_TEST_ASSETS})
   endif()
+endif()
+
+# --- tssm_ordertest --------------------------------------------------------------
+# The creation numbers on RenderWare's atomics that put the opaque models in the
+# console's draw order (iModelOrder.h, rw/atomic_order.cpp), over librw's NULL
+# platform: no game, no data, no device. Run it as `tssm_ordertest`.
+if(TSSM_BUILD_TESTS AND NOT ANDROID)
+  add_executable(tssm_ordertest ${PC_DIR}/tests/ordertest.cpp ${PC_DIR}/rw/atomic_order.cpp)
+  target_include_directories(tssm_ordertest PRIVATE ${PC_DIR}/compat ${PC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(tssm_ordertest PRIVATE librw)
+  target_compile_options(tssm_ordertest PRIVATE ${TSSM_NO_WARNINGS})
+  enable_testing()
+  add_test(NAME tssm_ordertest COMMAND tssm_ordertest)
 endif()
 
 # --- tssm_gcrwtest ---------------------------------------------------------------
@@ -1388,6 +1527,24 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   enable_testing()
   add_test(NAME tssm_extrastest
            COMMAND tssm_extrastest ${CMAKE_CURRENT_BINARY_DIR}/tssm_extrastest_run)
+endif()
+
+# --- tssm_cheattest -----------------------------------------------------------------
+# tssm_cheattest: the Cheats tab's tables and state (src/SB/Core/pc/iCheats.h)
+# and the [cheats] settings through the real config layer, without the game.
+#   build-*/tssm_cheattest <scratch folder>
+if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
+  add_executable(tssm_cheattest ${PC_DIR}/tests/cheattest.cpp ${PC_DIR}/iCheats.cpp
+    ${PC_DIR}/iConfig.cpp ${PC_DIR}/iConfigEdit.cpp ${PC_DIR}/iConfigTable.cpp ${HOST_SOURCES})
+  target_include_directories(tssm_cheattest PRIVATE ${TSSM_INCLUDES})
+  target_compile_options(tssm_cheattest PRIVATE ${TSSM_NO_WARNINGS})
+  if(WIN32)
+    target_link_libraries(tssm_cheattest PRIVATE dbghelp)
+  endif()
+  enable_testing()
+  add_test(NAME tssm_cheattest
+           COMMAND tssm_cheattest ${CMAKE_CURRENT_BINARY_DIR}/tssm_cheattest_run
+                   ${CMAKE_CURRENT_SOURCE_DIR}/src/SB/Game/zGameExtras.cpp)
 endif()
 
 # --- tssm_modtest ----------------------------------------------------------------

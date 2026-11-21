@@ -87,7 +87,14 @@ namespace
         }
         if (b1.OriginalData != b2.OriginalData)
         {
+#ifdef PLATFORM_PC
+            // PLATFORM_PC: the console's order of the atomics' addresses, which its RenderWare
+            // heap hands out from the top down, comes from the order they were created in
+            // (iModelOrder.h); the host's heap has no such order.
+            return iModelCreationOrderCompare(b1.OriginalData, b2.OriginalData);
+#else
             return (U32)(UPtr)b1.OriginalData - (U32)(UPtr)b2.OriginalData;
+#endif
         }
         return b2.ClipFlags - b1.ClipFlags;
     }

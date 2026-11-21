@@ -1,6 +1,7 @@
 #include "iSystem.h"
 #include "iAsync.h"
 #include "iBoot.h"
+#include "iCheats.h"
 #include "iConfig.h"
 #include "iFile.h"
 #include "iFMV.h"
@@ -26,6 +27,7 @@
 #include <string.h>
 
 #include "iCamera.h"
+#include "iModelOrder.h"
 #include "xDebug.h"
 #include "xFX.h"
 #include "xMath.h"
@@ -239,6 +241,19 @@ static void ApplyConfig()
     iScreenSetMultiSample(iConfigGetInt("video.msaa", 1));
     iScreenSetFOV(iConfigGetFloat("video.fov", 75.0f));
 
+    // Where the HUD goes on a screen that is not 4:3 (iScreen.h, iHudAnchor.h).
+    {
+        const char* ui = iConfigGetString("video.ui", "pillarbox");
+        iScreenSetUIMode(iScreenUIModeFromName(ui));
+        iScreenSetUISafeMargin(0.01f * iConfigGetFloat("video.ui_margin", 0.0f));
+        if (iScreenUIModeInForce() == iSCREENUI_NATIVE)
+        {
+            printf("tssm: HUD at the screen's edges (%s, margin %.1f%%)\n",
+                   iScreenGetUIMode() == iSCREENUI_NATIVE ? "ui native" : "screen taller than 4:3",
+                   (double)(100.0f * iScreenGetUISafeMargin()));
+        }
+    }
+
     const char* backend = iConfigGetString("video.backend", "auto");
     if (iHostStrCaseCmp(backend, "d3d9") == 0)
     {
@@ -319,6 +334,9 @@ static void ApplyConfig()
     // TSSM's own screen passes, the console's effects drawn with render targets.
     iHDRGlowSetEnabled(iConfigGetBool("video.hdr_glow", TRUE));
     iScreenWarpSetEnabled(iConfigGetBool("video.screen_warp", TRUE));
+
+    // The port's cheats ([cheats], iCheats.h): each one off by default.
+    iCheatsApply();
 
     const char* path = iConfigPath();
     printf("tssm: %s -- %dx%d %s, backend %s\n", path != NULL ? path : "no config.ini, defaults",
@@ -474,6 +492,12 @@ static U32 RWAttachPlugins()
         return TRUE;
     }
     if (!RpPTankPluginAttach())
+    {
+        return TRUE;
+    }
+    // PC: the order the atomics are made in, for the opaque models' draw order
+    // (iModelOrder.h).
+    if (!iModelOrderPluginAttach())
     {
         return TRUE;
     }

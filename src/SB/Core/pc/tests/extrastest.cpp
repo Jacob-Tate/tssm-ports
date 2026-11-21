@@ -40,6 +40,7 @@
 #include "iPadBind.h"
 #include "iScreen.h"
 #include "iWindow.h"
+#include "iXboxDistort.h"
 #include "iXboxWaterDraw.h"
 #include "xEvent.h"
 
@@ -138,6 +139,14 @@ bool iXboxWaterActive()
 const char* iXboxWaterStatus()
 {
     return sWaterStatus;
+}
+
+// The guitar's distortion's own answer (iXboxDistort.cpp, rw/xboxdistort.cpp).
+static const char* sDistortStatus;
+
+const char* iXboxDistortStatus()
+{
+    return sDistortStatus;
 }
 
 void iWindowSetFrameLock(S32 count)
@@ -242,6 +251,13 @@ static void TestResolve()
                         const bool no = r != iEXTRAS_RENDERER_SHADERS || fl == iEXTRAS_FILES_GAMECUBE;
                         CHECK(got == (no ? iEXTRAS_GAMECUBE : iEXTRAS_XBOX));
                     }
+                    else if (f == iEXTRAS_GUITAR_DISTORTION)
+                    {
+                        // A pixel shader and the Xbox files' swirl map, in any
+                        // scene.
+                        const bool no = r != iEXTRAS_RENDERER_SHADERS || fl == iEXTRAS_FILES_GAMECUBE;
+                        CHECK(got == (no ? iEXTRAS_GAMECUBE : iEXTRAS_XBOX));
+                    }
                 }
             }
         }
@@ -252,6 +268,46 @@ static void TestResolve()
     CHECK(iExtrasBuilt(iEXTRAS_CROWDS));
     CHECK(iExtrasBuilt(iEXTRAS_WATER));
     CHECK(iExtrasBuilt(iEXTRAS_FRAME_LOCK));
+    CHECK(iExtrasBuilt(iEXTRAS_GUITAR_DISTORTION));
+    CHECK(strcmp(iExtrasKey(iEXTRAS_GUITAR_DISTORTION), "extras.guitar_distortion") == 0);
+
+    // The guitar's distortion's three fallbacks, each with its own sentence.
+    const char* gtr = NULL;
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_GAMECUBE,
+                         iEXTRAS_RENDERER_SHADERS, 'BB02', &gtr) == iEXTRAS_GAMECUBE);
+    CHECK(gtr != NULL && strstr(gtr, "GameCube files") != NULL && strstr(gtr, "swirl map") != NULL);
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                         iEXTRAS_RENDERER_FIXED, 'BB02', &gtr) == iEXTRAS_GAMECUBE);
+    CHECK(gtr != NULL && strstr(gtr, "fixed path") != NULL);
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                         iEXTRAS_RENDERER_3DS, 'BB02', &gtr) == iEXTRAS_GAMECUBE);
+    CHECK(gtr != NULL && strstr(gtr, "3DS") != NULL);
+    // Android's and the Switch's GL (never run there) and Vulkan (no shader):
+    // none is drawn, and every other feature takes them as it takes shaders.
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                         iEXTRAS_RENDERER_DEVICE_GL, 'BB02', &gtr) == iEXTRAS_GAMECUBE);
+    CHECK(gtr != NULL && strstr(gtr, "Android") != NULL && strstr(gtr, "Switch") != NULL);
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                         iEXTRAS_RENDERER_VULKAN, 'BB02', &gtr) == iEXTRAS_GAMECUBE);
+    CHECK(gtr != NULL && strstr(gtr, "Vulkan") != NULL);
+    for (S32 f = 0; f < iEXTRAS_FEATURE_COUNT; f++)
+    {
+        if (f == iEXTRAS_GUITAR_DISTORTION)
+        {
+            continue;
+        }
+        const char* a = NULL;
+        const char* b = NULL;
+        const iExtrasLook shaders = iExtrasResolve((iExtrasFeature)f, iEXTRAS_XBOX,
+                                                   iEXTRAS_FILES_XBOX, iEXTRAS_RENDERER_SHADERS,
+                                                   'BB02', &a);
+        CHECK(iExtrasResolve((iExtrasFeature)f, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                             iEXTRAS_RENDERER_DEVICE_GL, 'BB02', &b) == shaders);
+        CHECK(a == b);
+    }
+    CHECK(iExtrasResolve(iEXTRAS_GUITAR_DISTORTION, iEXTRAS_XBOX, iEXTRAS_FILES_XBOX,
+                         iEXTRAS_RENDERER_SHADERS, 0, &gtr) == iEXTRAS_XBOX);
+    CHECK(gtr == NULL);
 
     const char* why = NULL;
     iExtrasResolve(iEXTRAS_CROWDS, iEXTRAS_XBOX, iEXTRAS_FILES_GAMECUBE, iEXTRAS_RENDERER_SHADERS,
@@ -630,6 +686,26 @@ static void TestConfig(const char* scratch)
     iConfigSet("extras.water", "xbox");
     sBootId = NULL;
     CHECK(iExtrasInForce(iEXTRAS_WATER) == iEXTRAS_XBOX);
+
+    // The guitar's distortion: appended at its default, in force at once, and
+    // the pass's own reason (no swirl map, say) reaches the row while the
+    // setting is xbox.
+    CHECK(CountLines(text, "guitar_distortion = xbox") == 1);
+    CHECK(iExtrasSetting(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_XBOX);
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_XBOX);
+    CHECK(!iExtrasStatus(iEXTRAS_GUITAR_DISTORTION, why, sizeof(why)));
+    sDistortStatus = "The game's files have no swirl map: none is drawn.";
+    CHECK(iExtrasStatus(iEXTRAS_GUITAR_DISTORTION, why, sizeof(why)) &&
+          strstr(why, "no swirl map") != NULL);
+    iConfigSet("extras.guitar_distortion", "gamecube");
+    CHECK(!iExtrasStatus(iEXTRAS_GUITAR_DISTORTION, why, sizeof(why)));
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_XBOX); // until the overlay applies
+    iExtrasApply();
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_GAMECUBE);
+    sDistortStatus = NULL;
+    iConfigSet("extras.guitar_distortion", "xbox");
+    iExtrasApply();
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_XBOX);
     sBootId = "GC";
     CHECK(iExtrasInForce(iEXTRAS_WATER) == iEXTRAS_GAMECUBE);
     CHECK(iExtrasStatus(iEXTRAS_WATER, why, sizeof(why)) && strstr(why, "game's files") != NULL);
@@ -641,6 +717,21 @@ static void TestConfig(const char* scratch)
     CHECK(iExtrasInForce(iEXTRAS_CROWDS) == iEXTRAS_GAMECUBE); // the file's own value
     CHECK(iExtrasInForce(iEXTRAS_SPOTLIGHTS) == iEXTRAS_XBOX);
     iConfigSet("extras.water", "gamecube");
+
+    // The game's files are GameCube's from here on: no swirl map, whatever a
+    // level's own files are (every level below is from Xbox files unless
+    // named), and no "next level" difference.
+    iExtrasApply();
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_GAMECUBE);
+    CHECK(iExtrasStatus(iEXTRAS_GUITAR_DISTORTION, why, sizeof(why)) &&
+          strstr(why, "game's files are GameCube files") != NULL);
+    iExtrasSceneEnter('BB02');
+    CHECK(iExtrasLevelFiles() == iEXTRAS_FILES_XBOX);
+    CHECK(iExtrasInForce(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_GAMECUBE);
+    CHECK(iExtrasAtLevelLoad(iEXTRAS_GUITAR_DISTORTION) == iEXTRAS_XBOX);
+    CHECK(iExtrasStatus(iEXTRAS_GUITAR_DISTORTION, why, sizeof(why)) &&
+          strstr(why, "swirl map") != NULL);
+    iExtrasSceneReady('BB02', 1);
 
     // A level with crowds = gamecube.
     iExtrasSceneEnter('BB02');

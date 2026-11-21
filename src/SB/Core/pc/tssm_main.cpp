@@ -84,6 +84,9 @@
 // TSSM_TEST_HANG_DUMP: the game thread's heartbeat.
 #include "iHangDump.h"
 
+// The build's time, version and commit: the banner and crash.log's first line.
+#include "iBuildInfo.h"
+
 #ifdef __ANDROID__
 // The log has to be opened from here rather than from the Android shim's own
 // startup, because the banner below is printed from a static constructor and
@@ -186,9 +189,10 @@ namespace
         }
         char line[1024];
         int n = snprintf(line, sizeof(line),
-                         "\n==== %04u-%02u-%02u %02u:%02u:%02u  %s (process %lu, built %s %s)\n",
+                         "\n==== %04u-%02u-%02u %02u:%02u:%02u  %s (process %lu, %s %s, built %s)\n",
                          t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, exe,
-                         (unsigned long)GetCurrentProcessId(), __DATE__, __TIME__);
+                         (unsigned long)GetCurrentProcessId(), iBuildVersion, iBuildCommit,
+                         iBuildTime);
         if (n > 0)
         {
             DWORD wrote = 0;
@@ -861,10 +865,10 @@ namespace
         char line[1024];
         int n =
             snprintf(line, sizeof(line),
-                     "\n==== %04d-%02d-%02d %02d:%02d:%02d  tssm (process %d, built %s %s)\n%s\n"
+                     "\n==== %04d-%02d-%02d %02d:%02d:%02d  tssm (process %d, %s %s, built %s)\n%s\n"
                      "the backtrace is in %s\n",
                      t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec,
-                     (int)getpid(), __DATE__, __TIME__, what,
+                     (int)getpid(), iBuildVersion, iBuildCommit, iBuildTime, what,
                      iLogPath()[0] != '\0' ? iLogPath() : "the game's output");
         if (n > 0)
         {
@@ -1040,7 +1044,9 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
-            printf("tssm: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+            printf("tssm: PC port %s (%s, built %s), renderers: %s. Movie decoder: %s, "
+                   "movie audio: %s.\n",
+                   iBuildVersion, iBuildCommit, iBuildTime,
                    kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
                    iFMVAudioName());
             // TSSM_TEST_CRASH: at startup, or at a frame when it is a number

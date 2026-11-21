@@ -1,6 +1,9 @@
 // PC-only: the save store. See iSaveStore.h and docs/SAVES.md.
 #include "iSaveStore.h"
 #include "iSaveFormat.h"
+#include "iSaveLE.h"
+#include "iSavePS2.h"
+#include "iSaveXbox.h"
 #include "iSaveZip.h"
 #include "iHost.h"
 #include "iFile.h"
@@ -585,6 +588,9 @@ void iSaveImportDefaults(iSaveImportOptions* o)
     o->pick = 0;
     o->force = false;
     o->dryRun = false;
+    o->xboxXbe = NULL;
+    o->xboxKeys = NULL;
+    o->psvKeys = NULL;
 }
 
 namespace
@@ -602,6 +608,7 @@ namespace
         bool ok;
         std::string problem;
         std::string detail; // for a card's file: its name, region and date
+        S64 mtime; // when it was saved, when the file says (an Xbox save's); else 0
     };
 } // namespace
 
@@ -640,6 +647,7 @@ static void iSS_fromGCI(const U8* p, size_t n, const std::string& source, S32 ta
     f.game = -1;
     f.haveCard = false;
     f.ok = false;
+    f.mtime = 0;
 
     if (!iSaveGCIParse(p, n, &gci, err, sizeof(err)))
     {
@@ -676,6 +684,96 @@ static void iSS_fromGCI(const U8* p, size_t n, const std::string& source, S32 ta
     found.push_back(f);
 }
 
+// The folder part of a zip entry's name ("" for none), and its last part.
+static std::string iSS_entryDir(const std::string& name)
+{
+    size_t slash = name.find_last_of('/');
+    return slash == std::string::npos ? "" : name.substr(0, slash);
+}
+
+static std::string iSS_entryBase(const std::string& name)
+{
+    size_t slash = name.find_last_of('/');
+    return slash == std::string::npos ? name : name.substr(slash + 1);
+}
+
+// A save in the little-endian consoles' order (iSaveLE.h): an Xbox's
+// GameData.xsv, with its 20-byte signature after the payload, or the payload
+// alone. `saveName` is the game's name for it when something says
+// ("SpongeBobMovie02": the Xbox's SaveMeta.xbx, or the file's own name),
+// `folder` the Xbox save folder's name when there is one. `wrapper` is what
+// the file it came in says of itself (a .psv's signature), or NULL.
+static void iSS_fromLE(const U8* p, size_t n, const std::string& source, const char* saveName,
+                       const char* folder, S64 mtime, std::vector<Found>& found,
+                       const char* wrapper = NULL)
+{
+    char err[400] = "";
+    Found f;
+    f.source = source;
+    f.target = -1;
+    f.game = -1;
+    f.haveCard = false;
+    f.mtime = mtime;
+
+    std::string signature;
+    std::string notes;
+    f.ok = iSaveStoreXboxDecode(p, n, f.payload, &signature, &notes, err, sizeof(err)) &&
+           iSavePayloadInspect(&f.payload[0], f.payload.size(), NULL, err, sizeof(err));
+    f.problem = err;
+
+    if (saveName != NULL)
+    {
+        f.game = iSaveXboxGameOfName(saveName);
+    }
+    for (S32 g = 0; f.game < 0 && folder != NULL && g < ISS_GAMES; g++)
+    {
+        // The folder's name is worked out from the save's (iSaveXbox.h).
+        char name[32];
+        char hashed[16];
+        iSaveXboxSaveName(g, name, sizeof(name));
+        iSaveXboxFolderName(name, hashed);
+        if (iHostStrCaseCmp(folder, hashed) == 0)
+        {
+            f.game = g;
+        }
+    }
+
+    // Which console's: an Xbox save's folder or its file's name says so even
+    // when the file is damaged; a bare file is told by the 20 bytes of
+    // signature after the payload.
+    std::string file = source;
+    size_t slash = file.find_last_of("/\\");
+    if (slash != std::string::npos)
+    {
+        file.erase(0, slash + 1);
+    }
+    bool xbox = folder != NULL || iHostStrCaseCmp(file.c_str(), ISX_SAVE_FILE) == 0 ||
+                (n >= ISF_PAYLOAD_HEADER && iSavePayloadIsLE(p, n) &&
+                 n == (size_t)iSavePayloadLESize(p) + ISX_SIGNATURE_SIZE);
+    f.detail = xbox ? "an Xbox save" : "a PlayStation 2 save";
+    if (saveName != NULL && saveName[0] != 0)
+    {
+        f.detail += std::string(" (") + saveName + ")";
+    }
+    if (xbox && !signature.empty())
+    {
+        f.detail += ", " + signature;
+    }
+    if (wrapper != NULL && wrapper[0] != '\0')
+    {
+        f.detail += std::string(", ") + wrapper;
+    }
+    // The conversion's note belongs to a save that reads. A refused one has
+    // its reason, and a note worked out from damaged data would only read as
+    // a second one.
+    if (f.ok && !notes.empty())
+    {
+        f.detail += "; note: " + notes;
+    }
+
+    found.push_back(f);
+}
+
 static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>& found, char* err,
                      size_t errsize, bool* understood)
 {
@@ -687,6 +785,45 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
     const char* base2 = strrchr(name, '\\');
     base = (base2 > base) ? base2 : base;
     base = (base != NULL) ? base + 1 : name;
+
+    // A PlayStation 2 save in one of the forms it travels in: a memory card
+    // image, a .psu, a .max or a .psv (iSavePS2.h). Each save file in the
+    // game's folder is the little-endian payload and nothing else.
+    {
+        std::vector<iSavePS2Folder> folders;
+        std::string kind;
+        S32 ps2 = iSaveStorePS2Folders(p, n, folders, &kind, why, sizeof(why));
+        if (ps2 < 0)
+        {
+            iSS_err(err, errsize, "%s: %s", name, why);
+            *understood = false;
+            return;
+        }
+        if (ps2 > 0)
+        {
+            // A .psv carries a PlayStation 3's signature: which one is said,
+            // and nothing hangs on it.
+            std::string psvSignature;
+            if (iSavePS2PsvIs(p, n))
+            {
+                psvSignature = iSaveStorePsvSignature(p, n);
+            }
+            for (size_t i = 0; i < folders.size(); i++)
+            {
+                for (size_t k = 0; k < folders[i].files.size(); k++)
+                {
+                    const iSavePS2File& file = folders[i].files[k];
+                    if (iSavePS2GameOfName(file.name.c_str()) < 0)
+                    {
+                        continue;
+                    }
+                    iSS_fromLE(file.data.empty() ? NULL : &file.data[0], file.data.size(), kind,
+                               file.name.c_str(), NULL, file.modified, found, psvSignature.c_str());
+                }
+            }
+            return;
+        }
+    }
 
     // A zip from iSaveStoreExportZip (or any zip of .gci files).
     if (iSaveZipIs(p, n))
@@ -702,6 +839,40 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
         for (size_t i = 0; i < entries.size(); i++)
         {
             const iSaveZipEntry& e = entries[i];
+
+            // An Xbox save folder: GameData.xsv, with SaveMeta.xbx beside it
+            // saying which save it is.
+            if (iHostStrCaseCmp(iSS_entryBase(e.name).c_str(), ISX_SAVE_FILE) == 0)
+            {
+                std::string dir = iSS_entryDir(e.name);
+                char saveName[64] = "";
+                for (size_t k = 0; k < entries.size(); k++)
+                {
+                    if (iSS_entryDir(entries[k].name) == dir &&
+                        iHostStrCaseCmp(iSS_entryBase(entries[k].name).c_str(), ISX_SAVE_META) ==
+                            0 &&
+                        !entries[k].data.empty())
+                    {
+                        iSaveXboxMetaValue(&entries[k].data[0], entries[k].data.size(), "Name",
+                                           saveName, sizeof(saveName));
+                    }
+                }
+                iSS_fromLE(e.data.empty() ? NULL : &e.data[0], e.data.size(), e.name,
+                           saveName[0] != 0 ? saveName : NULL, iSS_entryBase(dir).c_str(), e.mtime,
+                           found);
+                continue;
+            }
+
+            // A PlayStation 2 save file, out of the game's folder on a
+            // folder-type card or any copy of it.
+            if (iSavePS2GameOfName(iSS_entryBase(e.name).c_str()) >= 0 && !e.data.empty() &&
+                iSavePayloadIsLE(&e.data[0], e.data.size()))
+            {
+                iSS_fromLE(&e.data[0], e.data.size(), e.name, iSS_entryBase(e.name).c_str(), NULL,
+                           e.mtime, found);
+                continue;
+            }
+
             if (!iSS_lowerEnds(e.name, ".gci") && !iSS_lowerEnds(e.name, ".gcs"))
             {
                 continue;
@@ -742,6 +913,14 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
         return;
     }
 
+    // The same save in the little-endian consoles' order: an Xbox's
+    // GameData.xsv on its own, or a bare payload.
+    if (iSavePayloadIsLE(p, n))
+    {
+        iSS_fromLE(p, n, base, iSaveXboxGameOfName(base) >= 0 ? base : NULL, NULL, 0, found);
+        return;
+    }
+
     // A save file as the PC keeps it, from another install's save folder.
     if (n >= 4 && iSaveGetU32(p) == ISF_TAG('G', 'D', 'A', 'T'))
     {
@@ -750,6 +929,7 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
         f.target = -1;
         f.game = -1;
         f.haveCard = false;
+        f.mtime = 0;
         f.ok = iSavePayloadInspect(p, n, NULL, why, sizeof(why));
         f.problem = why;
         if (f.ok)
@@ -778,8 +958,8 @@ static void iSS_find(const U8* p, size_t n, const char* name, std::vector<Found>
     }
 
     iSS_err(err, errsize,
-            "%s is not a save this game knows: not a .gci/.gcs, a memory card image, a zip "
-            "of saves or a save file",
+            "%s is not a save this game knows: not a .gci/.gcs, a GameCube or PlayStation 2 "
+            "memory card image, a .psu/.max/.psv, an Xbox save, a zip of saves or a save file",
             name);
     *understood = false;
 }
@@ -798,7 +978,11 @@ bool iSaveStoreImportData(const U8* data, size_t n, const char* name, const iSav
 
     std::vector<Found> found;
     bool understood;
+    iSaveStoreXboxLookWith(o->xboxXbe, o->xboxKeys);
+    iSaveStorePsvLookWith(o->psvKeys);
     iSS_find(data, n, name, found, err, errsize, &understood);
+    iSaveStoreXboxLookWith(NULL, NULL);
+    iSaveStorePsvLookWith(NULL);
     if (!understood)
     {
         return false;
@@ -905,6 +1089,14 @@ bool iSaveStoreImportData(const U8* data, size_t n, const char* name, const iSav
                     else
                     {
                         iSS_removeHead(item.target, item.game);
+
+                        // An Xbox save's date is its file's.
+                        if (f.mtime > 0)
+                        {
+                            char path[512];
+                            iSaveStoreSlotPath(item.target, item.game, path, sizeof(path));
+                            iHostSetFileTime(path, f.mtime);
+                        }
                     }
 
                     item.ok = true;
@@ -927,6 +1119,34 @@ bool iSaveStoreImport(const char* file, const iSaveImportOptions* o,
     items.clear();
 
     std::vector<U8> data;
+
+    // An Xbox save is a folder: the saves under one (or beside a GameData.xsv
+    // that was named itself) are gathered and imported as one bundle.
+    iHostFileInfo st;
+    if (iHostStat(file, &st) && st.is_dir)
+    {
+        if (!iSaveStoreReadFolder(file, data, err, errsize))
+        {
+            return false;
+        }
+        return iSaveStoreImportData(&data[0], data.size(), file, o, items, err, errsize);
+    }
+
+    {
+        const char* base = strrchr(file, '/');
+        const char* base2 = strrchr(file, 0x5C);
+        base = (base2 > base) ? base2 : base;
+        if (base != NULL && base != file && iHostStrCaseCmp(base + 1, ISX_SAVE_FILE) == 0)
+        {
+            // Its own folder only: what else is below it was not asked for.
+            std::string dir(file, (size_t)(base - file));
+            if (iSaveStoreReadFolder(dir.c_str(), data, NULL, 0, false))
+            {
+                return iSaveStoreImportData(&data[0], data.size(), file, o, items, err, errsize);
+            }
+        }
+    }
+
     if (!iSaveStoreReadFile(file, data, err, errsize))
     {
         return false;

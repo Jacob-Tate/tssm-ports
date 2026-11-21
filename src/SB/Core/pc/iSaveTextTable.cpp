@@ -75,13 +75,19 @@ namespace
     // that has the line, choosing that disc leaves the line exactly as it is
     // (iSaveTextRewrite), so these are only what the OTHER disc's lines get.
     //
-    // PS2: there is no dump of the PS2 release here yet. Its words below are
-    // the PS2's standard memory card warning, built from the PS2 text both
-    // discs still carry: {i:PS2_MEMCARD} is the PS2 release's own "memory card
-    // (8MB) (for PlayStation(R)2)" asset (font_US.hip on both discs), and the
-    // rest follows its European lines ("...or reset/switch off the console").
-    // Correct this row from the PS2 disc's mnuc_US/mnus_US lines when it is
-    // dumped; nothing else needs to change.
+    // PS2: the US PS2 disc's own words (SLUS-209.04). The sentence is what its
+    // save screen line, SV MC DONTREMOVE TXT (MN/MNUC_US.HIP), says after
+    // "WARNING: {var:MCAccessType}...{n}"; its load screen line (LD MC
+    // DONTREMOVE TXT, MN/MNUS_US.HIP) is the same but for "reset/power off".
+    // The "While playing, ..." end, capital D and all, is its CREATE NEW GAME
+    // TXT (MN/MNUS_US.HIP). One change: where the disc has {i:PS2_PAD},
+    // these have {i:PS2_PAD_NAME}. PS2_PAD is "{var:ps2PadName}", which only
+    // the PS2 program fills in ("{i:PS2_PAD_NAME}" on an NTSC console) and
+    // which is always empty here (zVar.cpp), so the words name that asset
+    // themselves and read as the US PS2's do. The Xbox and GameCube discs both
+    // have PS2_MEMCARD, PS2_NAME and PS2_PAD_NAME (font_US.hip), and the
+    // assets {var:MCSelectedCard} reads (mnuc_US.hip: "MEMORY CARD slot 1" on
+    // the Xbox's, "slot A" on the GameCube's).
     struct Words
     {
         const char* note;
@@ -92,8 +98,10 @@ namespace
         /* auto: resolved before use */ { NULL, NULL },
         /* xbox */ { "Please don't turn off your Xbox console.", "do not turn off your Xbox console." },
         /* ps2 */
-        { "Do not remove the {i:PS2_MEMCARD}, or reset/switch off the console.",
-          "do not remove the {i:PS2_MEMCARD}, or reset/switch off the console." },
+        { "Do not remove {i:PS2_MEMCARD} in {var:MCSelectedCard}, or the {i:PS2_PAD_NAME}, or "
+          "reset/switch off the console.",
+          "Do not remove {i:PS2_MEMCARD}, the {i:PS2_PAD_NAME}, or reset/switch off the "
+          "console." },
         /* gamecube */
         { "Do not touch the Memory Card or the POWER Button",
           "Do not remove the Memory Card or power off the Nintendo GameCube." },

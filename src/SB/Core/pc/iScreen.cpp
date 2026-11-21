@@ -40,38 +40,26 @@ namespace
 
     iScreenUIMode sUIMode = iSCREENUI_PILLARBOX;
 
-    // How far from the middle a widget has to be authored before it belongs to
-    // an edge rather than to the centre of the screen.
-    //
-    // The number is not arbitrary. Retail's HUD is five groups, and measuring
-    // where they sit gives their centres as: the health meter at 0.13, the
-    // pickup counter at 0.13 and 0.21, the spatula counter at 0.48 and 0.54,
-    // the shiny counter at 0.66 and 0.74, the sock counter at 0.78 and 0.86.
-    // A zone of a tenth either side of the middle -- edges at 0.4 and 0.6 --
-    // puts every one of those groups WHOLLY inside one zone, with the nearest
-    // miss two thirds of the zone away from a boundary. That is what keeps a
-    // number beside its icon: both halves get the same offset.
-    const F32 kAnchorZone = 0.1f;
+    // How far short of the real edges the HUD stops, as a share of the
+    // screen's width (height, on a tall screen) at each side.
+    F32 sUISafeMargin = 0.0f;
 
     // The offset in force, in UI units. Set per widget, because which edge a
     // widget belongs to is a property of the widget and not of the screen.
     F32 sAnchorOffsetX = 0.0f;
     F32 sAnchorOffsetY = 0.0f;
 
-    // Left edge, right edge, or neither.
-    F32 anchorOffset(F32 centre, F32 margin)
+    // Whether a HUD widget's anchor is set (its offset may be zero: paused,
+    // or no reach), and how deep the menus' cut scope is.
+    bool sAnchorSet;
+    S32 sBoxClipDepth;
+
+    // How far an anchored widget travels: the screen's reach outside the box,
+    // less the safe margin, and never inwards.
+    F32 anchorReach(F32 margin, F32 frac)
     {
-        if (centre < 0.5f - kAnchorZone)
-        {
-            return -margin;
-        }
-
-        if (centre > 0.5f + kAnchorZone)
-        {
-            return margin;
-        }
-
-        return 0.0f;
+        const F32 reach = margin - sUISafeMargin / frac;
+        return reach > 0.0f ? reach : 0.0f;
     }
 
     // The largest 4:3 rectangle that fits, centred. The same fit iFMV.cpp puts
@@ -172,12 +160,12 @@ F32 iScreenUIMarginYF()
 
 F32 iScreenAnchorMarginXF()
 {
-    return sUIMode == iSCREENUI_NATIVE ? sUIMarginX : 0.0f;
+    return iScreenUIModeInForce() == iSCREENUI_NATIVE ? anchorReach(sUIMarginX, sUIFracX) : 0.0f;
 }
 
 F32 iScreenAnchorMarginYF()
 {
-    return sUIMode == iSCREENUI_NATIVE ? sUIMarginY : 0.0f;
+    return iScreenUIModeInForce() == iSCREENUI_NATIVE ? anchorReach(sUIMarginY, sUIFracY) : 0.0f;
 }
 
 iScreenUIMode iScreenGetUIMode()
@@ -193,19 +181,90 @@ void iScreenSetUIMode(iScreenUIMode mode)
     // anchors anything at all.
     sAnchorOffsetX = 0.0f;
     sAnchorOffsetY = 0.0f;
+    sAnchorSet = false;
 }
 
-void iScreenSetAnchorRect(F32 x, F32 y, F32 w, F32 h)
+S32 iScreenUITall()
 {
-    if (sUIMode != iSCREENUI_NATIVE)
+    // In whole pixels, so a 4:3 size is never taller by a rounding error.
+    return 4 * sHeight > 3 * sWidth;
+}
+
+iScreenUIMode iScreenUIModeInForce()
+{
+    return iScreenUITall() ? iSCREENUI_NATIVE : sUIMode;
+}
+
+iScreenUIMode iScreenUIModeFromName(const char* name)
+{
+    // The config reader hands values over as written; compare without case.
+    // By hand, like the aspect names below: tssm_hudtest links this file alone.
+    static const char kNative[] = "native";
+    if (name == NULL)
     {
-        sAnchorOffsetX = 0.0f;
-        sAnchorOffsetY = 0.0f;
-        return;
+        return iSCREENUI_PILLARBOX;
+    }
+    size_t i = 0;
+    for (; kNative[i] != '\0'; i++)
+    {
+        const char c = name[i];
+        if (((c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c) != kNative[i])
+        {
+            return iSCREENUI_PILLARBOX;
+        }
+    }
+    return name[i] == '\0' ? iSCREENUI_NATIVE : iSCREENUI_PILLARBOX;
+}
+
+F32 iScreenGetUISafeMargin()
+{
+    return sUISafeMargin;
+}
+
+void iScreenSetUISafeMargin(F32 share)
+{
+    sUISafeMargin = share < 0.0f ? 0.0f : share > 0.25f ? 0.25f : share;
+}
+
+void iScreenSetAnchor(F32 sideX, F32 sideY)
+{
+    sAnchorOffsetX = sideX * iScreenAnchorMarginXF();
+    sAnchorOffsetY = sideY * iScreenAnchorMarginYF();
+    sAnchorSet = true;
+}
+
+void iScreenClearAnchor()
+{
+    sAnchorOffsetX = 0.0f;
+    sAnchorOffsetY = 0.0f;
+    sAnchorSet = false;
+}
+
+void iScreen2DBoxClipBegin()
+{
+    sBoxClipDepth++;
+}
+
+void iScreen2DBoxClipEnd()
+{
+    if (sBoxClipDepth > 0)
+    {
+        sBoxClipDepth--;
+    }
+}
+
+S32 iScreen2DClipY(F32* top, F32* bottom)
+{
+    if (!iScreenUITall() || (!sAnchorSet && sBoxClipDepth == 0))
+    {
+        return FALSE;
     }
 
-    sAnchorOffsetX = anchorOffset(x + 0.5f * w, sUIMarginX);
-    sAnchorOffsetY = anchorOffset(y + 0.5f * h, sUIMarginY);
+    // The box, moved by the anchor in force (none for the menus): the 4:3
+    // screen the draw was made for.
+    *top = sUIOriginY + sAnchorOffsetY * sUIHeight;
+    *bottom = *top + sUIHeight;
+    return TRUE;
 }
 
 F32 iScreenAnchorX(F32 x)
@@ -725,7 +784,7 @@ void iScreenSetSize(S32 width, S32 height)
 namespace
 {
     // How many screen-space scopes are open. The game draws from one thread
-    // (iAsync.cpp does not start the loading screen's), so a plain counter.
+    // (iAsync.cpp draws the loading screen on it too), so a plain counter.
     S32 sScreenSpaceDepth = 0;
 } // namespace
 

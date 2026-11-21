@@ -103,6 +103,12 @@ S32 iWindowGetPacedRate()
     return 0;
 }
 
+// Nothing is paced, so the game keeps the measured time.
+F32 iWindowGameFrameTime(F32 measured)
+{
+    return measured;
+}
+
 // No monitor, so the rate cannot be determined. video.framerate = display
 // falls back to the configured cap on this answer.
 S32 iWindowGetDisplayRefreshRate()

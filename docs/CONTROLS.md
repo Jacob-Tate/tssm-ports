@@ -57,6 +57,7 @@ Notes on the table:
 | **Right stick** | Camera: orbit and tilt. | |
 
 **Cheat codes** work as on the consoles. Pause, hold LT and RT, then enter the code with X and Y.
+`docs/CHEATS.md` lists them; the overlay's Cheats tab has each one as a switch.
 
 ### The other move layout
 
@@ -215,6 +216,11 @@ The other rows:
   - The Xbox data opens the upgrade window on `PadPressSelect`.
   - The GameCube code wakes the menus on Start or Z, not Select, so Back carries Z to wake them.
   - `zUI::DoUpdate` tests Select before Z, so the press still arrives as Select.
+  - With the GameCube release's menus (a GameCube disc, or a mod's GameCube `MN/mnui.HIP`), Back
+    sets `Z` alone. Those menus open the upgrade window on `PadPressE`, which `zUI::DoUpdate`
+    raises for Z, and Select would come first and reach nothing. A GameCube pad has no Select, so
+    that is what its Z sends on the console. The port asks the package that holds the menu the
+    window opens from (`__PAUSE_STATE_PAUSE MGR`) which release it is (`iPad.cpp`).
 
 Verified in the game: our build, run with a scripted pad, reaches gameplay in Bikini Bottom.
 
@@ -370,7 +376,11 @@ widgets (`iMenuMouse.h`).
 - **The wheel** steps through a list as up and down do.
 - **A hint is a button:** clicking "Options" or "Return to Game" at the bottom of a screen presses
   the button its picture shows.
-- **Arrows are buttons:** the pause screen's level arrows are up and down.
+- **Arrows are buttons:** the pause screen's level arrows are up and down, at the first and last
+  level too (where the game refuses the press, as it does the d-pad's).
+- **A token is its task:** on the pause screen, pointing at one of a level's tokens selects its task
+  as left and right do, and a click warps there as A does (the game asks first). The wheel moves
+  through the levels.
 - **A value is clicked toward:** on a row that left and right change (vibration, a volume), click
   the left half of its value to lower it and the right half to raise it.
 - A left click on nothing is still the button the left mouse button is bound to, as the hints on
@@ -545,8 +555,12 @@ The line shows:
 - It drives SDL's own virtual controllers (an Xbox Series, a DualSense, a Switch Pro and a GameCube
   adapter): attached, pressed and unplugged through SDL's real gamepad code.
 - It also drives a stand-in keyboard and mouse.
-- It runs the game's own `xPadUpdate` and checks what the game sees, 179 checks in all:
+- It runs the game's own `xPadUpdate` and checks what the game sees, 228 checks in all:
   - every button on every preset;
+  - every default key of every button, by itself;
+  - Back under each release's menus: Select + Z under the Xbox's, Z alone under the GameCube's
+    (from Tab, also with a controller connected, from a controller's Back and from a GameCube
+    pad's Z), with black and Start unchanged;
   - press and release edges;
   - the trigger threshold;
   - the stick curves, sensitivity and inversion;
@@ -580,5 +594,5 @@ build-*/tssm_input_test [scratch folder]
 |---|---|
 | Left and right stick clicks | The Xbox sets bits for them that no TSSM code reads. Bind them to anything. |
 | The GameCube's B + X + Start reset | On a PC it would quit the game from a button combination. |
-| Debug flight (`CheatFlyToggle` with Z and L2) and D-pad character switching (`CheatPlayerSwitch`) | They exist only with the debug cheats on. They read white, black and the D-pad as the console did. |
+| Debug flight (`CheatFlyToggle` with Z and L2) and D-pad character switching (`CheatPlayerSwitch`) | They exist only with the debug cheats on. They read white, black and the D-pad as the console did. The port's `[cheats] fly` turns the flight on (`docs/CHEATS.md`): hold white, press black. |
 | Memory card screens (`zMainMemCardSpaceQuery`) | The PC save code never reports a card error, so they never show. |

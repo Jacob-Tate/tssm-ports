@@ -111,6 +111,10 @@ TREEDOME_RW_DIRS = ["rw"]
 TREEDOME_ADAPTED = [
     "rw/engine_start.cpp",
     "rw/texture.cpp",
+    # the loading screen's pump at the end of each reader (iLoadFrame.h)
+    "rw/atomic.cpp",
+    "rw/clump.cpp",
+    "rw/world.cpp",
     "rw/engine.cpp",
     "rw/renderstate.cpp",
     "iConfig.cpp",

@@ -56,8 +56,8 @@ By hand:
 | `TSSM_D3D11_DEBUG_LAYER` | OFF | Debug builds: librw asks Direct3D 11 for its debug layer. Needs Windows' optional Graphics Tools feature; without it the D3D11 device does not open, which is why it is off |
 | `TSSM_LIBRW_PATCHES` | ON | apply the port's librw fixes (`tools/librw/*.patch`) to `third_party/librw`; needs git. `docs/RENDERING.md` |
 | `TSSM_PC_TITLE` | `The SpongeBob SquarePants Movie Video Game` | the program's name: the launcher's and the game's window titles, the launcher's heading, the settings window's title and About tab, message boxes, the first line of `config.ini`, and the name in `tssm.exe`'s version information (Explorer's Properties, Task Manager). No double quotes, backslashes or `%` |
-| `TSSM_PC_VERSION` | `0.9.4` | the version in `tssm.exe`'s version information: up to four numbers |
-| `TSSM_VERSION_LINE` | empty | the About tab's version line; empty: the branch and `git describe` |
+| `TSSM_PC_VERSION` | `0.9.5` | the version in `tssm.exe`'s version information: up to four numbers |
+| `TSSM_VERSION_LINE` | empty | the About tab's version line; empty: the branch and the build's commit |
 | `TSSM_ICON_DIR` | empty | a folder made by `tools/make_icons.ps1`: the icon of `tssm.exe` and of its windows (`docs/ICON.md`); empty: the port's sponge block, `dist/pc` |
 
 CMake caches these, so a build directory keeps what it was configured with until
@@ -208,8 +208,8 @@ icon and, like every build, none of the game's files (players bring their
 own, as above). They are ordinary Release builds of this branch with clang++ on
 the MSVC ABI (as `build-release.bat`), set up like this:
 
-- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.4` and
-  `TSSM_VERSION_LINE=0.9.4`: the name and version in every place the options
+- `TSSM_PC_TITLE=TSSM Dehydrated`, `TSSM_PC_VERSION=0.9.5` and
+  `TSSM_VERSION_LINE=0.9.5`: the name and version in every place the options
   table above lists;
 - the default icon: `dist/pc/default_icon.ico` and `default_icon-64.png`,
   `tools/make_icons.ps1`'s output for the drawn sponge block
@@ -243,7 +243,7 @@ extracted into the work folder:
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ^
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DTSSM_BUILD_TESTS=OFF ^
           -DCMAKE_PREFIX_PATH=%R%/ffmpeg-x64 ^
-          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.4 -DTSSM_VERSION_LINE=0.9.4 ^
+          "-DTSSM_PC_TITLE=TSSM Dehydrated" -DTSSM_PC_VERSION=0.9.5 -DTSSM_VERSION_LINE=0.9.5 ^
           -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=%R%/bin-x64
     cmake --build %R%\build-x64 --target tssm
 
@@ -306,18 +306,62 @@ a window:
                                                  raw card image, a zip of saves)
     tssm --export-save A1 SpongeBob1.gci         a slot back to Dolphin or a console
     tssm --export-save all saves.zip             every save, for another install
+    tssm --import-save <Xbox save folder>        an Xbox save, whatever its signature
+    tssm --export-save A1 <folder> --xbox emu    a slot as an Xbox save for Cxbx-Reloaded
+                                                 and other copies of this port
+    tssm --export-save A1 <folder> --xbox real --keys keys.bin
+                                                 the same for a real Xbox or xemu
+    tssm --import-save save.psu                  a PlayStation 2 save (also .max, .psv, a
+                                                 memory card file, PCSX2's folder card)
+    tssm --export-save A1 save.psu --ps2 psu     a slot as a .psu for uLaunchELF or mymc
+    tssm --export-save A1 Mcd001.ps2 --ps2 card  into a PCSX2 memory card file (copied to
+                                                 Mcd001.ps2.bak first)
+    tssm --export-save A1 <folder> --psv standin a slot as a PlayStation 3 .psv, for other
+                                                 copies of this port and PC save tools
+    tssm --export-save A1 <folder> --psv real --psv-keys ps3keys.bin
+                                                 the same with the PS3's own signature
     tssm --saves-help                            the rest (--slot, --force, backups)
 
 Every save that is replaced is kept as a backup (`--restore-save`).
+
+Xbox saves are the same save in the other byte order, in a folder, signed
+(`docs/SAVES.md` sections 6 and 7). Importing one needs only the game's own
+files (to know what each level saves). Exporting one needs `DEFAULT.XBE` from
+your own copy of the Xbox game, which is beside the game's files when you play
+from the Xbox ones; a save for a real Xbox or xemu also needs your `keys.bin`,
+made from your own Xbox (the file Cxbx-Reloaded reads). The port has no key of
+its own and never shows one. The Saves tab does all of it with file pickers;
+the two paths are `[game] xbox_xbe` and `xbox_keys` in config.ini.
+
+PlayStation 2 saves are that same little-endian save, bare, in the game's
+folder on a memory card (`docs/SAVES.md` section 8). The port reads it from a
+`.psu`, `.max` or `.psv` file, a memory card file or PCSX2's folder-type card,
+and writes a `.psu`, or into a card file (after copying it) or a folder card.
+An exported save carries the game's own icon if you point at `PLAT.HIP` from
+your own PlayStation 2 disc or at a save the game made (`[game] ps2_icon`);
+otherwise an icon the port draws itself.
+
+A PlayStation 3 moves PlayStation 2 saves in and out of its virtual memory
+cards as a signed `.psv` (`docs/SAVES.md` section 9). The port reads one
+whatever its signature and says which it carries. It writes one with either
+of two signatures: the stand-in, which other copies of the port and PC save
+tools take but which a PS3 needs re-signed first (by a save tool on a modded
+PS3, for example); or the PS3's own, made from a 32-byte key file you provide
+(`--psv-keys`, `[game] psv_keys`), following the public description of how a
+PS3 signs, not yet confirmed on a PS3. The port has no key of its own and
+never shows one. The PS3's virtual card itself (`.VM2`) is read and written as
+a memory card file.
 
 ## config.ini and switches
 
 The settings table is `iConfigTable.cpp` (`[assets] path, mod, mods,
 mods_folder`, `[game] boot,
-intro_movies, save_folder, save_text` (the save screens' words, `iSaveText.h`,
-`docs/GUI.md`), `[video] mode, width, height, ui, framerate,
+intro_movies, save_folder, xbox_xbe, xbox_keys, ps2_icon, psv_keys, save_text` (the save screens' words, `iSaveText.h`,
+`docs/GUI.md`), `[video] mode, aspect, width, height, ui and ui_margin (the HUD in the 4:3 area or at the screen's
+edges, and always at the edges of a screen taller than 4:3, `docs/WIDESCREEN.md`), framerate,
 vsync, msaa, fov, backend, pipeline, hdr_glow, screen_warp`, `[extras] glow, spotlights, crowds,
-water, frame_lock` (the Xbox release's features, `docs/EXTRAS.md`), `[input] controller, preset, layout,
+water, frame_lock, guitar_distortion` (the Xbox release's features, `docs/EXTRAS.md`), `[cheats] no_damage, fly,
+unlock_extras` (the port's cheats, each off by default; `docs/CHEATS.md`), `[input] controller, preset, layout,
 button_icons, keyboard, stick_curve, deadzone, trigger_threshold,
 camera_sensitivity, camera_invert_x, camera_invert_y, mouse_look,
 mouse_sensitivity_x, mouse_sensitivity_y, mouse_invert_x, mouse_invert_y, mouse_raw,
@@ -336,7 +380,9 @@ mods), `TSSM_MODS_DIR`, `TSSM_CONFIG`, `TSSM_SAVE_DIR`,
 `TSSM_LOG=<file>` (or `off`) moves the game's own log, which is otherwise
 `%APPDATA%\tssm\last_run.log` (the run before: `last_run.prev.log`; crash reports
 are added to `crash.log` beside it), or `last_run.log` beside `TSSM_SAVE_DIR`'s
-folder when that is set (`iLog.h`); `TSSM_INPUT_TEST=1` (or `=overlay`) logs
+folder when that is set (`iLog.h`); the log's first line and each crash report
+say the version, git commit and time of the build (`iBuildInfo.h`, rewritten on
+every build); `TSSM_INPUT_TEST=1` (or `=overlay`) logs
 what the game reads from the controller every time it changes.
 `tssm_input_test` (built beside `tssm.exe`) checks the input layer with
 virtual controllers and no game data.
@@ -354,6 +400,21 @@ their lengths; `TSSM_SNDCACHE=<MB>` sizes the decoded-sound cache (256);
 The port runs the GameCube game's own code, and a behaviour of the original is
 kept even where it looks like a bug. Changes made on purpose are listed here and
 in `PORTING.md` (known divergences).
+
+- **A frame that comes on time runs on a steady frame time** (`docs/PACING.md`).
+  On the consoles every frame is one NTSC retrace (1001/60000 s); the port's
+  measured frames wobble by microseconds, and at exactly 60 or 120 frames a
+  second that made about one enemy hurt or death in five play its animation
+  once more (a Popper or Merv dying 0.6 to 1 s late, a Popper that stayed up and
+  could be hit again). Each on-time frame now gets the same time, a hair longer
+  than their average, and those animations end on the same frame as in Dolphin.
+  What that gives the game too much or too little (a scene running a little over
+  budget, the short frame after a late one) is paid back once it reaches three
+  eighths of a frame, and a scene over budget gets its own steady time, so the
+  game's clock stays on the wall clock and cutscenes on their sound under any
+  load: 6 ms a minute ahead, and otherwise within 3 ms at 120 and 6 ms at 60.
+  The frame rate and the pictures are unchanged. A frame more than a quarter of
+  a frame off, and every frame with no cap, keeps its measured time.
 
 - **The mouse turns the camera directly** (mouse look, `docs/CONTROLS.md`). While the mouse
   is what turns it, the on-foot camera stays where it is pointed: it does not ease back and
@@ -404,6 +465,19 @@ levels are code only and follow the setting with either
 - `frame_lock`: the six levels the GameCube holds at 30 frames a second run at
   the frame-rate cap, or are held at 30 (the Patty Wagon drives as at 60
   either way).
+- `guitar_distortion`: the screen swirls while the Sonic Wave Guitar's wave
+  is steered, as on the Xbox, or does not, as on the GameCube. It needs the
+  Xbox files (the swirl's map is in their `plat.HIP`) and a pixel shader: with
+  GameCube files, on Direct3D 9's fixed path or on Vulkan no swirl is drawn,
+  and the overlay's row says why.
+
+## Cheats
+
+The overlay's and the launcher's Cheats tab has the original game's cheats (its nine button codes
+and the Extras screen's costumes and functions) as switches that run the game's own code, and
+three of the port's own: `[cheats] no_damage`, `fly` and `unlock_extras`, off by default and never
+in a save. `docs/CHEATS.md` lists every code and what it does; `tools/cheat_runs.py` is the
+scripted check.
 
 ## Mods
 
@@ -425,9 +499,11 @@ writes those presented frames as `frame_NNNNN.png` into `TSSM_CAPTURE_DIR`, and
 `TSSM_TEST_PLACE=<frame:x:y:z[:yaw],...>` puts the player down at a spot and
 `TSSM_TEST_CAMLOG=<n>` logs the camera every n frames (with `TSSM_TEST_LOOKLOG=1` also its
 angles and whether the mouse steers it), `TSSM_TEST_MOUSE=<frame:move:dx:dy[/frames],frame:at:x:y,frame:click,frame:esc,...>`
-plays a mouse of the test's own (mouse look, and the pointer in the game's menus), `TSSM_TEST_UILOG=<n>`
-logs the menu widgets a pointer could mean, `TSSM_TEST_SPOTLOG=<n>` the
-scene's spotlights and `TSSM_TEST_CROWDLOG=<n>` its crowd (`iTestEvents.h`), and `TSSM_HDR_VIEW=mask|glow|base` shows the glow pass's input
+plays a mouse of the test's own (mouse look, and the pointer in the game's menus), `TSSM_TEST_KEYS=<frame:key[+key][/frames],...>`
+a keyboard of the test's own through the [keyboard] bindings (e.g. `300:space/4,700:tab`; leave `TSSM_INPUT` unset), `TSSM_TEST_UILOG=<n>`
+logs the menu widgets a pointer could mean, `TSSM_TEST_HUDLOG=<n>` the HUD widgets drawn and
+where they land (`iHudAnchor.h`, the HUD at the screen's edges), `TSSM_TEST_SPOTLOG=<n>` the
+scene's spotlights and `TSSM_TEST_CROWDLOG=<n>` its crowd (`iTestEvents.h`), `TSSM_TEST_CHEAT=<frame:what,...>` asks for a cheat as the Cheats tab does and `TSSM_TEST_CHEATLOG=<n>` logs the cheats' state (`docs/CHEATS.md`), `TSSM_TEST_DISTORT=<amount>[,<ms>]` draws the Sonic Wave Guitar's distortion at that amount in every frame (the clock held at that time when given; `=log` logs the game's own amount; `iXboxDistort.h`), and `TSSM_HDR_VIEW=mask|glow|base` shows the glow pass's input
 or output, or (the Xbox glow) the frame without it (`docs/RENDERING.md`, which covers the console's screen effects on
 PC). Keep captures of game frames out of the repository.
 `TSSM_TEST_SEND=<frame:name[:event],...>` sends a scene object its event
@@ -444,6 +520,13 @@ device has taken.
 `TSSM_TEST_HANG_DUMP=<s>` writes every thread's stack to the log and ends the
 run (exit code 3) when the game thread stops for that long, and logs SDL
 assertions with the stacks instead of SDL's message box (`iHangDump.h`).
+A level load is one frame to all of these, so the loading screen has its own:
+`TSSM_TEST_LOADLOG=1` logs each load's time, its loading frames and the
+longest wait between two of them (2: every stretch that gave the screen no
+chance of a frame), `TSSM_CAPTURE_LOAD=<n>` saves each load's first n loading
+frames (`load<load>_<frame>.png`), `TSSM_TEST_LOADSLOW=<ms>` makes every
+package step wait, and `TSSM_TEST_LOADEVENT=<frame>:mode|close` switches the
+window mode or closes the window at a loading frame (`iTestEvents.h`).
 
 ## Regression run
 

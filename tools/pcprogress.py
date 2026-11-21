@@ -81,7 +81,7 @@ def split_command(entry):
         return list(entry["arguments"])
     # compile_commands.json from CMake on Windows: a command line. shlex in
     # POSIX mode eats backslashes, so protect them first. An escaped quote
-    # (-DTSSM_GUI_VERSION="\"pc ...\"") is a literal quote in the argument.
+    # (-DTSSM_GUI_BRANCH="\"pc ...\"") is a literal quote in the argument.
     cmd = entry["command"].replace('\\"', "\x01").replace("\\", "\x00")
     args = shlex.split(cmd, posix=True)
     return [a.replace("\x00", "\\").replace("\x01", '"') for a in args]

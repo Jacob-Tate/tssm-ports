@@ -155,6 +155,8 @@
 #include "iXboxWater.h"
 #include "iExtras.h"
 #include "iExtrasGC.h"
+#include "iXboxDistort.h"
+#include "iLoadFrame.h"
 #endif
 
 #include <stdlib.h>
@@ -1062,6 +1064,12 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     zAnimListInit();
     zGooInit(24);
 
+#ifdef PLATFORM_PC
+    // PC: the console's loading screen is drawn by a thread that cuts in anywhere. Here it is
+    // drawn at pump points, and setting the scene up is long enough to need some (iLoadFrame.h).
+    iLoadFramePump(iLOADPUMP_SCENE);
+#endif
+
     zGameScreenTransitionUpdate(100.0f, "...initializing scene - base types\n");
 
     for (i = 0; i < eBaseTypeCount; i++)
@@ -1155,6 +1163,10 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
         {
             base_idx = sInitTable[i].func(s, &sInitTable[i], base_idx);
         }
+
+#ifdef PLATFORM_PC
+        iLoadFramePump(iLOADPUMP_SCENE);
+#endif
     }
 
     base_idx = init_dynamic_types(*s, base_idx);
@@ -1163,6 +1175,10 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
 
     zNMEAsset_CreateEnemies();
     zNMEAsset_RegisterEnemies(s, &base_idx);
+
+#ifdef PLATFORM_PC
+    iLoadFramePump(iLOADPUMP_SCENE);
+#endif
 
     s->num_update_base = 0;
 
@@ -3448,11 +3464,29 @@ static void zSceneRenderPostFX()
 
     if (globals.sceneCur->enableDrawing)
     {
+#ifdef PLATFORM_PC
+        // PLATFORM_PC: the Xbox (0x6a0f0) draws the guitar's HUD last, after its screen
+        // distortion (iXboxDistort.h), so the HUD is not swirled; with that look off, the
+        // GameCube's order.
+        const bool xboxDistort = iXboxDistortActive();
+        if (!xboxDistort)
+        {
+            cruise_bubble::render_screen();
+        }
+#else
         cruise_bubble::render_screen();
+#endif
         RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
         xScreenWarp::render(globals.screen->icam);
         xFXHighDynamicRangeRender(globals.screen->icam);
         xScrFxLensFlare_Render(globals.screen->icam);
+#ifdef PLATFORM_PC
+        if (xboxDistort)
+        {
+            iXboxDistortRender(globals.screen->icam);
+            cruise_bubble::render_screen();
+        }
+#endif
     }
     else
     {

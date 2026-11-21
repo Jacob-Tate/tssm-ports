@@ -71,8 +71,8 @@ namespace
     // An xTextAsset: a U32 length, then the string and its NUL.
     const U32 kHeader = (U32)sizeof(U32);
 
-    // Room for the longest line with the longest choice's words (about 190
-    // characters), with margin. The packer takes the copy's size as the
+    // Room for the longest line with the longest choice's words (200
+    // characters, the PS2's), with margin. The packer takes the copy's size as the
     // asset's.
     const U32 kCopyText = 320;
 

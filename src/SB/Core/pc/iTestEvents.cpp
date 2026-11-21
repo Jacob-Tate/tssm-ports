@@ -3,10 +3,15 @@
 
 #include "iTestEvents.h"
 
+#include "iCheats.h"
 #include "iExtras.h"
+#include "iHost.h"
 #include "iLightVolume.h"
+#include "iHudAnchor.h"
 #include "iMenuMouse.h"
 #include "iMouseLook.h"
+#include "iPadKeyboard.h"
+#include "iPadTokens.h"
 #include "xAnim.h"
 #include "xEnt.h"
 #include "xMath3.h"
@@ -123,6 +128,9 @@ namespace
     // TSSM_TEST_UILOG=n: every n frames, log the menu widgets (iMenuMouseLog).
     S32 sUILogEvery;
 
+    // TSSM_TEST_HUDLOG=n: every n frames, log the HUD widgets drawn (iHudAnchorLog).
+    S32 sHudLogEvery;
+
     // TSSM_TEST_LOOKLOG=1: with each TSSM_TEST_CAMLOG line, the on-foot camera's angles and
     // whether the mouse is steering it.
     bool sLookLog;
@@ -238,6 +246,150 @@ namespace
                 iMouseLookTestEscape();
                 printf("tssm: test: frame %d: Escape\n", (int)frame);
                 break;
+            }
+        }
+    }
+
+    // TSSM_TEST_KEYS: a keyboard of the test's own, iPadKeyboard.h's stand-in.
+    struct KeyPress
+    {
+        S32 first;
+        S32 last;
+        S16 key[4];
+        S32 count;
+        char text[48];
+    };
+
+    const S32 kMaxKeys = 128;
+
+    KeyPress sKeys[kMaxKeys];
+    S32 sKeyCount;
+    // The frame whose keys the polls read: set after a frame is drawn, so the
+    // next frame reads it, as TSSM_INPUT's buttons are (iCapture.cpp).
+    S32 sKeyFrame;
+    iPadKeyboardTestSource sTestKeyboard;
+
+    bool TestKeyDown(S32 id)
+    {
+        for (S32 i = 0; i < sKeyCount; i++)
+        {
+            const KeyPress& k = sKeys[i];
+            if (sKeyFrame < k.first || sKeyFrame > k.last)
+            {
+                continue;
+            }
+            for (S32 j = 0; j < k.count; j++)
+            {
+                if (k.key[j] == id)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // A [keyboard] key name ("tab", "space", "mouse1"), or -1.
+    S32 KeyId(const char* name)
+    {
+        S32 count;
+        const iPadBindToken* tokens = iPadKeyTokens(&count);
+        for (S32 i = 0; i < count; i++)
+        {
+            if (iHostStrCaseCmp(tokens[i].name, name) == 0)
+            {
+                return tokens[i].id;
+            }
+        }
+        return -1;
+    }
+
+    // "700:tab", "900:space+w/10": held from that frame for that many frames (6
+    // when not given), as TSSM_INPUT's entries are.
+    bool ParseKey(const char* text, KeyPress* out)
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s", text);
+        snprintf(out->text, sizeof(out->text), "%s", text);
+
+        char* end;
+        long at = strtol(buf, &end, 10);
+        if (end == buf || at < 1 || *end != ':')
+        {
+            return false;
+        }
+
+        char* names = end + 1;
+        long frames = 6;
+        char* slash = strchr(names, '/');
+        if (slash != NULL)
+        {
+            *slash = '\0';
+            frames = strtol(slash + 1, &end, 10);
+            if (end == slash + 1 || *end != '\0' || frames < 1)
+            {
+                return false;
+            }
+        }
+
+        out->count = 0;
+        for (char* name = names; name != NULL && *name != '\0';)
+        {
+            char* plus = strchr(name, '+');
+            if (plus != NULL)
+            {
+                *plus = '\0';
+            }
+            const S32 id = KeyId(name);
+            if (id < 0 || out->count == 4)
+            {
+                return false;
+            }
+            out->key[out->count++] = (S16)id;
+            name = plus != NULL ? plus + 1 : NULL;
+        }
+
+        out->first = (S32)at;
+        out->last = (S32)(at + frames - 1);
+        return out->count > 0;
+    }
+
+    void ParseKeys(const char* list)
+    {
+        static char buf[4096];
+        snprintf(buf, sizeof(buf), "%s", list);
+
+        for (char* entry = strtok(buf, ","); entry != NULL; entry = strtok(NULL, ","))
+        {
+            if (sKeyCount == kMaxKeys || !ParseKey(entry, &sKeys[sKeyCount]))
+            {
+                printf("tssm: test: TSSM_TEST_KEYS: '%s' is not frame:key[+key][/frames] with "
+                       "[keyboard] key names (or there are more than %d); ignored\n",
+                       entry, (int)kMaxKeys);
+                continue;
+            }
+            sKeyCount++;
+        }
+
+        // The test's keyboard from here on, whatever is plugged in and
+        // whichever window has the focus.
+        sTestKeyboard.down = TestKeyDown;
+        sTestKeyboard.mouse_dx = 0.0f;
+        sTestKeyboard.mouse_dy = 0.0f;
+        iPadKeyboardSetTestSource(&sTestKeyboard);
+        printf("tssm: test: a keyboard of the test's own, %d key presses\n", (int)sKeyCount);
+        fflush(stdout);
+    }
+
+    void KeyFrame(S32 frame)
+    {
+        sKeyFrame = frame;
+        for (S32 i = 0; i < sKeyCount; i++)
+        {
+            if (sKeys[i].first == frame)
+            {
+                printf("tssm: test: frame %d: keys %s\n", (int)frame, sKeys[i].text);
+                fflush(stdout);
             }
         }
     }
@@ -567,6 +719,11 @@ void iTestEventsFrame(S32 frame)
         {
             ParseMouse(mouse);
         }
+        const char* keys = getenv("TSSM_TEST_KEYS");
+        if (keys != NULL && keys[0] != '\0')
+        {
+            ParseKeys(keys);
+        }
         const char* lookLog = getenv("TSSM_TEST_LOOKLOG");
         sLookLog = lookLog != NULL && atoi(lookLog) != 0;
         const char* uiLog = getenv("TSSM_TEST_UILOG");
@@ -574,14 +731,29 @@ void iTestEventsFrame(S32 frame)
         {
             sUILogEvery = atoi(uiLog);
         }
+        const char* hudLog = getenv("TSSM_TEST_HUDLOG");
+        if (hudLog != NULL && atoi(hudLog) > 0)
+        {
+            sHudLogEvery = atoi(hudLog);
+        }
     }
 
     MouseFrame(frame);
+    if (sKeyCount > 0)
+    {
+        KeyFrame(frame);
+    }
+
+    // TSSM_TEST_CHEAT, TSSM_TEST_CHEATLOG (iCheats.h).
+    iCheatsTestFrame(frame);
 
     if (sUILogEvery > 0 && frame % sUILogEvery == 0)
     {
         iMenuMouseLog(frame);
     }
+
+    // The log is of the frame drawn next; 0 when that is not a frame to log.
+    iHudAnchorLog(sHudLogEvery > 0 && (frame + 1) % sHudLogEvery == 0 ? frame + 1 : 0);
 
     if (sCarLogLast > 0 && frame >= sCarLogFirst && frame <= sCarLogLast)
     {

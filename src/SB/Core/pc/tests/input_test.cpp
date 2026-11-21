@@ -100,12 +100,6 @@ void* xSTFindAsset(U32, U32* size)
     return NULL;
 }
 
-// Nor does any package: the prompts ask which release the font came from.
-char* xST_xAssetID_HIPFullPath(U32)
-{
-    return NULL;
-}
-
 U32 xStrHash(const char* str)
 {
     U32 i = 0;
@@ -116,6 +110,21 @@ U32 xStrHash(const char* str)
         i = i * 131 + c;
     }
     return i;
+}
+
+// Nor does any package: the prompts ask which release the font came from, and
+// the pad layer which release the menus came from (TestBackForTheMenus), by
+// the package that holds the menu that opens the upgrade window. That one is
+// the test's: a few bytes whose PLAT chunk says which release.
+static const char* sMenusPackage;
+
+char* xST_xAssetID_HIPFullPath(U32 id)
+{
+    if (sMenusPackage != NULL && id == xStrHash("__PAUSE_STATE_PAUSE MGR"))
+    {
+        return (char*)sMenusPackage;
+    }
+    return NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -968,6 +977,178 @@ static void TestEscape(SDL_Window* window)
     Check(SDL_GetWindowRelativeMouseMode(window), "the pointer is held at the end");
 }
 
+// Every default key of every button row, by itself, reaches the game as that
+// row's buttons: the [keyboard] column of iPadBindTable.cpp, as a player with
+// no [keyboard] section has it.
+static void TestEveryDefaultKey()
+{
+    S32 count;
+    const iPadBindToken* tokens = iPadKeyTokens(&count);
+    KeysUp();
+    Frame();
+
+    for (S32 row = 0; row < kPadBindButtonCount; row++)
+    {
+        const iPadBindButton& b = kPadBindButtons[row];
+        if (b.mask == 0)
+        {
+            continue;
+        }
+
+        char what[160];
+        iPadBind bind;
+        snprintf(what, sizeof(what), "the default keys of %s parse", b.name);
+        Check(iPadBindParse(b.key, tokens, count, b.name, &bind) && bind.alts > 0, what);
+
+        for (S32 a = 0; a < bind.alts; a++)
+        {
+            if (bind.length[a] != 1)
+            {
+                continue;
+            }
+            const S16 id = bind.id[a][0];
+            sKeys[id] = true;
+            snprintf(what, sizeof(what), "%s alone = %s", iPadBindTokenName(id, tokens, count),
+                     b.name);
+            CheckBits(Frame().on, b.mask, what);
+            KeysUp();
+            Frame();
+        }
+    }
+}
+
+// Back opens the upgrade window, which the Xbox's menus hear as PadPressSelect
+// and the GameCube's as PadPressE, zUI::DoUpdate's event for Z. Back carries
+// both bits, and DoUpdate raises only Select when both are there: under the
+// GameCube's menus Back has to be the GameCube's Z alone (iPad.cpp). The menus'
+// release is the PLAT chunk of the package xST_xAssetID_HIPFullPath names.
+static bool WritePackage(const char* path, const char* plat, const char* name)
+{
+    // HIPA, then PACK holding PLAT: as far as iGCPackagePlatform reads.
+    U8 b[64];
+    S32 n = 0;
+    const S32 platLen = (S32)(strlen(plat) + 1 + strlen(name) + 1);
+    const U32 sizes[3] = { 0, (U32)(8 + platLen), (U32)platLen };
+    const char* ids[3] = { "HIPA", "PACK", "PLAT" };
+    for (S32 i = 0; i < 3; i++)
+    {
+        memcpy(b + n, ids[i], 4);
+        b[n + 4] = (U8)(sizes[i] >> 24);
+        b[n + 5] = (U8)(sizes[i] >> 16);
+        b[n + 6] = (U8)(sizes[i] >> 8);
+        b[n + 7] = (U8)sizes[i];
+        n += 8;
+    }
+    memcpy(b + n, plat, strlen(plat) + 1);
+    n += (S32)strlen(plat) + 1;
+    memcpy(b + n, name, strlen(name) + 1);
+    n += (S32)strlen(name) + 1;
+
+    SDL_IOStream* f = SDL_IOFromFile(path, "wb");
+    if (f == NULL)
+    {
+        return false;
+    }
+    const bool ok = SDL_WriteIO(f, b, (size_t)n) == (size_t)n;
+    return SDL_CloseIO(f) && ok;
+}
+
+static void TestBackForTheMenus(const char* dir)
+{
+    char gamecube[600];
+    char xbox[600];
+    snprintf(gamecube, sizeof(gamecube), "%s/menus_gamecube.hip", dir);
+    snprintf(xbox, sizeof(xbox), "%s/menus_xbox.hip", dir);
+    Check(WritePackage(gamecube, "GC", "GameCube") && WritePackage(xbox, "BX", "Xbox"),
+          "the stand-in menu packages are written");
+
+    const U32 back = XPAD_BUTTON_SELECT | XPAD_BUTTON_Z;
+    KeysUp();
+    Frame();
+
+    // No menus yet (the boot screens): what Back always was.
+    sMenusPackage = NULL;
+    sKeys[SDL_SCANCODE_TAB] = true;
+    CheckBits(Frame().on, back, "no menus loaded: Tab = Select + Z");
+    KeysUp();
+    Frame();
+
+    sMenusPackage = xbox;
+    sKeys[SDL_SCANCODE_TAB] = true;
+    CheckBits(Frame().pressed, back, "Xbox menus: Tab presses Select + Z (PadPressSelect)");
+    KeysUp();
+    Frame();
+
+    sMenusPackage = gamecube;
+    sKeys[SDL_SCANCODE_TAB] = true;
+    {
+        _tagxPad& p = Frame();
+        CheckBits(p.on, XPAD_BUTTON_Z, "GameCube menus: Tab is the GameCube's Z (PadPressE)");
+        CheckBits(p.pressed, XPAD_BUTTON_Z, "pressed as Z");
+    }
+    CheckBits(Frame().pressed, 0, "not pressed again while Tab is held");
+    // The menus are asked once per press: menus that change while Back is held
+    // (a level loading) leave the press as it began.
+    sMenusPackage = xbox;
+    CheckBits(Frame().on, XPAD_BUTTON_Z, "menus changed while Tab is held: still Z");
+    sMenusPackage = gamecube;
+    KeysUp();
+    CheckBits(Frame().released, XPAD_BUTTON_Z, "and let go as Z");
+    sKeys[SDL_SCANCODE_C] = true;
+    CheckBits(Frame().on, XPAD_BUTTON_R2 | XPAD_BUTTON_Z, "GameCube menus: black (C) as before");
+    KeysUp();
+    sKeys[SDL_SCANCODE_ESCAPE] = true;
+    CheckBits(Frame().on, XPAD_BUTTON_START, "GameCube menus: Escape is still Start");
+    KeysUp();
+    Frame();
+
+    {
+        Pad pad = Attach(0x045e, 0x0b12, "Xbox Series X Controller (virtual)");
+        Frame();
+        Frame();
+        sKeys[SDL_SCANCODE_TAB] = true;
+        CheckBits(Frame().on, XPAD_BUTTON_Z,
+                  "GameCube menus: Tab with a controller connected but unused is Z");
+        KeysUp();
+        Frame();
+        CheckBits(Tap(pad, SDL_GAMEPAD_BUTTON_BACK), XPAD_BUTTON_Z,
+                  "GameCube menus: a controller's Back is Z");
+        CheckBits(Tap(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), XPAD_BUTTON_R2 | XPAD_BUTTON_Z,
+                  "GameCube menus: a controller's black as before");
+        sMenusPackage = xbox;
+        CheckBits(Tap(pad, SDL_GAMEPAD_BUTTON_BACK), back,
+                  "Xbox menus: a controller's Back is Select + Z");
+        sKeys[SDL_SCANCODE_TAB] = true;
+        CheckBits(Frame().on, back,
+                  "Xbox menus: Tab with a controller connected but unused is Select + Z");
+        KeysUp();
+        Frame();
+        sMenusPackage = gamecube;
+        Detach(pad);
+        Frame();
+        Frame();
+    }
+
+    {
+        Pad pad = Attach(0x057e, 0x0337, "GameCube adapter (virtual)");
+        Frame();
+        Frame();
+        CheckBits(Tap(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), XPAD_BUTTON_Z,
+                  "GameCube menus: the GameCube pad's Z is Z, as on the console");
+        Axis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1.0f);
+        Button(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, true);
+        CheckBits(Frame().on, XPAD_BUTTON_R2 | XPAD_BUTTON_Z,
+                  "GameCube menus: its Z+R is R2 + Z, as gc/iPad.cpp sets them");
+        Release(pad);
+        Frame();
+        Detach(pad);
+        Frame();
+        Frame();
+    }
+
+    sMenusPackage = NULL;
+}
+
 // The launcher brings the input layer up and down before the game does
 // (gui/iGuiLauncher.cpp). The real mouse path, so a window that has the
 // keyboard: SDL's dummy video driver gives one without a screen.
@@ -1066,8 +1247,10 @@ int main(int argc, char** argv)
     TestTables();
     TestXboxPad();
     TestKeyboard();
+    TestEveryDefaultKey();
     TestOtherPads();
     TestMenus();
+    TestBackForTheMenus(dir);
     TestLauncherMouse();
 
     xPadKill();

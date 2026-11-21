@@ -1,7 +1,8 @@
 // The list of tabs the overlay and the launcher both show, and the About tab:
 // versions, the renderer and folders in use, and the third-party notices.
-// (The Settings, Controls, Saves and Mods tabs are gui/iGuiSettings.cpp,
-// gui/iGuiControls.cpp, gui/iGuiSaves.cpp and gui/iGuiMods.cpp.)
+// (The Settings, Controls, Saves, Mods and Cheats tabs are gui/iGuiSettings.cpp,
+// gui/iGuiControls.cpp, gui/iGuiSaves.cpp, gui/iGuiMods.cpp and
+// gui/iGuiCheats.cpp.)
 
 #include "imgui.h"
 
@@ -9,6 +10,7 @@
 
 #include "gui/iGuiInternal.h"
 
+#include "iBuildInfo.h"
 #include "iConfig.h"
 #include "iFile.h"
 #include "iHost.h"
@@ -30,8 +32,10 @@ extern "C" {
 // license file (CMakeLists.txt, "the GUI").
 #include "iGuiNotices.inc"
 
-#ifndef TSSM_GUI_VERSION
-#define TSSM_GUI_VERSION "unknown"
+// The About tab's version line (CMakeLists.txt): TSSM_GUI_VERSION in a
+// release build, else the branch and the commit this build was made from.
+#ifndef TSSM_GUI_BRANCH
+#define TSSM_GUI_BRANCH ""
 #endif
 
 // --- the tabs ------------------------------------------------------------------------
@@ -101,6 +105,9 @@ namespace
         { "controls", "Controls", ControlsTab, NULL },
         { "saves", "Saves", SavesTab, SavesNotBeforeGame },
         { "mods", "Mods", ModsTab, NULL },
+        // Works before the game too: the port's cheats are settings, and the game's
+        // own are listed there and greyed (gui/iGuiCheats.cpp).
+        { "cheats", "Cheats", iGui::DrawCheats, NULL },
         { "about", "About", iGui::DrawAbout, NULL },
     };
 } // namespace
@@ -134,13 +141,18 @@ S32 iGui::TabFind(const char* name, size_t length)
 void iGui::DrawAbout()
 {
     ImGui::SeparatorText(TSSM_GAME_TITLE ": PC port");
+#ifdef TSSM_GUI_VERSION
     ImGui::Text("Version %s", TSSM_GUI_VERSION);
+#else
+    ImGui::Text("Version %s%s%s", TSSM_GUI_BRANCH, TSSM_GUI_BRANCH[0] ? " " : "", iBuildCommit);
+#endif
 #ifdef NDEBUG
     const char* config = "release";
 #else
     const char* config = "debug";
 #endif
-    ImGui::Text("Built %s, %s, %d-bit", __DATE__, config, (int)(sizeof(void*) * 8));
+    ImGui::Text("Built %s from %s, %s, %d-bit", iBuildTime, iBuildCommit, config,
+                (int)(sizeof(void*) * 8));
 
     ImGui::Spacing();
     if (ImGui::BeginTable("about", 2, ImGuiTableFlags_SizingFixedFit))

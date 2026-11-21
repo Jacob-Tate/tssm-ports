@@ -9,6 +9,9 @@
 #include "zUIUserString.h"
 
 #include "iDraw.h"
+#ifdef PLATFORM_PC
+#include "iScreen.h"
+#endif
 #include "xFXHighDynamicRange.h"
 #include "xRenderState.h"
 #include "xTRC.h"
@@ -280,6 +283,10 @@ void zUIMgrRender()
     // has asked for it (zSceneSetup clears the flag at every level start); the GameCube never
     // does.
     uiHDREnabled = uiHDRRequested && xFXHighDynamicRangeMenuGlow();
+
+    // PC: on a screen taller than 4:3 the menus are cut at the 4:3 area's top and bottom, as a
+    // 4:3 television cuts them (iScreen.h).
+    iScreenBoxClip boxClip;
 #endif
 
     if (uiHDREnabled)

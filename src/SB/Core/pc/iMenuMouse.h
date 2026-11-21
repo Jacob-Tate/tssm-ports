@@ -29,7 +29,15 @@
 // **A hint is a button.** Text that leads with a button's picture --
 // "{i:button_picture_04} Options", "{i:button_picture_03} Return to Game" --
 // presses that button when clicked. So is an arrow: a small widget that a
-// direction press lights up (the pause screen's level arrows).
+// direction press lights up (the pause screen's level arrows), at the end of
+// the list too, where the press is refused as it is from the pad.
+//
+// **A token is its item.** A small model that an item lights up when it gets
+// the highlight (the pause screen's tokens, one for each of the level's tasks;
+// where several items light it, the one that lights the fewest models) stands
+// for that item: pointing at it walks the highlight there, and a click accepts
+// it. It is hit where it is drawn: its bounding sphere, placed
+// as zUIModel draws the model, in the same 4:3 box at every screen shape.
 //
 // **A value is clicked toward.** On a row that left and right change rather
 // than leave (vibration, a volume), a click to the right of the row is the

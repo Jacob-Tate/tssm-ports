@@ -14,6 +14,7 @@ SHADERS = [
     ("glow_bright.frag", "glow_bright_frag_src", "glow_bright_gl.inc"),
     ("glow_blur.frag", "glow_blur_frag_src", "glow_blur_gl.inc"),
     ("distort.frag", "distort_frag_src", "distort_gl.inc"),
+    ("xboxdistort.frag", "xboxdistort_frag_src", "xboxdistort_gl.inc"),
     ("water.vert", "water_vert_src", "water_vert_gl.inc"),
     ("water.frag", "water_frag_src", "water_frag_gl.inc"),
 ]

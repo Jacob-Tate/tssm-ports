@@ -20,6 +20,7 @@ the GameCube's, and it needs shaders.
 | Glow | `[video] hdr_glow` | `xFXHighDynamicRange.cpp`, GX | `iHDRGlow.h`, `rw/hdrglow.cpp`; with `[extras] glow = xbox` the Xbox release's chain instead, `iXboxGlow.h`, `rw/xboxglow.cpp` (`docs/EXTRAS.md`) |
 | Screen warp | `[video] screen_warp` | `xScreenWarp.cpp`, GX | `iScreenWarp.h`, `rw/screenwarp.cpp` |
 | Lens flares | none | `iScrFX.cpp`, never drawn | not drawn (see below) |
+| The Sonic Wave Guitar's screen distortion | `[extras] guitar_distortion` | not drawn on the GameCube (`cruise_bubble`'s `distort_screen` is empty); the Xbox's `0x1afcb0` | with `xbox`: `iXboxDistort.h`, `rw/xboxdistort.cpp`, a pixel shader of its own (`rw/shaders/xboxdistort_PS.hlsl`, `rw/shadersgl/xboxdistort.frag`) over a copy of the frame; not on D3D9's fixed path or Vulkan (`docs/EXTRAS.md`, "guitar_distortion") |
 | Spotlights' light volumes and lamp flares | `[extras] spotlights` | not drawn on the GameCube (`xLightVolume.cpp` empty, flares collected and never drawn); the Xbox's `0x17ece0`, `0x60110` | with `xbox`: `iLightVolume.h`, `rw/lightvolume.cpp` (stencil), the flares in `zSpotlight.cpp` (`docs/EXTRAS.md`) |
 | Movies on textures | none | `xFMV.cpp`, Bink; no retail use | not ported (see below) |
 | Water (the Xbox files' water bodies) | `[extras] water` | plain models, some of them goo; the Xbox has its own `xWater`/`iWater` | the GameCube look: `iWaterBody.h`; the Xbox look: `iXboxWater.h`, `iXboxWaterPass.h`, `iXboxWaterDraw.h`, `rw/xboxwater.cpp` |
@@ -506,6 +507,9 @@ the Xbox glow's chain adds 7 render-target switches a frame; the spotlights' lig
 stencil clear and three cone draws each and no switch (the camera's end and begin around the clear
 keep the frame buffer bound on OpenGL), so on a tiled GPU they cost fill, not tile loads and stores.
 TT01's disco, the worst place measured, is +0.25 ms on a desktop GPU at 2340x1080 with 4x.
+The guitar's distortion adds, only while the wave is steered, one copy of the frame (a multisample
+resolve with anti-aliasing on) and one full-screen draw: +0.08 ms of GPU time at 1920x1080 with 4x on OpenGL 3 (`docs/EXTRAS.md`,
+"guitar_distortion").
 
 ## Switches for testing
 
@@ -611,6 +615,43 @@ So under `PLATFORM_PC` these draws, and the lane's flat quad over a drop (same t
 `rwFILTERLINEAR` (`iDecalFilter.h`, `rw/renderstate.cpp`) and put the stage's filter back afterwards.
 That is the sampling the console does, on every backend. A shadow drawn from the shadow camera's target
 has one level anyway and is left alone.
+
+## Opaque models: the console's order
+
+The game sorts its opaque model buckets once a level is set up (`xModelBucket.cpp`,
+`compare_opaque_buckets`): by the pipe table's layer and flags, and where those are equal, by the
+address of the model's atomic. On the GameCube RenderWare allocates from the game's general heap,
+which hands out memory from the top down (`gc/iMemMgr.cpp`: `xMemoryManagerGeneral::Down`, first
+fit), so a model created later has a lower address and is drawn first: in a level, the models read
+last come first.
+
+The port's RenderWare heap has no such order (on 64-bit hosts `iLowHeap`'s TLSF block, which fills
+upwards, on 32-bit ones the C library's), and drawing in its order mostly made it the other way
+round. For a solid model that changes nothing the depth buffer does not put right. It does for a
+model the pipe table has no entry for (so it is in the opaque pass, with depth writes) whose texture
+or vertex colours are see-through: drawn before what is behind it, it blends with whatever the frame
+held there and then hides, by depth, the walls drawn after it. In a level without fog the game clears
+only depth (`iCameraBegin`; the console's RenderWare copies the frame out without clearing it, so it
+keeps the last frame too), and what the frame held was the last frame's surface: it blended over
+itself frame after frame, came out solid, and left trails behind when the camera moved.
+
+A player's GameCube mod showed it (2026-11-20): a level built from simple objects, with no fog and no
+pipe-table entries, whose fountain spouts use the `fountain` texture (C8 with a graded RGB5A3 alpha,
+like `waterfall_de02`). Over the GameCube disc the port drew them solid bright cyan where Dolphin
+shows faint streaks; over the Xbox files, where other things had been allocated first, mostly not.
+With the console's order they are the faint streaks Dolphin shows over either.
+
+So every atomic carries the number of the order it was created in (`iModelOrder.h`, a librw plugin
+in `rw/atomic_order.cpp`), and under `PLATFORM_PC` the sort compares those numbers, latest first,
+where the console compares addresses. The simple objects' list (`zEntSimpleObj.cpp`, `CmpSimpleMgr`),
+which sets the order those objects are drawn in, is sorted by the same address first, so it compares
+the numbers of their first atomics too; with only the buckets in order the fountain was right in some
+runs and solid in others. The order is then the same on every host and width.
+`tssm_ordertest` checks the numbering and the order it sorts to.
+
+The console's order is the top-down heap's, not a rule of the game: a block freed during a load and
+reused by a later model would put that model's atomic above an earlier one. The creation order is
+the heap's order where a load leaves no such hole.
 
 ## Looks like a fault, but the console does it too
 
@@ -810,4 +851,3 @@ The port reads the GameCube release's files as well as the Xbox one's (`src/SB/C
 
 - **The treedome passes** in `rw/` (the Xbox BfBB glow, the cruise bubble distortion, the
   loading-screen snapshot) are imported and switched off; they draw BfBB's effects, not TSSM's.
-- **The loading screen** is not drawn while a level loads (`iAsync` has no second thread).
