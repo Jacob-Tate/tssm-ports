@@ -16,8 +16,10 @@
 // things: the setting, whose files the level's package is (Xbox or GameCube),
 // and the renderer. When the files or the renderer cannot give the Xbox version,
 // the level gets the GameCube one, the log says so, and iExtrasStatus gives the
-// overlay a sentence saying why. The glow and the frame lock are code only and
-// follow the setting at once; the rest hold until the next level loads.
+// overlay a sentence saying why. The glow, the frame lock and the guitar's
+// distortion follow the setting at once; the rest hold until the next level
+// loads. The distortion's files are the game's (boot.HIP's release), not the
+// level's: its swirl map is in plat.HIP.
 
 enum iExtrasFeature
 {
@@ -26,6 +28,7 @@ enum iExtrasFeature
     iEXTRAS_CROWDS,
     iEXTRAS_WATER,
     iEXTRAS_FRAME_LOCK,
+    iEXTRAS_GUITAR_DISTORTION,
     iEXTRAS_FEATURE_COUNT
 };
 
@@ -48,9 +51,12 @@ enum iExtrasFiles
 // The renderer, as far as a feature cares.
 enum iExtrasRenderer
 {
-    iEXTRAS_RENDERER_SHADERS, // D3D9's shader path, D3D11, OpenGL 3 / GLES 3, Vulkan
+    iEXTRAS_RENDERER_SHADERS, // D3D9's shader path, D3D11, OpenGL 3
     iEXTRAS_RENDERER_FIXED,   // D3D9's fixed-function path
-    iEXTRAS_RENDERER_3DS      // citro3d
+    iEXTRAS_RENDERER_3DS,     // citro3d
+    // Shaders as well, and SHADERS to every feature that does not name them:
+    iEXTRAS_RENDERER_DEVICE_GL, // Android's GLES 3 and the Switch's OpenGL
+    iEXTRAS_RENDERER_VULKAN
 };
 
 // "extras.crowds", and the feature's name for the log ("crowds").
@@ -115,6 +121,8 @@ iExtrasLook iExtrasAtLevelLoad(iExtrasFeature feature);
 // loaded with xbox and still got the GameCube version for a reason of its own:
 // the water's (iXboxWaterActive: no bump frames in plat.HIP, Vulkan, shaders or
 // targets not made), in the water's words, or its files' (iExtrasFallBack).
+// The guitar's distortion has its own too (iXboxDistortStatus: no swirl map,
+// Vulkan, a failed shader or copy), at any time.
 bool iExtrasStatus(iExtrasFeature feature, char* out, size_t outSize);
 
 // --- frame_lock --------------------------------------------------------------------
@@ -148,10 +156,10 @@ S32 iExtrasHeldRetraces();
 // so the hold keeps the Xbox's driving.
 S32 iExtrasHeldCarSteps(F32 dt, S32 steps);
 
-// Re-reads the settings that apply at once (the frame lock, the glow) and
-// applies them. Called by the overlay after it changes one (also in a menu,
-// where no game frame passes the count again); otherwise they are read when a
-// level loads.
+// Re-reads the settings that apply at once (the frame lock, the glow, the
+// guitar's distortion) and applies them. Called by the overlay after it changes
+// one (also in a menu, where no game frame passes the count again); otherwise
+// they are read when a level loads.
 void iExtrasApply();
 
 // --- glow ----------------------------------------------------------------------------

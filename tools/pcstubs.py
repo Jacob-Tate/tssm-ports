@@ -13,7 +13,7 @@ What counts, all under src/SB/Core/pc:
   * every other function defined in stubs/, listed as implemented, so each SDK
     module's whole PC surface is visible in one place;
   * every function of a module whose header comment calls the whole file a
-    STUB (iAsync.cpp): most of those are empty without saying so.
+    STUB: most of those are empty without saying so.
 
 Usage:
     tools/pcstubs.py            rewrite src/SB/Core/pc/stubs/STUBS.md
@@ -39,7 +39,6 @@ SUBSYSTEMS = [
     ("stubs/bink.cpp", "Bink"),
     ("stubs/fmod.cpp", "FMOD"),
     ("iSnd.cpp", "Sound (iSnd)"),
-    ("iAsync.cpp", "Load-screen thread (iAsync)"),
     ("iFMV.cpp", "Movies (iFMV)"),
     ("rw/tssm.cpp", "RenderWare shim (TSSM additions)"),
 ]

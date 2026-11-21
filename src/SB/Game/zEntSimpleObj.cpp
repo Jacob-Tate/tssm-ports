@@ -36,6 +36,15 @@ static S32 CmpSimpleMgr(const void* a, const void* b)
     zSimpleMgr* simpA = (zSimpleMgr*)a;
     zSimpleMgr* simpB = (zSimpleMgr*)b;
 
+#ifdef PLATFORM_PC
+    // PLATFORM_PC: the console's address order of the atomics is their creation order, latest
+    // first (iModelOrder.h), as in xModelBucket.cpp; the host's heap has no such order.
+    S32 order = iModelCreationOrderCompare(simpA->lodAtomic[0], simpB->lodAtomic[0]);
+    if (order != 0)
+    {
+        return order;
+    }
+#else
     if (simpA->lodAtomic[0] > simpB->lodAtomic[0])
     {
         return 1;
@@ -44,6 +53,7 @@ static S32 CmpSimpleMgr(const void* a, const void* b)
     {
         return -1;
     }
+#endif
     if (simpA->lkit > simpB->lkit)
     {
         return 1;

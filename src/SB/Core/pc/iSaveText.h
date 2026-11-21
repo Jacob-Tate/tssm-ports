@@ -43,8 +43,8 @@ void iSaveTextNoGames(S32 target, S32 otherWithSaves);
 //             or 3ds, whichever build this is
 //   xbox      the Xbox disc's line, word for word
 //   gamecube  the GameCube disc's line, word for word
-//   ps2       the PS2 release's memory card warning (iSaveTextTable.cpp says
-//             where it comes from: there is no PS2 dump here yet)
+//   ps2       the US PS2 disc's memory card warning (iSaveTextTable.cpp says
+//             where it comes from)
 //   generic   "Please don't turn off the power or quit the game."
 //   pc, android, switch, 3ds   that platform's words, on any build
 //

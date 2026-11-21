@@ -886,6 +886,30 @@ bool iConfigSave()
     return ok;
 }
 
+namespace
+{
+    // A value that cannot be read is reported once, not on every read: the
+    // settings window reads its keys each frame it is drawn.
+    bool firstReport(const char* key, const char* value)
+    {
+        static char sReported[16][kMaxKey + kMaxValue];
+        static S32 sNext;
+
+        char what[kMaxKey + kMaxValue];
+        snprintf(what, sizeof(what), "%s=%s", key, value);
+        for (S32 i = 0; i < 16; i++)
+        {
+            if (strcmp(sReported[i], what) == 0)
+            {
+                return false;
+            }
+        }
+        snprintf(sReported[sNext], sizeof(sReported[sNext]), "%s", what);
+        sNext = (sNext + 1) % 16;
+        return true;
+    }
+} // namespace
+
 S32 iConfigGetBool(const char* key, S32 def)
 {
     iConfigLoad();
@@ -915,7 +939,10 @@ S32 iConfigGetBool(const char* key, S32 def)
         }
     }
 
-    printf("tssm: config: '%s' is not on or off, using the default: %s\n", key, v);
+    if (firstReport(key, v))
+    {
+        printf("tssm: config: %s is '%s', not on or off; using the default\n", key, v);
+    }
     return def;
 }
 
@@ -933,7 +960,10 @@ S32 iConfigGetInt(const char* key, S32 def)
     long parsed = strtol(v, &end, 10);
     if (end == v || (end != NULL && *end != '\0'))
     {
-        printf("tssm: config: '%s' is not a whole number, using the default: %s\n", key, v);
+        if (firstReport(key, v))
+        {
+            printf("tssm: config: %s is '%s', not a whole number; using the default\n", key, v);
+        }
         return def;
     }
 
@@ -954,7 +984,10 @@ F32 iConfigGetFloat(const char* key, F32 def)
     double parsed = strtod(v, &end);
     if (end == v || (end != NULL && *end != '\0'))
     {
-        printf("tssm: config: '%s' is not a number, using the default: %s\n", key, v);
+        if (firstReport(key, v))
+        {
+            printf("tssm: config: %s is '%s', not a number; using the default\n", key, v);
+        }
         return def;
     }
 

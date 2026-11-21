@@ -1,7 +1,8 @@
 // The list of tabs the overlay and the launcher both show, and the About tab:
 // versions, the renderer and folders in use, and the third-party notices.
-// (The Settings, Controls, Saves and Mods tabs are gui/iGuiSettings.cpp,
-// gui/iGuiControls.cpp, gui/iGuiSaves.cpp and gui/iGuiMods.cpp.)
+// (The Settings, Controls, Saves, Mods and Cheats tabs are gui/iGuiSettings.cpp,
+// gui/iGuiControls.cpp, gui/iGuiSaves.cpp, gui/iGuiMods.cpp and
+// gui/iGuiCheats.cpp.)
 
 #include "imgui.h"
 
@@ -9,6 +10,7 @@
 
 #include "gui/iGuiInternal.h"
 
+#include "iBuildInfo.h"
 #include "iConfig.h"
 #include "iFile.h"
 #include "iHost.h"
@@ -104,6 +106,9 @@ namespace
         { "controls", "Controls", ControlsTab, NULL },
         { "saves", "Saves", SavesTab, SavesNotBeforeGame },
         { "mods", "Mods", ModsTab, NULL },
+        // Works before the game too: the port's cheats are settings, and the game's
+        // own are listed there and greyed (gui/iGuiCheats.cpp).
+        { "cheats", "Cheats", iGui::DrawCheats, NULL },
         { "about", "About", iGui::DrawAbout, NULL },
     };
 } // namespace
@@ -156,7 +161,8 @@ void iGui::DrawAbout()
 #else
     const char* config = "debug";
 #endif
-    ImGui::Text("Built %s, %s, %d-bit", __DATE__, config, (int)(sizeof(void*) * 8));
+    ImGui::Text("Built %s from %s, %s, %d-bit", iBuildTime, iBuildCommit, config,
+                (int)(sizeof(void*) * 8));
 
     ImGui::Spacing();
     if (ImGui::BeginTable("about", 2, ImGuiTableFlags_SizingFixedFit))

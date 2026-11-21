@@ -47,7 +47,7 @@ namespace
 const iConfigSetting kConfigSettings[] = {
     // TSSM-ADAPTED: treedome's table less the settings of BfBB features this
     // port did not import (toon, hipoly, world lighting, day/night, fonts,
-    // cheats, fixes, Xbox screen passes, menus, soundtrack, load-screen and
+    // its cheats, fixes, Xbox screen passes, menus, soundtrack, load-screen and
     // shadow tuning, button glyphs) and video.profile/draw_distance. A key that
     // nothing reads would be written into every config.ini as if it did
     // something. src/SB/Core/pc/PORTING.md lists what was removed.
@@ -86,6 +86,30 @@ const iConfigSetting kConfigSettings[] = {
       "; xbox or gamecube (that disc's own line, whichever disc's files you play),\n"
       "; ps2, generic (no console named), pc, android, switch or 3ds.",
       ICONFIG_ENUM, "auto|xbox|ps2|gamecube|generic|pc|android|switch|3ds", kNone, kNone },
+    // The Saves tab's Xbox export (iSaveStore.h, docs/SAVES.md section 7).
+    { "game", "xbox_xbe", "",
+      "The Xbox game's program, DEFAULT.XBE, from your own copy: an exported Xbox\n"
+      "; save is signed with it. Empty: the one beside the game's files, if they are\n"
+      "; the Xbox ones.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    { "game", "xbox_keys", "",
+      "Your keys.bin (32 bytes, made from your own Xbox; the file Cxbx-Reloaded\n"
+      "; reads). Only for exporting a save that a real Xbox or xemu will load. Empty:\n"
+      "; none. The game holds no key of its own.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    // The Saves tab's PlayStation 2 export (iSaveStore.h, docs/SAVES.md section 8).
+    { "game", "ps2_icon", "",
+      "Where the PlayStation 2 game's own save icon is, for exported PlayStation 2\n"
+      "; saves: PLAT.HIP from your own PlayStation 2 disc (or the folder it is in),\n"
+      "; or a save the game made. Empty: the port's own icon.",
+      ICONFIG_STRING, NULL, kNone, kNone },
+    // The Saves tab's PlayStation 3 export (.psv; docs/SAVES.md section 9).
+    { "game", "psv_keys", "",
+      "Your PS3 key file (32 bytes: the key a PS3 signs PlayStation 2 saves with,\n"
+      "; then its IV; docs/SAVES.md). For exporting a .psv with the PS3's own\n"
+      "; signature, and for saying which signature an imported .psv carries. Empty:\n"
+      "; none. The game holds no key of its own.",
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "video", "mode", "borderless",
 #ifdef __SWITCH__
       "Not used on the Switch: the picture always fills the screen.",
@@ -102,7 +126,7 @@ const iConfigSetting kConfigSettings[] = {
     { "video", "aspect", "wide",
 #endif
       "Picture shape: wide (the display's shape: more of the world at the sides,\n"
-      "; menus and HUD in a centered 4:3 area), 4:3 (the original picture) or custom\n"
+      "; menus in a centered 4:3 area, the HUD where ui says), 4:3 (the original picture) or custom\n"
       "; (exactly width x height).",
       ICONFIG_ENUM, "wide|4:3|custom", kNone, kNone },
 #ifdef __3DS__
@@ -121,6 +145,21 @@ const iConfigSetting kConfigSettings[] = {
       "Render height in pixels (lines). The picture is scaled to the window keeping\n"
       "; its shape.",
       ICONFIG_INT, NULL, 240.0f, 8640.0f },
+    { "video", "ui", "pillarbox",
+      "HUD position on a screen wider than 4:3: pillarbox (inside the centered 4:3\n"
+      "; area, where the original game draws it) or native (at the screen's real\n"
+      "; edges: health top left, manliness meter top right, chests bottom left,\n"
+      "; tokens and nitro bottom right). On a screen taller than 4:3 (a phone held\n"
+      "; upright, a tall window) the HUD is always at the top and bottom edges,\n"
+      "; whichever is set here. Menus and the pause screen stay in the 4:3 area\n"
+      "; either way.",
+      ICONFIG_ENUM, "pillarbox|native", kNone, kNone },
+    { "video", "ui_margin", "0",
+      "With ui = native, and on any screen taller than 4:3: how far short of the\n"
+      "; screen's edges the HUD stops, in percent of the screen's width (height, on\n"
+      "; a screen taller than 4:3), for a TV that cuts the edges of the picture\n"
+      "; off. 0 to 25.",
+      ICONFIG_FLOAT, NULL, 0.0f, 25.0f },
 #ifdef __3DS__
     { "video", "framerate", "30",
 #else
@@ -218,6 +257,25 @@ const iConfigSetting kConfigSettings[] = {
       "; gamecube (held at 30 frames a second, as on the GameCube). In both, the\n"
       "; Patty Wagon drives as it does at 60 frames a second, as on the Xbox.",
       ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    { "extras", "guitar_distortion", TSSM_EXTRAS_DEFAULT,
+      "The Sonic Wave Guitar: xbox (the screen swirls while you steer the wave, as\n"
+      "; on the Xbox) or gamecube (no swirl). Without the Xbox files, on Direct3D\n"
+      "; 9's fixed path or on Vulkan, gamecube is used.",
+      ICONFIG_ENUM, "xbox|gamecube", kNone, kNone },
+    // TSSM: the port's own cheats (iCheats.h, docs/CHEATS.md). The game's own cheats
+    // are not settings: they are entered, and saved, as in the original.
+    { "cheats", "no_damage", "off",
+      "Hits knock you about but take no health. Not part of a save.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "cheats", "fly", "off",
+      "The developers' flight: hold white and press black to start and stop\n"
+      "; flying through the level. It can skip what a level expects, so a task\n"
+      "; may not start or finish: save first. Not part of a save.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
+    { "cheats", "unlock_extras", "off",
+      "The Cheats tab switches the Extras screen's costumes and functions on\n"
+      "; without the treasure chests they need. Not part of a save.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "input", "controller", "auto",
       "Controller to use: auto (the first one found) or 1 to 4 for a specific slot.",
       ICONFIG_INT, "auto", 1.0f, 4.0f },

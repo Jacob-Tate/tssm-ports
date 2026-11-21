@@ -3,12 +3,15 @@
 
 #include "iMenuMouse.h"
 
+#include "iModel.h"
 #include "iMouseLook.h"
 #include "iPadPrompts.h"
 #include "iScreen.h"
 #include "iWindow.h"
 #include "xEvent.h"
 #include "xFont.h"
+#include "xGroup.h"
+#include "xMath3.h"
 #include "xPad.h"
 #include "xTRC.h"
 #include "xTextAsset.h"
@@ -45,6 +48,9 @@ namespace
     // the log.
     const zUI* sOver;
     const zUI* sOverHint;
+
+    // The token (PickToken) the pointer was on, 0 for none.
+    U32 sToken;
 
     // A click that the menu took stays taken from the button the mouse button
     // is bound to until the button is let go.
@@ -133,6 +139,14 @@ namespace
         *mx = (rx - iScreenUIOriginXF()) / iScreenUIWidthF() * 640.0f;
         *my = (ry - iScreenUIOriginYF()) / iScreenUIHeightF() * 480.0f;
         return true;
+    }
+
+    // Whether the menus are drawn where the pointer is. On a screen taller than
+    // 4:3 they are cut at the 4:3 area's top and bottom (iScreen2DClipY), so
+    // above or below it the pointer is on none of them, as off a 4:3 screen.
+    bool OnShownMenus()
+    {
+        return !iScreenUITall() || (sY >= 0.0f && sY < 480.0f);
     }
 
     bool IsMove(U32 e)
@@ -564,23 +578,41 @@ namespace
         }
     }
 
-    // An arrow: a small widget that a direction press lights up (the pause
-    // screen's level arrows glow on up and down). Clicking it is that press.
-    // The button, or 0 when the pointer is on no such widget.
-    U32 PickPress()
+    // Whether a widget that hears the pad sits where `ui` does and answers the
+    // press `srcEvent`: `ui` is then the next page of the same place (the
+    // pause screen's next level, whose links light the up arrow that the
+    // first level's only refuse).
+    bool SameSlotAnswers(const zUI* ui, U32 srcEvent)
     {
         for (S32 i = 0; i < sCount; i++)
         {
-            const zUI* ui = sAll[i];
-            if (!Hears(ui))
+            const zUI* h = sAll[i];
+            if (h != ui && Hears(h) && HasLink(h, srcEvent) && h->current.x == ui->current.x &&
+                h->current.y == ui->current.y && h->current.width == ui->current.width &&
+                h->current.height == ui->current.height)
             {
-                continue;
+                return true;
             }
+        }
+        return false;
+    }
+
+    // An arrow: a small widget that a direction press lights up (the pause
+    // screen's level arrows glow on up and down). Clicking it is that press,
+    // also where the list ends and the press is refused, as on the pad.
+    // The button, or 0 when the pointer is on no such widget.
+    U32 PickPress()
+    {
+        for (S32 at = 0; at < sStepCount; at++)
+        {
+            const zUI* ui = sAll[sSteps[at].node];
+            const bool hears = Hears(ui);
 
             for (S32 l = 0; l < ui->linkCount; l++)
             {
                 const xLinkAsset& link = ui->link[l];
-                if (!IsMove(link.srcEvent) || IsState(link.dstEvent) || link.dstAssetID == ui->id)
+                if (!IsMove(link.srcEvent) || IsState(link.dstEvent) || link.dstAssetID == ui->id ||
+                    !(hears || SameSlotAnswers(ui, link.srcEvent)))
                 {
                     continue;
                 }
@@ -604,6 +636,181 @@ namespace
             }
         }
         return 0;
+    }
+
+    // Where a model widget is drawn, in the menus' units: the middle and the
+    // radius of its bounding sphere, placed as zUIModel::DoRender places the
+    // model (xModelRender2D): its origin at the middle of the rectangle, one
+    // unit as wide as the rectangle across and down, at every screen shape,
+    // since the rectangle is in the 4:3 UI box and the model keeps its shape
+    // there. FALSE for anything else.
+    bool ModelSpot(const zUI* ui, F32* x, F32* y, F32* radius)
+    {
+        if (ui->baseType != eBaseTypeUIModel)
+        {
+            return false;
+        }
+        const xModelInstance* model = ((const zUIModel*)ui)->model;
+        const F32 w = ui->current.width;
+        if (model == NULL || model->Data == NULL || model->Mat == NULL || w <= 0.0f ||
+            ui->current.height <= 0.0f)
+        {
+            return false;
+        }
+
+        xSphere bound;
+        iModelWorldBoundSphere(model->Data, model->Mat, &bound);
+
+        static const xVec3 from = { 0.0f, 0.0f, 1.0f };
+        static const xVec3 to = { 0.0f, 0.0f, 0.0f };
+        xMat4x3 view;
+        xMat3x3LookAt(&view, &to, &from);
+        xMat3x3Transpose(&view, &view);
+        view.pos.x = 0.0f;
+        view.pos.y = 0.0f;
+        view.pos.z = xVec3Dist(&to, &from);
+
+        xVec3 at;
+        xMat4x3Toworld(&at, &view, &bound.center);
+        if (at.z < 0.01f)
+        {
+            return false;
+        }
+        *x = ui->current.x + 0.5f * w - w * at.x / at.z;
+        *y = ui->current.y + 0.5f * ui->current.height - w * at.y / at.z;
+        *radius = w * bound.r / at.z;
+        return true;
+    }
+
+    // Whether the object `target` is the widget `id` or a group holding it,
+    // directly or in a group of groups (the pause screen's tokens are two
+    // groups down).
+    bool Holds(U32 target, U32 id, S32 depth)
+    {
+        if (target == id)
+        {
+            return true;
+        }
+        xBase* to = depth < 3 ? zSceneFindObject(target) : NULL;
+        if (to == NULL || to->baseType != eBaseTypeGroup)
+        {
+            return false;
+        }
+        xGroup* group = (xGroup*)to;
+        for (U32 i = 0; i < xGroupGetCount(group); i++)
+        {
+            if (Holds(xGroupGetItem(group, i), id, depth + 1))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether `item` lights the widget `id` up when it gets the highlight:
+    // one of its select links goes to it, or to a group holding it.
+    bool Lights(const zUI* item, U32 id)
+    {
+        for (S32 l = 0; l < item->linkCount; l++)
+        {
+            const xLinkAsset& link = item->link[l];
+            if (IsSelect(link.srcEvent) && Holds(link.dstAssetID, id, 0))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // How many model widgets, shown or not, `item` lights up when it gets the
+    // highlight; counting stops past `most`.
+    S32 ModelsLit(const zUI* item, S32 most)
+    {
+        S32 n = 0;
+        for (S32 i = 0; i < sCount && n <= most; i++)
+        {
+            if (sAll[i]->baseType == eBaseTypeUIModel && Lights(item, sAll[i]->id))
+            {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    // A token: a small model shown in the menu that a widget the pad can walk
+    // to lights up when it gets the highlight (the pause screen's tokens, a
+    // group of them for each of the level's tasks). Several may light it: the
+    // pause screen's level names light every task's tokens, a task its own.
+    // It stands for the one that lights the fewest models, if one does.
+    // Pointing at it is pointing at that widget. Its step, or -1.
+    S32 TokenStep(const zUI* ui)
+    {
+        F32 x;
+        F32 y;
+        F32 r;
+        if (!Shown(ui) || !ModelSpot(ui, &x, &y, &r) || r > 60.0f)
+        {
+            return -1;
+        }
+        S32 found = -1;
+        S32 fewest = 0;
+        bool tie = false;
+        for (S32 at = 0; at < sStepCount; at++)
+        {
+            const zUI* item = sAll[sSteps[at].node];
+            if (!Lights(item, ui->id))
+            {
+                continue;
+            }
+            const S32 n = ModelsLit(item, found >= 0 ? fewest : kMaxWidgets);
+            if (found < 0 || n < fewest)
+            {
+                found = at;
+                fewest = n;
+                tie = false;
+            }
+            else if (n == fewest)
+            {
+                tie = true;
+            }
+        }
+        return tie ? -1 : found;
+    }
+
+    // The token under the pointer, nearest its middle: its item, and the
+    // item's step. -1 when the pointer is on none.
+    S32 PickToken(S32* step, U32* token)
+    {
+        S32 best = -1;
+        F32 bestDistance = 0.0f;
+        *step = -1;
+        *token = 0;
+        for (S32 i = 0; i < sCount; i++)
+        {
+            const zUI* ui = sAll[i];
+            F32 x;
+            F32 y;
+            F32 r;
+            if (!Shown(ui) || !ModelSpot(ui, &x, &y, &r))
+            {
+                continue;
+            }
+            const F32 d = (sX - x) * (sX - x) + (sY - y) * (sY - y);
+            if (d >= r * r || (best >= 0 && d >= bestDistance))
+            {
+                continue;
+            }
+            const S32 at = TokenStep(ui);
+            if (at < 0)
+            {
+                continue;
+            }
+            best = sSteps[at].node;
+            bestDistance = d;
+            *step = at;
+            *token = ui->id;
+        }
+        return best;
     }
 
     // The button a hint names, for hints like "{i:button_picture_03} Return"
@@ -825,6 +1032,7 @@ U32 iMenuMouseUpdate(S32 inMenu, U32 on)
     {
         sOver = NULL;
         sOverHint = NULL;
+        sToken = 0;
         return Spend(on);
     }
 
@@ -865,20 +1073,29 @@ U32 iMenuMouseUpdate(S32 inMenu, U32 on)
         GatherAll(s);
         Walk();
 
+        const bool shown = OnShownMenus();
         S32 step = -1;
-        S32 over = Pick(&step);
+        S32 over = shown ? Pick(&step) : -1;
+        U32 token = 0;
+        if (over < 0 && shown)
+        {
+            over = PickToken(&step, &token);
+        }
         sOver = over >= 0 ? sAll[over] : NULL;
         sOverHint = NULL;
 
-        // Pointing at an item gives it the highlight.
-        if (over >= 0 && sSteps[step].from >= 0)
+        // Pointing at an item gives it the highlight. A token's item is
+        // walked to when the pointer comes onto the token or clicks it, so a
+        // refused press (a locked task) is heard once, as from the pad.
+        if (over >= 0 && sSteps[step].from >= 0 && (token == 0 || token != sToken || clicked))
         {
             Follow(step);
         }
+        sToken = token;
 
         U32 hint = 0;
         U32 adjust = 0;
-        if (over < 0)
+        if (over < 0 && shown)
         {
             S32 h = PickHint(&hint);
             sOverHint = h >= 0 ? sAll[h] : NULL;
@@ -911,6 +1128,12 @@ U32 iMenuMouseUpdate(S32 inMenu, U32 on)
                     }
                 }
                 add |= (!accept && start) ? XPAD_BUTTON_START : XPAD_BUTTON_X;
+                sLeftTaken = true;
+            }
+            else if (token != 0)
+            {
+                // A token whose item could not be reached: the click was the
+                // press that was refused.
                 sLeftTaken = true;
             }
             else if (hint != 0)
@@ -967,7 +1190,9 @@ void iMenuMouseLog(S32 frame)
         const char* text = TextOf(ui);
         U32 hint = Shown(ui) ? HintButton(text) : 0;
         S32 at = FindStep(i);
-        if (!ui->focus && !(Shown(ui) && (ui->selected || at >= 0 || hint != 0 || text != NULL)))
+        const S32 token = TokenStep(ui);
+        if (!ui->focus && !(Shown(ui) && (ui->selected || at >= 0 || hint != 0 || text != NULL ||
+                                          token >= 0)))
         {
             continue;
         }
@@ -1028,6 +1253,14 @@ void iMenuMouseLog(S32 frame)
         if (hint != 0)
         {
             printf(" hint %X words %.0f-%.0f", (unsigned)hint, (double)t0, (double)t1);
+        }
+        F32 sx;
+        F32 sy;
+        F32 sr;
+        if (token >= 0 && ModelSpot(ui, &sx, &sy, &sr))
+        {
+            printf(" token of %08X at %.0f %.0f r %.0f", (unsigned)sAll[sSteps[token].node]->id,
+                   (double)sx, (double)sy, (double)sr);
         }
         printf(" \"%s\"%s\n", brief,
                ui == sOver ? " <- pointer" : (ui == sOverHint ? " <- pointer (hint)" : ""));

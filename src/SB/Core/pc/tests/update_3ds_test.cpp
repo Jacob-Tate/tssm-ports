@@ -246,6 +246,7 @@ namespace
         // A download's title version against the version in its file name.
         Check(i3DSCiaVersionIs(146, "0.9.2"), "146 is 0.9.2");
         Check(i3DSCiaVersionIs(148, "0.9.4"), "148 is 0.9.4");
+        Check(i3DSCiaVersionIs(149, "0.9.5"), "149 is 0.9.5");
         Check(i3DSCiaVersionIs(144, "0.9"), "144 is 0.9");
         Check(i3DSCiaVersionIs(129, "0.8.1"), "129 is 0.8.1");
         Check(!i3DSCiaVersionIs(1, "0.9.1"), "makerom's 0.0.1 is not 0.9.1");

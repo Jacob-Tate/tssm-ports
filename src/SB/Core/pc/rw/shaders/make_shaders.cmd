@@ -18,6 +18,12 @@ call :ps distort_PS distort_PS.hlsl || goto fail
 call :ps glow_bright_PS glow_bright_PS.hlsl || goto fail
 call :ps glow_blur_PS glow_blur_PS.hlsl || goto fail
 
+rem The Sonic Wave Guitar's screen distortion (iXboxDistort.h). Direct3D only, as
+rem the water below: no SPIR-V is built for it (that needs a dxc.exe with SPIR-V
+rem output, finddxc.cmd; change :d3dps to :ps here when there is one), and the
+rem Vulkan renderer draws no distortion.
+call :d3dps xboxdistort_PS xboxdistort_PS.hlsl || goto fail
+
 rem The Xbox water's surface (iXboxWater.h). Direct3D only: no SPIR-V is built
 rem for it, and the Vulkan renderer uses the GameCube water.
 call :d3dvs water_VS water_VS.hlsl || goto fail

@@ -240,6 +240,157 @@ namespace
 
 namespace
 {
+    // --- instancing a tank of matrices -------------------------------------
+    //
+    // A tank with a matrix per particle (rpPTANKDFLAGMATRIX: xPtankPool's PGT_COLOR_MAT and
+    // PGT_COLOR_MAT_UV2, which have no position cluster). The game has already turned and sized
+    // each particle, so the camera is not asked: a quad is spanned by its matrix's right and up
+    // about its pos. The Goofy Goober Token's coloured patches are drawn this way, and so are
+    // sparks, fire, explosions, decals and the splash rings.
+    //
+    // The corners, their order and which texture corner each takes are the GameCube plugin's
+    //
+    //     _rpPTankGameCubeAsmVtxRender_CC_PPM   rwsdk/plugin/ptank/gcn/
+    //                                           ptankgcn_cc_ppm.s:0x80310490
+    //
+    //         c  = pos + cCenter.x * right + cCenter.y * up
+    //         v0 = c - right/2 + up/2      (u1, v0)      uv[3]
+    //         v1 = c + right/2 + up/2      (u0, v0)      uv[0]
+    //         v2 = c + right/2 - up/2      (u0, v1)      uv[1]
+    //         v3 = c - right/2 - up/2      (u1, v1)      uv[2]
+    //
+    // -- with two texture corners per particle the first is (u0, v0) and the second (u1, v1);
+    // with four they go round as in the last column. No size, no rotation, and cCenter whether
+    // or not rpPTANKDFLAGUSECENTER is set (it is zero unless the game sets it).
+    void instancePTankMatrices(const RpPTankData& pd, RwInt32 count, rw::V3d* verts,
+                               rw::RGBA* colors, rw::TexCoords* uvs)
+    {
+        const RwUInt8* matData = (const RwUInt8*)pd.clusters[RPPTANKSIZEMATRIX].data;
+        const RwInt32 matStride = pd.clusters[RPPTANKSIZEMATRIX].stride;
+        const RwUInt8* colData = (const RwUInt8*)pd.clusters[RPPTANKSIZECOLOR].data;
+        const RwInt32 colStride = pd.clusters[RPPTANKSIZECOLOR].stride;
+        const RwUInt8* vtxColData = (const RwUInt8*)pd.clusters[RPPTANKSIZEVTXCOLOR].data;
+        const RwInt32 vtxColStride = pd.clusters[RPPTANKSIZEVTXCOLOR].stride;
+        const RwUInt8* uv2Data = (const RwUInt8*)pd.clusters[RPPTANKSIZEVTX2TEXCOORDS].data;
+        const RwInt32 uv2Stride = pd.clusters[RPPTANKSIZEVTX2TEXCOORDS].stride;
+        const RwUInt8* uv4Data = (const RwUInt8*)pd.clusters[RPPTANKSIZEVTX4TEXCOORDS].data;
+        const RwInt32 uv4Stride = pd.clusters[RPPTANKSIZEVTX4TEXCOORDS].stride;
+
+        static const RwReal kRight[4] = { -0.5f, 0.5f, 0.5f, -0.5f };
+        static const RwReal kUp[4] = { 0.5f, 0.5f, -0.5f, -0.5f };
+
+        for (RwInt32 i = 0; i < count; i++)
+        {
+            const RwMatrix* m = (const RwMatrix*)(matData + (size_t)matStride * i);
+            const RwV3d r = m->right;
+            const RwV3d u = m->up;
+            RwV3d c = m->pos;
+            c.x += r.x * pd.cCenter.x + u.x * pd.cCenter.y;
+            c.y += r.y * pd.cCenter.x + u.y * pd.cCenter.y;
+            c.z += r.z * pd.cCenter.x + u.z * pd.cCenter.y;
+
+            rw::V3d* v = &verts[i * 4];
+            for (int k = 0; k < 4; k++)
+            {
+                v[k].x = c.x + r.x * kRight[k] + u.x * kUp[k];
+                v[k].y = c.y + r.y * kRight[k] + u.y * kUp[k];
+                v[k].z = c.z + r.z * kRight[k] + u.z * kUp[k];
+            }
+
+            if (colors != NULL)
+            {
+                rw::RGBA* c4 = &colors[i * 4];
+                if (vtxColData != NULL)
+                {
+                    const RwRGBA* src = (const RwRGBA*)(vtxColData + (size_t)vtxColStride * i);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        c4[k].red = src[k].red;
+                        c4[k].green = src[k].green;
+                        c4[k].blue = src[k].blue;
+                        c4[k].alpha = src[k].alpha;
+                    }
+                }
+                else
+                {
+                    RwRGBA col = pd.cColor;
+                    if (colData != NULL)
+                    {
+                        col = *(const RwRGBA*)(colData + (size_t)colStride * i);
+                    }
+                    for (int k = 0; k < 4; k++)
+                    {
+                        c4[k].red = col.red;
+                        c4[k].green = col.green;
+                        c4[k].blue = col.blue;
+                        c4[k].alpha = col.alpha;
+                    }
+                }
+            }
+
+            if (uvs != NULL)
+            {
+                rw::TexCoords* t4 = &uvs[i * 4];
+                if (uv4Data != NULL)
+                {
+                    const RwTexCoords* src = (const RwTexCoords*)(uv4Data + (size_t)uv4Stride * i);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        t4[k].u = src[(k + 3) & 3].u;
+                        t4[k].v = src[(k + 3) & 3].v;
+                    }
+                }
+                else
+                {
+                    RwTexCoords tl = pd.cUV[0];
+                    RwTexCoords br = pd.cUV[1];
+                    if (uv2Data != NULL)
+                    {
+                        const RwTexCoords* src =
+                            (const RwTexCoords*)(uv2Data + (size_t)uv2Stride * i);
+                        tl = src[0];
+                        br = src[1];
+                    }
+
+                    t4[0].u = br.u;
+                    t4[0].v = tl.v;
+                    t4[1].u = tl.u;
+                    t4[1].v = tl.v;
+                    t4[2].u = tl.u;
+                    t4[2].v = br.v;
+                    t4[3].u = br.u;
+                    t4[3].v = br.v;
+                }
+            }
+        }
+    }
+
+    // What both ways of instancing end with.
+    void finishPTankInstance(rw::Geometry* geo, RpPTankAtomicExtPrv* ext, rw::V3d* verts,
+                             RwInt32 count)
+    {
+        // Particles past the active count have to go back to being degenerate,
+        // or the tail of a tank that shrank keeps drawing last frame's
+        // billboards. The whole remainder is cleared rather than tracking what
+        // was live last time, because RpPTankAtomicExtPrv is RenderWare's own
+        // struct and the GameCube build shares this header -- a field added
+        // here for bookkeeping would change a layout that is not ours to
+        // change. The cost is bounded by maxPCount, which is 64 for the ptank
+        // pool: a few kilobytes of memset against a draw call.
+        if (count < ext->maxPCount)
+        {
+            const RwInt32 stale = ext->maxPCount - count;
+            memset(&verts[count * 4], 0, (size_t)stale * 4 * sizeof(rw::V3d));
+        }
+
+        // The vertices changed, so the instanced streams have to be rebuilt.
+        // lock() raises the dirty bits d3d9.cpp's instance path reads; it does
+        // NOT throw the mesh away unless LOCKPOLYGONS is among them, and the
+        // mesh here never changes.
+        geo->lock(rw::Geometry::LOCKVERTICES | rw::Geometry::LOCKPRELIGHT |
+                  rw::Geometry::LOCKTEXCOORDS);
+    }
+
     // --- instancing: particles into billboard vertices ---------------------
     //
     // This is the half of the plugin that turns a locked particle buffer into
@@ -294,10 +445,17 @@ namespace
         const RpPTankData& pd = ext->publicData;
         const RwUInt32 flags = (RwUInt32)pd.format.dataFlags;
 
+        if (pd.clusters[RPPTANKSIZEMATRIX].data != NULL)
+        {
+            instancePTankMatrices(pd, count, verts, colors, uvs);
+            finishPTankInstance(geo, ext, verts, count);
+            return;
+        }
+
         const RwUInt8* posData = (const RwUInt8*)pd.clusters[RPPTANKSIZEPOSITION].data;
         if (posData == NULL)
         {
-            // A tank with no positions has nothing to place.
+            // A tank with neither positions nor matrices has nothing to place.
             return;
         }
 
@@ -451,26 +609,7 @@ namespace
             }
         }
 
-        // Particles past the active count have to go back to being degenerate,
-        // or the tail of a tank that shrank keeps drawing last frame's
-        // billboards. The whole remainder is cleared rather than tracking what
-        // was live last time, because RpPTankAtomicExtPrv is RenderWare's own
-        // struct and the GameCube build shares this header -- a field added
-        // here for bookkeeping would change a layout that is not ours to
-        // change. The cost is bounded by maxPCount, which is 64 for the ptank
-        // pool: a few kilobytes of memset against a draw call.
-        if (count < ext->maxPCount)
-        {
-            const RwInt32 stale = ext->maxPCount - count;
-            memset(&verts[count * 4], 0, (size_t)stale * 4 * sizeof(rw::V3d));
-        }
-
-        // The vertices changed, so the instanced streams have to be rebuilt.
-        // lock() raises the dirty bits d3d9.cpp's instance path reads; it does
-        // NOT throw the mesh away unless LOCKPOLYGONS is among them, and the
-        // mesh here never changes.
-        geo->lock(rw::Geometry::LOCKVERTICES | rw::Geometry::LOCKPRELIGHT |
-                  rw::Geometry::LOCKTEXCOORDS);
+        finishPTankInstance(geo, ext, verts, count);
     }
 
     // The callback the atomic carries. It puts the tank's blend state up,

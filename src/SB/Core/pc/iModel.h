@@ -3,6 +3,7 @@
 
 #include "xMath3.h"
 #include "xModel.h"
+#include "iModelOrder.h"
 
 #include <rwcore.h>
 #include <rpworld.h>

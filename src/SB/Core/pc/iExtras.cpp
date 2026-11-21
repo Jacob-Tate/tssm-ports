@@ -8,6 +8,7 @@
 #include "iHost.h"
 #include "iScreen.h"
 #include "iWindow.h"
+#include "iXboxDistort.h"
 #include "iXboxWaterDraw.h"
 #include "xEvent.h"
 
@@ -19,10 +20,11 @@ namespace
 {
     const char* const kKeys[iEXTRAS_FEATURE_COUNT] = {
         "extras.glow", "extras.spotlights", "extras.crowds", "extras.water", "extras.frame_lock",
+        "extras.guitar_distortion",
     };
 
     const char* const kNames[iEXTRAS_FEATURE_COUNT] = {
-        "glow", "spotlights", "crowds", "water", "frame lock",
+        "glow", "spotlights", "crowds", "water", "frame lock", "guitar distortion",
     };
 
     // Which Xbox versions this build has.
@@ -32,6 +34,7 @@ namespace
         true, // crowds
         true, // water (iXboxWater.h)
         true, // frame lock
+        true, // guitar distortion (iXboxDistort.h)
     };
 
     U32 sSceneID;
@@ -60,6 +63,10 @@ namespace
     // and is asked for every frame, so it is kept here rather than read.
     iExtrasLook sGlow;
     bool sGlowKnown;
+
+    // So does the guitar's distortion.
+    iExtrasLook sGuitar;
+    bool sGuitarKnown;
 
     // The four characters of a scene ID ('BB02' -> "BB02").
     void SceneName(U32 id, char out[5])
@@ -99,15 +106,11 @@ namespace
         return platform == IGCPLAT_GAMECUBE ? iEXTRAS_FILES_GAMECUBE : iEXTRAS_FILES_XBOX;
     }
 
-    // Whose files the current level is, or before the first level, boot.HIP's
-    // (iFileAssetPlatform): the overlay's answer in the menus. Kept once boot.HIP
+    // Whose files the game's own are, boot.HIP's (iFileAssetPlatform): the
+    // overlay's answer in the menus, before the first level. Kept once boot.HIP
     // has answered (not before iFileInit, when it cannot be read).
-    iExtrasFiles SceneFiles()
+    iExtrasFiles BootFiles()
     {
-        if (sHaveScene)
-        {
-            return sSceneFiles;
-        }
         if (!sBootFilesKnown)
         {
             const char* id = iFileAssetPlatform(NULL);
@@ -116,6 +119,19 @@ namespace
             sBootFilesKnown = id != NULL;
         }
         return sBootFiles;
+    }
+
+    // Whose files the current level is, or before the first level, the game's.
+    iExtrasFiles SceneFiles()
+    {
+        return sHaveScene ? sSceneFiles : BootFiles();
+    }
+
+    // The files a feature is decided from: the level's, except for the guitar's
+    // distortion, whose swirl map is in plat.HIP, one of the game's own files.
+    iExtrasFiles FilesFor(iExtrasFeature feature)
+    {
+        return feature == iEXTRAS_GUITAR_DISTORTION ? BootFiles() : SceneFiles();
     }
 
     // The water's own answer for the current level when [extras] let it try
@@ -139,6 +155,10 @@ namespace
         {
             return NULL;
         }
+        if (feature == iEXTRAS_GUITAR_DISTORTION)
+        {
+            return sInForce[feature] == iEXTRAS_XBOX ? iXboxDistortStatus() : NULL;
+        }
         return feature == iEXTRAS_WATER ? WaterFellBack() : sLateWhy[feature];
     }
 
@@ -151,7 +171,15 @@ namespace
         {
             return iEXTRAS_RENDERER_FIXED;
         }
+        if (iScreenGetBackend() == iSCREENBACKEND_VULKAN)
+        {
+            return iEXTRAS_RENDERER_VULKAN;
+        }
+#if defined(__ANDROID__) || defined(__SWITCH__)
+        return iEXTRAS_RENDERER_DEVICE_GL;
+#else
         return iEXTRAS_RENDERER_SHADERS;
+#endif
 #endif
     }
 
@@ -161,6 +189,15 @@ namespace
         sGlow = iExtrasResolve(iEXTRAS_GLOW, iExtrasSetting(iEXTRAS_GLOW), SceneFiles(),
                                CurrentRenderer(), sHaveScene ? sSceneID : 0, &why);
         sGlowKnown = true;
+    }
+
+    void ReadGuitar()
+    {
+        const char* why;
+        sGuitar = iExtrasResolve(iEXTRAS_GUITAR_DISTORTION,
+                                 iExtrasSetting(iEXTRAS_GUITAR_DISTORTION), BootFiles(),
+                                 CurrentRenderer(), sHaveScene ? sSceneID : 0, &why);
+        sGuitarKnown = true;
     }
 
     bool ReadFrameLock()
@@ -359,6 +396,42 @@ iExtrasLook iExtrasResolve(iExtrasFeature feature, iExtrasLook setting, iExtrasF
         }
         return iEXTRAS_XBOX;
 
+    case iEXTRAS_GUITAR_DISTORTION:
+        // Code, and one texture: the swirl map of the Xbox's plat.HIP, which
+        // the GameCube's does not have (`files` is the game's here, not the
+        // level's). A pixel shader reads the frame through it. A map that is
+        // not there after all and a failed shader are the pass's own reasons
+        // (iXboxDistortStatus; iExtrasStatus).
+        if (renderer == iEXTRAS_RENDERER_3DS)
+        {
+            *why = "Not on the 3DS yet.";
+            return iEXTRAS_GAMECUBE;
+        }
+        if (renderer == iEXTRAS_RENDERER_DEVICE_GL)
+        {
+            // The pass is built for them (rw/xboxdistort.cpp's GL3 arm) and has
+            // never run on one: until it has been seen there, none is drawn.
+            *why = "Not on Android or the Switch yet.";
+            return iEXTRAS_GAMECUBE;
+        }
+        if (renderer == iEXTRAS_RENDERER_VULKAN)
+        {
+            *why = "The Vulkan renderer has no shader for the swirl yet: none is drawn.";
+            return iEXTRAS_GAMECUBE;
+        }
+        if (renderer == iEXTRAS_RENDERER_FIXED)
+        {
+            *why = "Direct3D 9's fixed path has no pixel shader for the swirl: none is drawn.";
+            return iEXTRAS_GAMECUBE;
+        }
+        if (files == iEXTRAS_FILES_GAMECUBE)
+        {
+            *why = "The game's files are GameCube files: they have no swirl map, so none is "
+                   "drawn.";
+            return iEXTRAS_GAMECUBE;
+        }
+        return iEXTRAS_XBOX;
+
     case iEXTRAS_GLOW:
         // Code only, on the frame's alpha, which both releases' files fill
         // nearly the same way (TT01's talk window is one known difference,
@@ -389,18 +462,19 @@ void iExtrasSceneEnter(U32 sceneID)
         sNote[i][0] = '\0';
     }
 
-    const iExtrasFiles files = sSceneFiles;
     const iExtrasRenderer renderer = CurrentRenderer();
     for (S32 i = 0; i < iEXTRAS_FEATURE_COUNT; i++)
     {
         const iExtrasFeature f = (iExtrasFeature)i;
         sAtLoad[i] = iExtrasSetting(f);
-        sInForce[i] = iExtrasResolve(f, sAtLoad[i], files, renderer, sceneID, &sWhy[i]);
+        sInForce[i] = iExtrasResolve(f, sAtLoad[i], FilesFor(f), renderer, sceneID, &sWhy[i]);
     }
 
     sFrameLockOn = sInForce[iEXTRAS_FRAME_LOCK] == iEXTRAS_GAMECUBE;
     sGlow = sInForce[iEXTRAS_GLOW];
     sGlowKnown = true;
+    sGuitar = sInForce[iEXTRAS_GUITAR_DISTORTION];
+    sGuitarKnown = true;
 }
 
 void iExtrasSceneReady(U32 sceneID, U32 minVSyncCnt)
@@ -492,6 +566,14 @@ iExtrasLook iExtrasInForce(iExtrasFeature feature)
         }
         return sGlow;
     }
+    if (feature == iEXTRAS_GUITAR_DISTORTION)
+    {
+        if (!sGuitarKnown)
+        {
+            ReadGuitar();
+        }
+        return sGuitar;
+    }
     if (!sHaveScene)
     {
         const char* why;
@@ -558,14 +640,16 @@ bool iExtrasStatus(iExtrasFeature feature, char* out, size_t outSize)
     // force has its own "next level" tag, and is not a reason.
     const iExtrasLook setting = iExtrasSetting(feature);
     const char* why = NULL;
-    iExtrasResolve(feature, setting, SceneFiles(), CurrentRenderer(), sHaveScene ? sSceneID : 0,
-                   &why);
+    iExtrasResolve(feature, setting, FilesFor(feature), CurrentRenderer(),
+                   sHaveScene ? sSceneID : 0, &why);
     // The level may still have fallen back, for a reason of its own, when it
     // loaded with xbox: the water's (iXboxWaterActive) or its files'
     // (iExtrasFallBack).
     if (why == NULL && setting == iEXTRAS_XBOX)
     {
-        why = LevelFellBack(feature);
+        // The distortion follows its setting at once, so its own reason does
+        // not wait for a level loaded with xbox.
+        why = feature == iEXTRAS_GUITAR_DISTORTION ? iXboxDistortStatus() : LevelFellBack(feature);
     }
     if (why == NULL)
     {
@@ -604,6 +688,7 @@ void iExtrasApply()
     sFrameLockOn = ReadFrameLock();
     PushFrameLock();
     ReadGlow();
+    ReadGuitar();
 }
 
 F32 iExtrasGlowStrength(U32 sceneID)

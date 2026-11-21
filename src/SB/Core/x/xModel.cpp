@@ -596,6 +596,14 @@ void xModelRender2D(const xModelInstance& model, const basic_rect<F32>& r, const
     F32 viewscale = camvw->x * r.w * 2.0f;
     F32 shearX = camvw->x * -(r.x * 2.0f + r.w - 1.0f);
     F32 shearY = camvw->y * -(r.y * 2.0f + r.h - 1.0f);
+#ifdef PLATFORM_PC
+    // PC: a HUD model goes to the screen edge with its widget's 2D (iScreenSetAnchor).
+    if (camvw == &boxvw)
+    {
+        shearX -= camvw->x * 2.0f * iScreenAnchorX(0.0f);
+        shearY -= camvw->y * 2.0f * iScreenAnchorY(0.0f);
+    }
+#endif
 
     shearmat.right.x = viewscale;
     shearmat.right.y = 0.0f;

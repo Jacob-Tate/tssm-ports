@@ -111,6 +111,7 @@ namespace rw
             float sFogPlane; // the camera's, for the log
             float sFarPlane;
             bool sScreenCamera;
+            V3d sCamPos; // the screen camera's, the origin of its world Im3D
             float sIm2DW = SCREEN_W;
             float sIm2DH = SCREEN_H;
             int32 sDraws;
@@ -1566,6 +1567,7 @@ namespace rw
             else
             {
                 sScreenCamera = true;
+                sCamPos = cam->getFrame()->getLTM()->pos;
             }
 
             // Stereo: in a 3D frame the main camera's draws are shifted per
@@ -2099,6 +2101,28 @@ namespace rw
 
         // --------------------------------------------------------------- Im3D
 
+        static V3d im3DBoxMiddle(const Im3DVertex* v, int32 numVertices)
+        {
+            V3d lo = { v[0].x, v[0].y, v[0].z };
+            V3d hi = lo;
+            for (int32 i = 1; i < numVertices; i++)
+            {
+                lo.x = v[i].x < lo.x ? v[i].x : lo.x;
+                lo.y = v[i].y < lo.y ? v[i].y : lo.y;
+                lo.z = v[i].z < lo.z ? v[i].z : lo.z;
+                hi.x = v[i].x > hi.x ? v[i].x : hi.x;
+                hi.y = v[i].y > hi.y ? v[i].y : hi.y;
+                hi.z = v[i].z > hi.z ? v[i].z : hi.z;
+            }
+            V3d c = { 0.5f * (lo.x + hi.x), 0.5f * (lo.y + hi.y), 0.5f * (lo.z + hi.z) };
+            // A vertex that is not a number would take every other one with it.
+            if (!(fabsf(c.x) < 1e30f && fabsf(c.y) < 1e30f && fabsf(c.z) < 1e30f))
+            {
+                c.x = c.y = c.z = 0.0f;
+            }
+            return c;
+        }
+
         static void im3DTransform(void* vertices, int32 numVertices, Matrix* world, uint32 flags)
         {
             RecordScope timed;
@@ -2126,23 +2150,14 @@ namespace rw
             // (a step of about 0.004 at 500 units: xShadowSimple lifts its
             // blob 0.02 off the ground). The matrix takes the centre back on
             // the CPU, in 32 bits.
-            V3d lo = { v[0].x, v[0].y, v[0].z };
-            V3d hi = lo;
-            for (int32 i = 1; i < numVertices; i++)
-            {
-                lo.x = v[i].x < lo.x ? v[i].x : lo.x;
-                lo.y = v[i].y < lo.y ? v[i].y : lo.y;
-                lo.z = v[i].z < lo.z ? v[i].z : lo.z;
-                hi.x = v[i].x > hi.x ? v[i].x : hi.x;
-                hi.y = v[i].y > hi.y ? v[i].y : hi.y;
-                hi.z = v[i].z > hi.z ? v[i].z : hi.z;
-            }
-            V3d c = { 0.5f * (lo.x + hi.x), 0.5f * (lo.y + hi.y), 0.5f * (lo.z + hi.z) };
-            // A vertex that is not a number would take every other one with it.
-            if (!(fabsf(c.x) < 1e30f && fabsf(c.y) < 1e30f && fabsf(c.z) < 1e30f))
-            {
-                c.x = c.y = c.z = 0.0f;
-            }
+            // World coordinates under the screen's camera are rebased on the
+            // camera instead, one origin for the whole frame: two shadows
+            // close together draw the same floor triangles, the later one only
+            // where it is no farther than the first (the depth writes stay on,
+            // as on the GameCube), and on two centres the 24-bit maths gave
+            // the same floor two depths, leaving holes in the second shadow.
+            const V3d c =
+                world == nil && sScreenCamera ? sCamPos : im3DBoxMiddle(v, numVertices);
             for (int32 i = 0; i < numVertices; i++)
             {
                 v[i].x -= c.x;

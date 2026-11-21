@@ -11,8 +11,8 @@ There are two parts, and they never run at the same time:
 - **The launcher** is a window shown before the game's own window opens. It has every tab the
   overlay has, so every setting can be changed before the game starts, and the folder with the
   game's files is chosen there.
-- **The overlay** is drawn over the running game. It has Settings, Controls, Saves, Mods and About
-  tabs.
+- **The overlay** is drawn over the running game. It has Settings, Controls, Saves, Mods, Cheats
+  and About tabs.
 
 The two show the same list of tabs (`gui/iGuiTabs.cpp`): a tab added later is in both.
 
@@ -61,7 +61,7 @@ Most settings take effect immediately:
 - vertical sync
 - the frame-rate cap
 - field of view
-- HUD placement
+- the HUD position and its edge margin
 - the glow and the screen warp (`docs/RENDERING.md`)
 - camera speed
 - stick deadzone
@@ -85,8 +85,11 @@ The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the 
 ### The tabs
 
 - **Settings:**
-  - **Display:** renderer, window mode, aspect ratio, render size, anti-aliasing, vsync, frame-rate
-    cap, field of view, glow and screen warp. Three of the settings say what they cost, in a line
+  - **Display:** renderer, window mode, aspect ratio, HUD position (in the 4:3 area as the
+    original, or at the screen edges, with a margin for a TV that cuts the picture's edges off;
+    on a screen taller than 4:3 always at the top and bottom edges: `docs/WIDESCREEN.md`), render
+    size, anti-aliasing, vsync, frame-rate cap, field of view, glow
+    and screen warp. Three of the settings say what they cost, in a line
     under the control:
     - **Frame rate cap** above 60 (a number, or "Display rate" on a 90, 120 or 144 Hz screen) says
       how many times the work of 60 that is. The game draws and simulates every frame, so the work
@@ -121,10 +124,12 @@ The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the 
     move, or stand still) and **Water** (the Xbox water of SC02's tanks and B301's sea, with
     reflections, refraction and ripples, or the GameCube's; its note says the two extra pictures
     it draws per water area) apply when the next level loads and are tagged **next level** until
-    then; **30 fps levels** (the six levels the GameCube holds at 30) applies at once, and says
+    then; **Sonic Wave Guitar** (the screen swirls while you steer the wave, or no swirl) applies
+    at once; **30 fps levels** (the six levels the GameCube holds at 30) applies at once, and says
     that the Patty Wagon drives as at 60 either way. A row says why when the level in play cannot
-    give the Xbox version (GameCube files, Direct3D 9's fixed path, and for the water also the
-    water's own reasons, such as Vulkan: `docs/RENDERING.md`, "Water"), and what `config.ini` has
+    give the Xbox version (GameCube files, Direct3D 9's fixed path, and for the water and the
+    guitar's swirl also their own reasons, such as Vulkan: `docs/RENDERING.md`, "Water";
+    `docs/EXTRAS.md`, "guitar_distortion"), and what `config.ini` has
     when its value is neither xbox nor gamecube (the default is used). The Android and Switch
     versions do not have these rows yet; they come with a later update. The 3DS shows none of
     them either (its defaults are the GameCube versions until each is timed on the console).
@@ -142,7 +147,7 @@ The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the 
     | Automatic (the default) | this platform's own words: PC "Please don't close the game." (Android, Switch and 3DS builds have their own) |
     | Xbox (original) | the Xbox disc's line, "Please don't turn off your Xbox console." |
     | GameCube (original) | the GameCube disc's line, "Do not touch the Memory Card or the POWER Button" |
-    | PlayStation 2 | "Do not remove the memory card (8MB) (for PlayStation®2), or reset/switch off the console." |
+    | PlayStation 2 | the US PS2 disc's line, "Do not remove memory card (8MB) (for PlayStation®2) in MEMORY CARD slot 1, or the DUALSHOCK®2 analog controller, or reset/switch off the console." |
     | Any console | "Please don't turn off the power or quit the game." |
     | PC, Android, Switch, 3DS | that platform's words, on any build: "Please don't close the game.", "Please don't close the app.", "Please don't close the game or turn off the console.", "Please don't turn off the power or close the game." |
 
@@ -150,10 +155,10 @@ The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the 
     exactly as the disc has it; with the GameCube disc's files, GameCube does. The other disc's
     choice puts its words into the same lines. Only these lines change, and only their warning: the
     rest of each line ("Saving Game.....", "Would you like to create a game save...") stays the
-    disc's, and no other text in the game is touched. The PS2 wording is the PS2 release's usual
-    memory card warning, made from the PS2 text both discs still carry; it will be checked against
-    a PS2 disc when there is a dump of one (`src/SB/Core/pc/iSaveTextTable.cpp` keeps it in one
-    place).
+    disc's, and no other text in the game is touched. The PS2 wording is the US PS2 disc's own
+    line, with the controller's name written in where the PS2 program fills it in itself; the
+    slot reads "slot A" with the GameCube disc's files (`src/SB/Core/pc/iSaveTextTable.cpp` keeps
+    it in one place).
   - **Game files:** the folder, with a folder picker and a check of what is in it.
   - **This window:** overlay size, the key that opens it, the controller shortcut, when the launcher
     shows, and where `config.ini` is.
@@ -203,6 +208,17 @@ The Xbox extras' spotlights, crowds and water (`[extras]`) take effect when the 
   conflicts (what, which mod is used, over which) and the mod log, with a filter, **Copy** and
   **Open mods.log**. Every change is written to `mods/mods.ini` at once. The single mod folder of
   `[assets] mod` is kept at the bottom. `docs/MODDING.md` is the modder's guide.
+- **Cheats:** the game's own cheats and the port's (`docs/CHEATS.md`).
+  - **The game's own cheats:** the original's nine button codes, each with its code, what it does and
+    how long it lasts, as a switch or an **Enter** button (pressed twice for a code that cannot be
+    undone), and the costumes and functions of the
+    Extras screen with the treasure chests each needs. A click does what entering the code or
+    selecting the icon does, in the game's own code, so they are saved and forgotten as on the
+    console. They work while a level is running; at the title screen and in the launcher they are
+    listed and greyed.
+  - **Port cheats:** *No damage*, *Flight* and *Extras without treasure chests* (`[cheats]` in
+    config.ini, each off by default, never in a save, applied at once), **Turn all port cheats off**
+    and **Refill health**. Flight says what it can do to a level.
 - **About:** the version, the renderer and library versions in use, and the full license text of
   every third-party component.
 
@@ -245,8 +261,9 @@ The launcher shows on its own when the game's files are not where `config.ini` s
 that turns the "files not found" error into a folder picker.
 
 It has every tab of the overlay: **Settings** (every section: Game files first, then Display, Xbox
-extras, Audio, Game and This window), **Controls**, **Saves**, **Mods** and **About**. Everything
-there works before the game starts:
+extras, Audio, Game and This window), **Controls**, **Saves**, **Mods**, **Cheats** and **About**.
+Everything there works before the game starts (in the Cheats tab: the port's cheats; the game's own
+are listed greyed until a level is running):
 
 - A setting is saved to `config.ini` as soon as it is changed, and the game starts with it. Nothing
   is tagged **restart** here: the game has not started yet.
@@ -287,6 +304,8 @@ saves then, so they are changed there.
 | `[gui] pad_combo` | `on` | whether Back+Start opens the overlay |
 | `[gui] scale` | `auto` | the overlay's size: `auto`, or a factor from 0.5 to 4 |
 | `[gui] file_picker` | `auto` | `auto`, `system` or `builtin`: which file and folder picker Import, Export and Browse use; see "The built-in file browser" |
+| `[video] ui`, `ui_margin` | `pillarbox`, `0` | where the HUD goes on a screen wider than 4:3 (on a taller one it is always at the top and bottom edges), from the Settings tab's Display section: `pillarbox` (the 4:3 area, as the original) or `native` (the screen's edges), and the margin in percent (`docs/WIDESCREEN.md`) |
+| `[cheats] no_damage`, `fly`, `unlock_extras` | `off` | the port's cheats, from the Cheats tab (`docs/CHEATS.md`) |
 | `[audio] master_volume`, `music_volume`, `sfx_volume`, `movie_volume` | `100` | 0 to 100. At 100 the sound is exactly what it would be without them. They count in a build without the overlay too. See "Panels other modules fill" below. |
 
 `auto` scale takes the display's own scaling (150%, 200%), raises it for a big window so the text can be
@@ -307,9 +326,10 @@ All of the GUI is under `src/SB/Core/pc/gui/` and is port-only. The table below 
 | `iGuiLauncher.cpp` | the launcher, on SDL_Renderer, with every tab of the list |
 | `iGuiSettings.cpp` | the Settings tab (in the launcher, Game files first) |
 | `iGuiControls.cpp` | the Controls tab, on the input layer's binding API (`iPadControls.h`) |
-| `iGuiSaves.cpp` | the Saves tab, on the save store (`iSaveStore.h`) |
+| `iGuiSaves.cpp` | the Saves tab, on the save store (`iSaveStore.h`): GameCube saves and, as folders, Xbox ones (import whatever the signature; export signed for Cxbx-Reloaded and other copies of the port, or for a real Xbox or xemu with the player's own `keys.bin`; `docs/SAVES.md` section 7), and PlayStation 2 ones (import from a `.psu`, `.max`, `.psv`, a card file (a PS3's `.VM2` too) or PCSX2's folder card; export to a `.psu`, a card file or a folder card; section 8), and a PlayStation 3's `.psv` (export with the stand-in signature, or with the PS3's own from the player's key file, `[game] psv_keys`, not yet confirmed on a PS3; section 9) |
 | `iGuiMods.cpp` | the Mods tab, on the mod system (`iMod.h`) |
-| `iGuiTabs.cpp` | the list of tabs the overlay and the launcher both show (`iGui::TabAt`; a new tab, such as co-op's or a Cheats tab, is a row there), and the About tab |
+| `iGuiCheats.cpp` | the Cheats tab, on `iCheats.h` |
+| `iGuiTabs.cpp` | the list of tabs the overlay and the launcher both show (`iGui::TabAt`; a new tab, such as co-op's, is a row there), and the About tab |
 | `iGuiUtil.cpp` | the look, scaling, the system's folder and file dialogs, whole-file reads and writes through SDL, the asset-folder check and the PNG writer |
 | `iGuiFilePicker.h/.cpp` | the built-in file browser, for where the system has no file dialog (the Switch, the 3DS) |
 | `iGuiSelfTest.cpp` | `TSSM_GUI_SELFTEST` |
@@ -572,9 +592,10 @@ All of these are environment variables.
 | Variable | What it does |
 |---|---|
 | `TSSM_GUI_OPEN=1` | open the overlay at the first frame |
-| `TSSM_GUI_TAB=<settings\|controls\|saves\|mods\|about\|all>` | bring that tab to the front. `all` steps through every tab, one capture each; a list (`saves,mods`) steps through those. With `TSSM_GUI_CAPTURE`, the launcher does the same with its tabs first, as `launcher_<tab>`. |
+| `TSSM_GUI_TAB=<settings\|controls\|saves\|mods\|cheats\|about\|all>` | bring that tab to the front. `all` steps through every tab, one capture each; a list (`saves,mods`) steps through those. With `TSSM_GUI_CAPTURE`, the launcher does the same with its tabs first, as `launcher_<tab>`. |
 | `TSSM_GUI_OPEN_AT=<n>` | open the overlay at the n-th present instead of at startup, so a capture shows it over the game (with `TSSM_INPUT` to get there) |
 | `TSSM_GUI_IMPORT=<file>` | open the Saves tab's import dialog for that file the first time the tab is drawn, as if it had been picked |
+| `TSSM_GUI_SAVES_SCROLL=<0..1>` | keep the Saves tab scrolled that far down (1 is the bottom), so a capture shows the sections below the first screenful |
 | `TSSM_GUI_CAPTURE=<file.png>` | write the window's back buffer, with the game's picture and the overlay exactly as presented, after the overlay has been open for N frames. A `%s` in the name becomes the tab's name, or `launcher` (`launcher_<tab>` with `TSSM_GUI_TAB`). Also opens the overlay. |
 | `TSSM_GUI_CAPTURE_FRAMES=<n>` | N for the capture above. Default 30. |
 | `TSSM_GUI_EXIT=1` | exit with code 0 once the captures are written |

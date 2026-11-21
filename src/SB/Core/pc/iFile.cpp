@@ -4,6 +4,7 @@
 #include "iFile.h"
 #include "iAudioSDLTest.h"
 #include "iHangDump.h"
+#include "iLoadFrame.h"
 #include "iConfig.h"
 #include "iD0Stats.h"
 #include "iHost.h"
@@ -1364,6 +1365,9 @@ U32 iFileRead(tag_xFile* file, void* buf, U32 size)
     // TSSM_TEST_HANG_DUMP: a load is progress too (iHangDump.h).
     iHangDumpBeat();
 
+    // And a chance for the loading screen's next frame (iLoadFrame.h).
+    iLoadFramePump(iLOADPUMP_READ);
+
     tag_iFile* ps = &file->ps;
     FILE* fp = (FILE*)ps->handle;
 
@@ -1485,6 +1489,10 @@ void iFileAsyncService()
     {
         iFileServiceEntry(&file_queue[i]);
     }
+
+    // xSTLoadStep ends here: one package layer is in, and the loading screen
+    // can have a frame (iLoadFrame.h).
+    iLoadFramePump(iLOADPUMP_STEP);
 }
 
 IFILE_READSECTOR_STATUS iFileReadAsyncStatus(S32 key, S32* amtToFar)

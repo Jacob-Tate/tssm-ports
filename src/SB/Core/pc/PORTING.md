@@ -71,6 +71,47 @@ resolved branch must have:
 - A build with no SDL input uses `iPadHostNull.cpp`, whose mouse stand-ins are
   complete.
 
+### Bringing the matrix particle tanks into a console branch
+
+`rw/ptank.cpp` draws the tanks that carry a matrix per particle
+(`instancePTankMatrices`: the Goofy Goober Token's coloured patches, sparks,
+fire, explosions, decals, splash rings). The file is the same on every
+platform and already in every source list, so a merge brings it with nothing
+to resolve and no setting. What each branch should check afterwards:
+
+- The patches show: collect a token (`tools/regress.py`'s `bb03_token` run
+  does it on the PC with `TSSM_TEST_PLACE`).
+- Frame cost where many such tanks are alive at once (a fight with sparks and
+  explosions), on the 3DS above all: each live particle is four vertices
+  written on the CPU every frame, and each tank is one more draw that used to
+  be empty.
+- With `[extras] glow = xbox` a tank that brightens also writes the glow
+  mask, so the bloom round these particles grows; the 3DS keeps the GameCube
+  look and is not affected.
+
+### Bringing the steady frame time into a console branch
+
+`zGameLoop` (`zGame.cpp`, under `PLATFORM_PC`) passes each frame's measured
+time through `iWindowGameFrameTime` (`iWindow.h`), which gives a frame that
+came on time the steady time of `iSteadyFrame.h` (`docs/PACING.md`). The
+arithmetic is header-only, so no source list needs a new file. What the
+resolved branch must have:
+
+- A definition of `iWindowGameFrameTime` in its window file. Android and the
+  Switch build `iWindowSDL.cpp`, which has it; the 3DS's `iWindow3DS.cpp` needs
+  one, or the link fails: `iSteadyFrameTime` with the period its pacer slept
+  to (0 when it did not pace the frame), or the measured time unchanged.
+- On the 3DS citro3d paces the frame (`C3D_FrameBegin`) and
+  `iWindowPaceFrame` returns before its own pacer, so by that rule it passes 0
+  and the game keeps the measured time. That is right while the 3DS runs under
+  30 fps. Do not pass 1/30 s for it: the 3DS screen refreshes at about
+  59.83 Hz, so two refreshes are 33.4 ms. Should citro3d ever hold a steady
+  rate, the period is that many refreshes of the screen's own rate.
+- Where the pacer holds the 30 fps hold, a late frame passes 0, as
+  `PaceSleep` does, since the hold never makes it up.
+- `tssm_steadyframetest` (`tests/steadyframetest.cpp`) needs nothing but the
+  header.
+
 ## Origins
 
 ### treedome, renamed only (checked by `pcimport.py --check`)
@@ -97,6 +138,7 @@ resolved branch must have:
 | `rw/renderstate.cpp` | `RwRenderStateGet` answers the alpha-test function and reference (read back from librw) |
 | `rw/engine.cpp` | `RwGameCubeSetAlphaCompare` collapses a test written the same on both sides, which is how TSSM's alpha discard writes it |
 | `rw/texture.cpp` | mods: `gRwTextureReplaceHook`, called for each texture `RwTexDictionaryStreamRead` reads (after the raster conversion), which `iModTexture.cpp` sets so a mod's image can replace the raster. Marked `TSSM-ADAPTED`. OpenGL: a converted texture keeps the alpha kind (opaque, keyed, graded) of its top level, which librw's per-level `rasterFromImage` otherwise takes from the last level (`docs/RENDERING.md`) |
+| `rw/atomic.cpp`, `rw/clump.cpp`, `rw/world.cpp` | `RpAtomicStreamRead`, `RpClumpStreamRead` and `RpWorldStreamRead` end with `iLoadFramePump`, a chance for the loading screen's next frame (`iLoadFrame.h`); `rw/texture.cpp`'s `RwTexDictionaryStreamRead` does too |
 | `iConfig.cpp` | the first line of a written config.ini names TSSM |
 | `iConfigTable.cpp` | the settings of BfBB features not imported are removed (toon, hipoly, world lighting, day/night, fonts, cheats, fixes, Xbox screen-pass switches, menus, soundtrack, load-screen and shadow tuning, button glyphs, `video.profile`, `video.draw_distance`, `video.per_pixel_lighting`); help texts name TSSM's folders; TSSM's `[input]` settings: `preset`, `layout`, `button_icons`, `keyboard`, `stick_curve`, `deadzone`, `trigger_threshold`, `camera_sensitivity`, `camera_invert_x/y`, `mouse_look`, `mouse_sensitivity_x/y`, `mouse_invert_x/y`, `mouse_raw`, `mouse_smoothing`, `mouse_release_key`, `mouse_menus`, `rumble`, `touch_controls`, `test`; `[assets] mods` and `mods_folder` (the mods folder) are added |
 | `iPadBind.h`, `iPadBind.cpp`, `iPadBindTable.cpp` | TSSM's rows, named after the Xbox controller (`a b x y lt rt white black back start`, the d-pad, and the keyboard's `move_*`/`camera_*`/`walk` rows), each setting the bits the Xbox release sets; presets `xbox`, `playstation`, `switch`, `gamecube` (Z chords as on the console); a quiet parser and a formatter for a settings screen. docs/CONTROLS.md |
@@ -112,7 +154,7 @@ resolved branch must have:
 | `iConfig.cpp` | also: the `[pad]`/`[keyboard]` comments and row descriptions are TSSM's (`iPadBindDescribe`) |
 | `iFile.h`, `iFile.cpp` | TSSM's interface: `const` names in `iFileLoad`/`iFileSetPath`, `iFileFind`'s flags argument, `iFileExists`, `iFileGetSectorSize`, `xFileDriveType`; backslashes become slashes in `iFileFullPath` (gc does it); the PLAT check accepts TSSM's Xbox id `BX` and the GameCube's `GC` (each package on its own, `iFilePackagePlatform`, `iFilePackagePlatformOf`); a Dolphin extraction's `files/` folder is used when the asset folder is the one above it (`iFileAssetRoot`); the asset-override hook (BfBB's code menus) is gone. Mods (`iMod.h`): `iFileInit` starts the mod manager; a loose file from the mods folder is asked for after the single mod folder (same platform check; a file with a package's name that is not one, or a package whose table of contents does not hold together, `iModPkgCheck`, is refused); a package a mod replaces assets in is opened as a view (`tag_iFile::view`, read through `iModPkgRead`); `iFileLoad` applies INI overlays to the `.ini` files it loads |
 | `iTime.h`, `iTime.cpp` | TSSM's `iTimeGetGame`, `iFuncProfileFuncs`; the tick rate is also `OS_TIMER_CLOCK`, which `xFont.cpp` and `zGame.cpp` use inline |
-| `iPad.cpp` | TSSM's interface; TSSM's pulse-train rumble (`iPadStartRumble(pad, intensity)`, `iPadUpdateRumble`) on `iPadHostRumble`; the B+X+Start in-hand reset is not carried; `input.stick_curve` (the Xbox release's curve by default, treedome's GameCube octagon, or linear), camera sensitivity and inversion, the mouse's camera turn; calls the input test and the prompts once a frame for port 0 |
+| `iPad.cpp` | TSSM's interface; TSSM's pulse-train rumble (`iPadStartRumble(pad, intensity)`, `iPadUpdateRumble`) on `iPadHostRumble`; the B+X+Start in-hand reset is not carried; `input.stick_curve` (the Xbox release's curve by default, treedome's GameCube octagon, or linear), camera sensitivity and inversion, the mouse's camera turn; Back as the GameCube's Z alone when the menus are the GameCube release's (their upgrade window opens on PadPressE; `docs/CONTROLS.md`); calls the input test and the prompts once a frame for port 0 |
 | `iDraw.cpp` | TSSM's `iDrawSetFBMSK(abgr, setMask, plusFrame2)` with `lastSetFBMSK`; `iDrawSetDisplayOffset` (PAL VI origin) a no-op; `iXFBreset`/`iXFBalloc` lend a heap block instead of the console's spare frame buffer |
 | `iFMV.cpp` | TSSM's `iFMVPlay` signature (subtitle asset id, not drawn yet); the Xbox movies are `FMV/*.bik`, decoded by FFmpeg (treedome's `.xmv` rename is gone); a movie with no file reports finished (5 table entries have none on the Xbox disc); the GameCube's 512-wide movies are placed as the console places them in its 512x480 frame (`fitRect`); `game.intro_movies = off` skips the four boot logos; a mod's movie (`iModFindMovie`) is tried first; the game's sounds are paused while a movie plays (`xFMVPauseSound`, and the ostrich set to `PlayingMovie`), as gc/iFMV.cpp does: the end-of-level story movies are started by a level script with the level's sounds still live, and the mixer runs on its own thread; `iFMVOpen` and the rest are stubs (below) |
 | `isavegame.h`, `isavegame.cpp` | TSSM's interface (`iSGCheckForCorruptFiles` returns `U8`, `iSGIsGameCorrupt` added); save files are `SpongeBobMovie01..03` as on the console, and hold the console's payload byte for byte: the game's buffer is converted to the console's byte order on the way out and back on the way in (`iSavePayloadConvert`), written through the save store (atomic, with backups); the save folder is `iSaveStoreRoot`'s; `iSGIsGameCorrupt` checks the payload header; at startup every slot is checked and one a crash left unusable is put back from the whole temporary or the newest good backup (`iSaveStoreRecover`), and `iSGCheckForCorruptFiles` reports nothing (the boot screen it led to was black); `iSGOnlyTargetWithGames` lets the load screen skip the card choice when one folder holds saves, and `iSGSelectGameDir` calls the no-saves hook (`iSGSetNoGamesHook`) for an empty folder (docs/SAVES.md) |
@@ -121,6 +163,7 @@ resolved branch must have:
 | `iFMVAudioSDL.cpp` | the movie device closes and opens again with the game's (`iAudioSDL.h`); while it is closed the movie keeps time on a stand-in queue drained at its rate; a queue that stops moving for a second asks for a restart. The device is closed before its stream is destroyed: destroying a stream that is still bound makes SDL unbind it in `SDL_UnbindAudioStreams`, which unlocks the wrong device if SDL moves the device to a new default meanwhile, and the game froze in a movie that way. Marked `TSSM-ADAPTED` |
 | `iSndData.h`, `iSndData.cpp` | treedome's sample cache (lazy, LRU, pinned while playing), keyed by asset id and package; the bytes come from a package range iSnd.cpp names (from the package's own table of contents), decoded by `iSndXbox.cpp`, or by `iSndGC.cpp` for a GameCube table's sound; no soundtrack override; `TSSM_SND_DUMP` |
 | `tssm_main.cpp` | `bfbb_main.cpp` renamed: crash handler, watchdog, unbuffered stdout, banner; starts the log's tee before anything prints (`iLog.h`), and the crash and abort reports are appended to `crash.log` as well (formatted on the stack) before the log is drained |
+| `iBuildInfo.h`, `tools/build_info.cmake` | what the build is: its time, version (`TSSM_PC_VERSION`) and git commit (`-dirty` when tracked files differ), written into the build directory's `iBuildInfo.cpp` on every build by a CMake target, so the banner (the first line of `last_run.log`), `crash.log`'s report lines and the About tab name the build they are in, not the day one file last recompiled |
 | `iLog.h`, `iLog.cpp` | the game's own log: stdout and stderr each go through a pipe whose thread writes to where they went before and to `last_run.log` (the run before kept as `last_run.prev.log`) in `%APPDATA%\tssm`, or beside `TSSM_SAVE_DIR`'s folder, or at `TSSM_LOG` (`off` for none); held in memory until `iSystemInit` knows the run is the game and not a save tool; one process per log file; `crash.log` beside it |
 
 ### TSSM `src/SB/Core/gc`, verbatim (`VERBATIM.txt`)
@@ -150,7 +193,7 @@ they lean on `iWad.h` for their includes.
 | `iTRC.h`, `iTRC.cpp` | TSSM's 40-function interface minus ROMFont and the OS thread bookkeeping; no disc, no error screen (treedome's answer) |
 | `iException.h`, `iException.cpp` | the out-of-memory crash reports on the console and in a message box, then exits |
 | `iARAMTmp.cpp` | retail's algorithm with ARAM as a malloc'd buffer and the ARQ DMA as `memcpy` |
-| `iAsync.cpp` | see stubs |
+| `iAsync.cpp` | the loading screen: `zAsync::RenderThread`'s loop drawn a frame at a time on the game thread, between pieces of the load (`iLoadFrame.h`); see "The loading screen" below |
 | `iAnimSKB.h` | `iAnimSKBHeader::ExtractedData` is an `iPtr32` (`compat/types.h`): 4 bytes on every host, because cutscene time chunks carry SKB1 animations that are evaluated in the stream buffer and cannot be widened. A pointer above 4 GB stored there (zEntPlayer's ledge table, a static) is kept through iPtr32's handle table |
 
 ### compat (new)
@@ -194,12 +237,15 @@ records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
 | `stubs/dolphin_*.cpp`, `stubs/bink.cpp`, `stubs/fmod.cpp` | the definitions of the SDK and middleware calls shared code still makes, one file per module; `stubs/STUBS.md` (generated by `tools/pcstubs.py`) says which are stubs |
 | `rw/tssm.cpp` | the RenderWare calls TSSM makes and BfBB does not (20 functions), kept apart so `pcimport.py --check` still compares the shim with treedome |
 | `iCapture.h`, `iCapture.cpp` | debug capture for unattended runs: `TSSM_CAPTURE_FRAMES=1,5,100-400/50` writes those presented frames as PNGs into `TSSM_CAPTURE_DIR` (through `iFrameGrabWrite`, before the flip), `TSSM_EXIT_AFTER=n` exits with code 0 after n frames, `TSSM_INPUT=400:start,1000:a/10` holds port 0's buttons from a script (through `iPadHostScript`); a frame hook on `iSnapshotCapture`, installed only when asked for |
-| `iTestEvents.h`, `iTestEvents.cpp` | debug events on that hook, compiled with the game units because they call game code: `TSSM_TEST_WARP=1600:shockwave[:radius[:seconds[:intensity]]]` emits a screen warp at the player; `TSSM_TEST_PLACE=2700:-28.6:-8:41.2:90` puts the player down at a spot, facing a yaw in degrees; `TSSM_TEST_HOLD=301-600` puts the player (and camera) back at the latest place every frame of that range, so frames differ only by what animates; `TSSM_TEST_POWERUP=1250:2` sets every move's power-up at that frame; `TSSM_TEST_CAMLOG=1` logs the camera's position every frame and whether a level fly-through is playing (`tools/regress.py`'s fly-through check); `TSSM_TEST_CARLOG=1500-1700` logs the Patty Wagon every frame of that range (the frame's time, its step share, position, velocity); `TSSM_TEST_SPOTLOG=10` logs the scene's spotlights every 10 frames (which are on, which drawn, whether the camera is in a beam; `tools/regress.py`'s TT01 disco check); `TSSM_TEST_CROWDLOG=60` logs the crowd objects and how many moved on in their cycle (`tools/regress.py`'s BB01 crowd check); `TSSM_TEST_CRASH=<frame>` writes through a null pointer at that frame, for the crash handler and the logs |
+| `iTestEvents.h`, `iTestEvents.cpp` | debug events on that hook, compiled with the game units because they call game code: `TSSM_TEST_WARP=1600:shockwave[:radius[:seconds[:intensity]]]` emits a screen warp at the player; `TSSM_TEST_PLACE=2700:-28.6:-8:41.2:90` puts the player down at a spot, facing a yaw in degrees; `TSSM_TEST_HOLD=301-600` puts the player (and camera) back at the latest place every frame of that range, so frames differ only by what animates; `TSSM_TEST_POWERUP=1250:2` sets every move's power-up at that frame; `TSSM_TEST_CAMLOG=1` logs the camera's position every frame and whether a level fly-through is playing (`tools/regress.py`'s fly-through check); `TSSM_TEST_CARLOG=1500-1700` logs the Patty Wagon every frame of that range (the frame's time, its step share, position, velocity); `TSSM_TEST_SPOTLOG=10` logs the scene's spotlights every 10 frames (which are on, which drawn, whether the camera is in a beam; `tools/regress.py`'s TT01 disco check); `TSSM_TEST_CROWDLOG=60` logs the crowd objects and how many moved on in their cycle (`tools/regress.py`'s BB01 crowd check); `TSSM_TEST_KEYS=300:space/4,700:tab` plays a keyboard of the test's own through the [keyboard] bindings (`iPadKeyboardSetTestSource`; `tools/regress.py`'s BB03 upgrade-window check); `TSSM_TEST_CRASH=<frame>` writes through a null pointer at that frame, for the crash handler and the logs |
 | `iTestSend.h`, `iTestSend.cpp` | `TSSM_TEST_SEND=1200:AUTOSAVE_DONE_SCRIPT[:event]`: at that frame, the game's own event (eEventRun when not given) to the scene object with that name, as a link sends it; in SC02, DE02 or GG02 that starts the level's end (its story movie, then the next level); compiled with the game units |
 | `iHangDump.h`, `iHangDump.cpp` | `TSSM_TEST_HANG_DUMP=<seconds>`: when the game thread has made no progress (a window pump or a file read) for that long, every thread's stack, named and symbolised (dbghelp `StackWalk64`, `tssm_main.cpp`), goes to the log and the process ends with code 3; while it is set an SDL assertion is logged the same way and ignored, as a release build of SDL does, instead of SDL's message box. Windows only; the heartbeat is in `tssm_rw` |
+| `iLoadFrame.h`, `iLoadFrame.cpp` | the seam between a level load and the loading screen's frames: `iLoadFramePump` for the file layer and the RenderWare readers to call as a piece of the load ends, answered by `iAsync.cpp` through a pointer, and the flag that tells the present a frame is a loading frame; in `tssm_rw` |
 | `iDecalFilter.h` | `iDecalFilterBegin`/`End` (in `rw/renderstate.cpp`): a projected decal draws from its top texture level with linear filtering, as on the GameCube, whose art has only that level; called under `PLATFORM_PC` from `xShadow.cpp` and `zEntPlayer.cpp` (`docs/RENDERING.md`, "Decals: the top level only") |
+| `iModelOrder.h`, `rw/atomic_order.cpp` | the order RenderWare's atomics were created in, a librw plugin number on every atomic (`iModelOrderPluginAttach` in `RWAttachPlugins`): `xModelBucket.cpp`'s opaque sort compares it under `PLATFORM_PC` where the console compares the atomics' addresses, which its top-down RenderWare heap hands out latest first (`docs/RENDERING.md`, "Opaque models: the console's order"); `tests/ordertest.cpp` (`tssm_ordertest`) |
 | `iHDRGlow.h`, `rw/hdrglow.cpp` | TSSM's HDR glow (xFXHighDynamicRange's GX passes) with camera textures and librw's 2D pipeline; `video.hdr_glow`; `TSSM_HDR_VIEW=mask\|glow` (`docs/RENDERING.md`) |
 | `iXboxGlow.h`, `rw/xboxglow.cpp` | the Xbox release's glow chain (DEFAULT.XBE 0x1b0510) on the same helpers, its four taps through the BfBB glow's `glow_blur_PS` (four draws on D3D9's fixed path); the scene's and the menus' chains; `[extras] glow = xbox` (`docs/EXTRAS.md`) |
+| `iXboxDistort.h`, `iXboxDistort.cpp`, `rw/xboxdistort.cpp` | the Xbox release's screen distortion while the Sonic Wave Guitar's wave is steered (DEFAULT.XBE 0x1afcb0; `[extras] guitar_distortion`, `docs/EXTRAS.md`): the amount from `cruise_bubble`'s `distort_screen` and `deinit` under `PLATFORM_PC` (empty on the GameCube), the swirl map `BXCruiseBubbleDistort` of the Xbox's `plat.HIP`, and the pass `zSceneRenderPostFX` draws under `PLATFORM_PC` after the lens flare, with the guitar's HUD after it as on the Xbox; one copy of the frame (`iScreenPassCapture`) drawn back through a pixel shader of its own (`rw/shaders/xboxdistort_PS.hlsl`, `rw/shadersgl/xboxdistort.frag`) on Direct3D 9's shader path, Direct3D 11 and OpenGL 3 (Android's and the Switch's OpenGL get `gamecube` from `iExtrasResolve` until the pass has been run there, Vulkan until it has a shader); `iXboxDistort.cpp` is a game unit, the pass is in `tssm_rw`; `TSSM_TEST_DISTORT` |
 | `iLightVolume.h`, `rw/lightvolume.cpp` | the Xbox release's spotlight light volumes (0x17ece0): the closed cone drawn three times through the stencil buffer, B401's plain adding; `xLightVolume.cpp`'s bodies under `PLATFORM_PC`, `[extras] spotlights = xbox`; the Xbox's lamp flares (0x60110) are `zSpotlight.cpp`'s, under `PLATFORM_PC` |
 | `iFloatByte.h` | `iFloatToByte`: a float stored into a byte as the console does it (fctiwz saturates, stb keeps the low byte), for game code under `PLATFORM_PC` whose value can leave the S32 range (the glare in `xScrFx.cpp`, the spotlight flare) |
 | `iScreenWarp.h`, `rw/screenwarp.cpp` | xScreenWarp's draw: the frame copied and drawn back through the warp grid; `video.screen_warp` |
@@ -209,20 +255,28 @@ records the TSSM headers' hashes, so a change to `include/rwsdk` is reported.
 | `iXboxWaterDraw.h`, `rw/xboxwater.cpp` | the renderer's half of the water's surface (in `tssm_rw`): the shaders, the two grids' vertex and index buffers, and the per-tile draw, one arm for Direct3D 9's shader path and Direct3D 11 (`rw::d3d`) and one for OpenGL 3 and OpenGL ES 3 (`rw::gl3`); why the water cannot run on a renderer (Direct3D 9's fixed path, Vulkan); the current level's water status, which the Xbox extras' water row and the level's `tssm: extras:` line give when the water fell back (`iExtrasStatus`) |
 | `rw/shaders/water_VS.hlsl`, `water_PS.hlsl`, `rw/shadersgl/water.vert`, `water.frag` | the surface's shaders, rewritten by hand from the decoded Xbox shaders: vs/ps 2.0 blobs for Direct3D 9 (`shaders/water_*.h`) and 4.0 for Direct3D 11 (`shaders11/`), built by `shaders/make_shaders.cmd`; the GL sources as headers (`water_*_gl.inc`) by `shadersgl/gen.py` |
 | `iXboxWaterGrid.h`, `iXboxWaterGrid.cpp` | its arithmetic, with no game headers: the tile grid over a mesh's bounds, SC02's vertex mask, the patch strips (574 and 2174 indices), the bump clock, the bump frames as RGBA8 and the targets' size for a render size |
+| `iSteadyFrame.h` | the game's steady frame time (`iWindowGameFrameTime`, `docs/PACING.md`), header-only with no game or window headers; `tests/steadyframetest.cpp` (`tssm_steadyframetest`) |
 | `tests/watertest.cpp` | `tssm_watertest`: that arithmetic on made-up meshes (CMake target, `ctest`) |
 | `iWaterBody.h`, `iWaterBody.cpp` | the GameCube look for the Xbox files' water bodies (DYNA `effect:water_body`, B301 and SC02), for `[extras] water = gamecube` and wherever the Xbox water cannot run: `iWaterBodyScenePrepare` (from `zSceneInit` right after `xWaterScenePrepare`, when `!iXboxWaterWillRun()`, before the pipe tables are read and the objects are made) hides their reflection and refraction models in the assets and gives SC02's ponds the GameCube water's pipe settings and surface; `iWaterBodySceneBegin` (from the event handler of each `zWaterBody` the Xbox water does not take, at every SceneBegin: all of them when `!iXboxWaterActive()`) does what the GameCube files do there; both check the assets they touch, as the files may be modded; compiled with the game units (`docs/RENDERING.md`, "Water") |
 | `iDeviceReset.h`, `rw/devicereset.cpp` | Direct3D 9 device resets kept to the moments they can succeed, by taking over librw's `beginUpdate`, `showRaster` and the D3D9 `rasterLock` (librw itself is unchanged): no reset to an empty or minimised client area or of a device that cannot be reset yet, the overlay's default-pool objects released first, librw's cache of the bound index buffer, vertex streams and declaration emptied at every camera update and present (a reset otherwise binds a destroyed geometry's freed buffer again), the camera-texture reference librw's `rasterLock` keeps given back, Im2D, Im3D, `RwRasterRenderFast`, the present and the screen passes held while the device is lost, and a device lost again right after a reset reset again later; `TSSM_TEST_DEVICE_LOST=present[:presents]` or `=reset[:presents]` simulates a loss (`docs/RENDERING.md`) |
 | `iPadSettings.h`, `iPadSettings.cpp` | config.ini's `[input]` settings read once into plain values for the per-frame input code |
 | `iExtras.h`, `iExtras.cpp` | the Xbox release's features beside the GameCube release's (`[extras]`, `docs/EXTRAS.md`): decided per level in `zSceneInit` under `PLATFORM_PC` (`iExtrasSceneEnter` after the level's package is read, `iExtrasSceneReady` at the end, one log line), from the setting, the renderer and whose files the level's HIP is (its `PLAT` chunk, `iFilePackagePlatformOf`); the water's decision, which `xWaterScenePrepare` reads (`iXboxWater.h`), and its own fallback in the row's reason; the GameCube's 30 fps hold (`RwGameCubeSetMinRetraceCount` in `rw/engine.cpp` gives the count to the pacer, `iWindowSetFrameLock`); the crowds held still (`zEntSimpleObj.cpp`); the spotlights the GameCube keeps off (`zSpotlight.cpp`); the Xbox glow's per-scene strength; a level's own fallback after the decision (`iExtrasFallBack`) and its note in the level's line; the tables `iExtrasGC.h` works from (`iExtrasCrowdSkinned`, `iExtrasSpotlightLinks`); `tests/extrastest.cpp` (`tssm_extrastest`) |
+| `iCheats.h`, `iCheats.cpp`, `iCheatsGame.cpp`, `gui/iGuiCheats.cpp` | the Cheats tab (`docs/CHEATS.md`): the original's nine button codes and its Extras screen's costumes and functions, asked for by the tab and done by the game's own code on the next frame of `zGameLoop` (`iCheatsGameFrame`, under `PLATFORM_PC` after `zGameExtras_SceneUpdate`; `zGameExtras_PCEnterCheat` and `zMenuSB_PCToggleExtra`, under `PLATFORM_PC` at the end of `zGameExtras.cpp` and `zMenuSB.cpp`, are what a matched code and the Extras screen's select do); the port's own (`[cheats] no_damage, fly, unlock_extras`, the developers' `TakeDamage` and `CheatFlyToggle` held while on and put back when off); the co-op state a guest follows (`iCheatsShared`); `iCheats.cpp` has no game code, `iCheatsGame.cpp` is a game unit; `TSSM_TEST_CHEAT`, `TSSM_TEST_CHEATLOG`; `tests/cheattest.cpp` (`tssm_cheattest`), `tools/cheat_runs.py` |
 | `iExtrasGC.h`, `iExtrasGC.cpp` | the Xbox extras in a level whose package is GameCube files, as far as the files allow (`docs/EXTRAS.md`, "With GameCube files"): from `zSceneInit` under `PLATFORM_PC`, `iExtrasGCScenePrepare` (before the objects are made) gives BB02's crowd objects the skinned models and animation lists the files carry, and checks the links below against the disc's; `iExtrasGCSceneObjects` (once the objects exist, before the first reset and SceneBegin) gives BB02's `SPOTLIGHT_DISP_GC_ONLY` and B401's intro and restart objects the Xbox files' links (a dispatcher a copy of its asset, which it re-reads at every reset); a file that is not the disc's keeps the GameCube version, said once (`iExtrasFallBack`); compiled with the game units |
 | `iPadPrompts.h`, `iPadPrompts.cpp` | keeps the game's button prompts true: the six move prompts follow `input.layout` (TEXT rewritten in place), "Pull"/"Press" follows the device, and the `pad_button*` rasters are swapped for glyphs drawn for the device and binding in use (keyboard keycaps, PlayStation shapes, Switch and GameCube letters; the disc's own pictures, reshuffled, on its own pad: the Xbox font's on an Xbox pad, the GameCube font's on a GameCube pad, `kGameCubeInput`); `input.button_icons`; `iPadPromptsDiscRaster` gives a pad_button texture's other user its disc picture (TT01's spotlight flares are pad_button1, `zSpotlight.cpp`) |
 | `iPadTest.h`, `iPadTest.cpp` | the input test: `TSSM_INPUT_TEST=1` or `=overlay` (`input.test`) logs what the game reads from port 0 whenever it changes, and draws a controller (GL3/Vulkan) |
 | `iPadControls.h`, `iPadControls.cpp` | the binding API for a settings screen (rows, get/set/add/remove/reset, capture, labels, conflicts, `[input]` settings, live state, mouse capture) |
-| `tests/input_test.cpp`, `tests/input_test_xpad.cpp` | `tssm_input_test`: SDL virtual controllers (Xbox, DualSense, Switch Pro, GameCube adapter) and a stand-in keyboard and mouse through the game's own `xPadUpdate`, and the launcher's turn before the game with a real mouse's events, Escape and the pointer; 179 checks |
+| `tests/input_test.cpp`, `tests/input_test_xpad.cpp` | `tssm_input_test`: SDL virtual controllers (Xbox, DualSense, Switch Pro, GameCube adapter) and a stand-in keyboard and mouse through the game's own `xPadUpdate`, and the launcher's turn before the game with a real mouse's events, Escape and the pointer; 228 checks |
 | `iLowHeap.h`, `iLowHeap.cpp` | RenderWare's heap on 64-bit hosts: a TLSF heap over a block reserved below 4 GB with `iHostReserveLow` (256 MB, `TSSM_RWHEAP_MB`), passed to `RwEngineInit` by `iSystem.cpp`, so RenderWare and librw pointers the game keeps in 32 bits survive as on the console (where RenderWare allocates from `iMemMgr`). 32-bit builds keep the C library's heap; `TSSM_RWHEAP=1` uses this one anyway |
 | `iSaveFormat.h`, `iSaveFormat.cpp` | the save formats as data (docs/SAVES.md): the payload's walk and checks, its CRC, canonical <-> host byte order, `.gci`/`.gcs` parse and build, raw card images, the card clock, the port's own banner and icon |
 | `iSaveStore.h`, `iSaveStore.cpp` | the save folder (root, slots, atomic writes flushed to the disk, backups, the one-process claim on it, the repair at startup of what a crash left: `iSaveStoreRecover`), import from GameCube files and cards (each save's level and progress reported, even on a look-only pass), export to `.gci`, zip and a Dolphin GCI folder; the interface the in-game Saves tab calls. `iSaveStoreAutoSaveSlot` (the slot the game autosaves to) is defined in `isavegame.cpp`, beside the game's save code |
-| `iSaveZip.h`, `iSaveZip.cpp` | stored-entry zips, for every save in one file |
+| `iSaveZip.h`, `iSaveZip.cpp` | zips, for every save in one file: written stored, read stored or deflated (a small inflate, so a zip any tool made of a save folder imports) |
+| `iSaveLE.h`, `iSaveLE.cpp` | the payload as the PlayStation 2 and Xbox store it (little-endian, and each multi-byte value of the bit stream least significant byte first): where those values are in `PLYR`, `CNTR` and a level's block, a level's saved objects counted out of its package (`iSaveHipScan`), and the conversion both ways, byte for byte (docs/SAVES.md section 6). No file system |
+| `iSaveXbox.h`, `iSaveXbox.cpp`, `iSaveSHA1.h`, `iSaveSHA1.cpp` | the Xbox's save folder as data: the folder name from the save name, `SaveMeta.xbx`/`TitleMeta.xbx`, the player's XBE (title, the two picture sections, the certificate field kept in memory only), `keys.bin`, the title key and the HMAC-SHA1 signature, emulator or real (docs/SAVES.md section 7); SHA-1 and HMAC in-repo. No key is in the code and none is printed |
+| `iSaveStoreXbox.cpp` | the store's side of both: the level packages found under the asset folder (any case, a mod folder's first) and scanned once, `iSaveStoreToLE`/`FromLE`, Xbox import from a folder gathered into a bundle (`iSaveStoreReadFolder`), Xbox export with either signature into a folder, a UDATA or an emulator's data folder; `tests/xsave_selftest.cpp` (`xsave_selftest`). Folder import and export walk plain paths (`iHostDirOpen`, joined names): a phone's `content://` folder pick is not one, and needs its own reader when that port takes this up |
+| `iSavePS2.h`, `iSavePS2.cpp` | the PlayStation 2's save folder as data: the names, the card's clock, `icon.sys`, the filler, an icon made from the port's own art and the game's found in a package; `.psu` and a PlayStation 3's `.psv` read and written (the `.psv` signed with the stand-in or with the key values of the player's own PS3 key file), `.max` (LZARI) read; a memory card image formatted, listed, read and written file by file, with the per-page error-correcting code, and so a PS3's `.VM2` card too (docs/SAVES.md sections 8 and 9). No file system, and no key in the code |
+| `iSaveAES.h`, `iSaveAES.cpp` | AES-128 (FIPS 197), one block at a time, its tables made from their definition, for the `.psv` signature; tested against the standards' answers in `xsave_selftest` |
+| `iSaveStorePS2.cpp` | the store's side of it: what a file holds (`iSaveStorePS2Folders`), which icon an export writes (`iSaveStorePS2Icon`), export of a slot or a folder's three into a `.psu`, a `.psv`, a card file (copied to `.bak` first; a new `.vm2` is made without spare bytes) or PCSX2's folder-type card with its entry and index files; the PS3 key file (`iSaveStorePsvKeys`, `iSaveStorePsvKeysUsable`) and which signature a `.psv` carries (`iSaveStorePsvSignature`); import is `iSaveStoreImport`; tested in `xsave_selftest` and `tests/psv_sign_check.py` |
 | `iSaveText.h`, `iSaveText.cpp`, `iSaveTextTable.cpp` | the load screen's "no saves" message (`LD NOGAMES TXT`, the Xbox disc's "No game saves present on the Xbox Hard Disk") rewritten in place to name the empty memory card slot, and the one holding the saves; and the save screens' warning as a setting (`[game] save_text`): every "Please don't turn off your Xbox console" / "Do not touch the Memory Card or the POWER Button" line of both discs, exactly, rewritten as it loads by a readXForm on the TEXT type (installed from `iAssetTypesInstall`, as treedome's text patch is) into a copy with only the warning changed; `tests/savetexttest.cpp` (`tssm_savetexttest`) |
 | `iSaveCLI.h`, `iSaveCLI.cpp` | `tssm --saves`, `--import-save`, `--export-save`, `--check-save`, `--restore-save`, `--delete-save`, run from `iSystemInit` |
 | `tests/save_selftest*.cpp`, `tests/save_selftest_prefix.h` | the `save_selftest` program: saves and loads through the game's own `xsavegame`/`xserializer`, round-trips `.gci`, card and zip (CMake target, `ctest`) |
@@ -300,6 +354,21 @@ Each says at its site what it does not do.
   the share is exactly 1 and the car is the original, bit for bit.
   `docs/EXTRAS.md` has the measurements.
 
+- **A frame that came on time runs on a steady frame time** (a port fix;
+  `zGame.cpp` under `PLATFORM_PC`, `iWindowGameFrameTime`, `iSteadyFrame.h`).
+  The game's measured frame time wobbles by microseconds, and at exactly 60
+  or 120 fps an enemy's `time + dt >= duration` end check falls on a frame
+  boundary, so about one hurt or death end in five played its animation
+  once more. Every frame within a quarter of the period that paced it now
+  gets the on-time frames' average, a ten-thousandth long: the ends come on
+  the console's frame (each console frame is one NTSC retrace, a thousandth
+  longer than 1/60 s). What that gives too much or too little is kept as a
+  running total and paid back at three eighths of a period, and a scene over
+  budget moves the average to its own rate, so the game's clock runs 6 ms a
+  minute ahead of the wall clock and is otherwise within three eighths of a
+  frame of it under any load. Frames more than a quarter off and no cap keep
+  the measured time; pacing and pictures are unchanged (`docs/PACING.md`).
+
 - **The save screens name this platform by default** (`[game] save_text =
   auto`, `iSaveText.h`): "Please don't close the game." on a PC where the Xbox
   disc says "Please don't turn off your Xbox console". `xbox` and `gamecube`
@@ -315,6 +384,14 @@ Each says at its site what it does not do.
 - **The GameCube's 30 fps levels run at the cap by default**, as on the Xbox
   (`[extras] frame_lock = xbox`). `gamecube` holds them as the GameCube does
   (`docs/EXTRAS.md`).
+
+- **The screen swirls while the Sonic Wave Guitar's wave is steered** by
+  default, as on the Xbox (`[extras] guitar_distortion = xbox`, `iXboxDistort.h`),
+  and the guitar's HUD is then drawn after the screen effects, as the Xbox
+  draws it. `gamecube` draws no swirl and keeps the GameCube's order
+  (`docs/EXTRAS.md`). One difference from the Xbox is deliberate: the swirl is
+  drawn at the picture's own size, without the Xbox's trip through a 512x512
+  picture, which would blur a large picture.
 
 - **The SpongeBall keeps its full speed at low frame rates** (a deliberate,
   port-only difference; `zEntPlayer_BoulderVehicleSteps` in
@@ -358,9 +435,56 @@ Each says at its site what it does not do.
   same samples tssm_sndtest extracts) and the level's sounds; with
   `TSSM_SND=<n>` the two widths log the same tables and plays (only the menu's
   randomly chosen speech lines differ from run to run).
-- **iAsync: no second thread.** The async load screen is not shown; the load
-  itself runs as before. A real thread needs a lock where the console disables
-  interrupts, and RenderWare on a second thread.
+- **iAsync: no second thread, and the loading screen is drawn all the same.**
+  On the console a thread woken by the retrace stops the load and draws one
+  whole frame, sixty times a second. Here the game thread draws that frame
+  itself where a piece of the load ends: `iFileRead`, `iFileAsyncService`
+  (once per `xSTLoadStep`), the RenderWare readers (texture dictionary,
+  clump, atomic, world) and, under `PLATFORM_PC`, `zSceneInit` (after its
+  preparation, after each object type and after the enemies) call
+  `iLoadFramePump`, and `iAsync.cpp` draws one pass
+  of `zAsync::RenderThread`'s loop when a sixtieth of a second has gone by,
+  with the console's own rule for skipping a frame (a camera open, or scratch
+  memory in use). What differs:
+  - A frame can only start at a pump, so the screen stands still through a
+    piece of the load that reaches none. On the PC the longest is in the
+    scene's set-up after the last package is read: `zSceneInit`'s preparation
+    before the objects are made, about 29 ms of BB02's 105 ms in an x64 Debug
+    build, then the enemies (17 ms) and the simple objects (6 ms). The longest
+    wait between two frames is 28 to 47 ms over six levels (it was 64 to 101
+    ms before `zSceneInit` had its pumps). `TSSM_TEST_LOADLOG=2` lists the
+    stretches.
+  - A loading frame's flip does not wait for the display, is not paced, is not
+    counted as a frame (`TSSM_INPUT`, `TSSM_CAPTURE_FRAMES`, `TSSM_EXIT_AFTER`,
+    `TSSM_PERF` and `TSSM_GUI_OPEN_AT` keep their numbering), and the overlay
+    is not drawn on it. The window is pumped, so it answers the system and its
+    close button through a load.
+  - The next frame waits until the load has had nine times the last frame's
+    cost, or a quarter of a second if that is sooner: the screen takes at most
+    a tenth of a load while a frame costs under 28 ms, and one slow frame
+    cannot hold it still for seconds.
+  - There is no minimum time: as on the console the screen goes when the load
+    ends, which on a fast PC is after a handful of frames.
+  - Each loading frame adds one to `gFrameCount`, as the console's thread
+    does, and how many a load draws depends on timing here as there (4 to 6
+    at real speed). `zSurface.cpp` takes a texture animation's phase from
+    that count, so if a test frame ever differs from run to run just after a
+    load, look here first.
+  - `iAsyncSuspend`/`iAsyncResume` (the console's disc-error screen) do nothing.
+
+  **For another platform's port** (Android, Switch, 3DS): `iAsync.cpp`,
+  `iLoadFrame.*` and the pump calls come over unchanged. Its `tssm_rw` list
+  needs `iLoadFrame.cpp`. Its present must honour "no wait for the display" on
+  a loading frame (`RwCameraShowRaster` drops `rwRASTERFLIPWAITVSYNC`; a
+  backend that waits regardless costs the load up to a refresh per frame), and
+  anything it draws at the present (a touch overlay, a second screen) should
+  ask `iLoadFrameDrawing()` first. A backend that rebuilds something when
+  the wait changes (Vulkan's swap chain) must keep its wait as it is on a
+  loading frame instead. On a slow machine, check the stretches with
+  `TSSM_TEST_LOADLOG=2`; a long one in shared game code takes an
+  `iLoadFramePump(iLOADPUMP_SCENE)` call behind `PLATFORM_PC`, as
+  `zSceneInit` has (the first candidate is its preparation, which has one
+  pump at its end and none inside).
 - **iFMV: the movie-texture path** (`iFMVOpen`/`iFMVClose`, xFMV.cpp's direct
   Bink calls) is not ported; `iFMVOpen` returns NULL. The game's data never
   takes it: neither data set has a `BINK` asset, and every PlayMovie link goes
@@ -451,7 +575,8 @@ Each says at its site what it does not do.
 ## Not imported from treedome (BfBB-specific)
 
 `menu/` (BfBB's code-built menus), `iAssetOverride` (code-built packages; TSSM's mod support, `iMod*`, replaces assets at the file level instead), `iHipoly*`, `iToon`,
-`iEnvNormals`, `iDayNight`, `iTour`, `iCheats`, `iFixes`, `iTextPatch` (TSSM's
+`iEnvNormals`, `iDayNight`, `iTour`, `iCheats` (BfBB's cheats; TSSM's own `iCheats` is written for
+this game, `docs/CHEATS.md`), `iFixes`, `iTextPatch` (TSSM's
 prompt rewrites are `iPadPrompts.cpp`),
 `iHostWords.h`, `iSoundtrack`, `iMenuFrame`, `iLoadScreen`, `iLoadTransition`,
 `iScreenBleed`, `iDrawDist`, `iFont`/`iFontTexture` (TTF text), `iPadGlyph`

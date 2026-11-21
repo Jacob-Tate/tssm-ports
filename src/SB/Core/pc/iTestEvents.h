@@ -97,10 +97,44 @@
 //                           real pointer is not touched.
 //                           It works beside TSSM_INPUT's scripted controller.
 //
+//   TSSM_TEST_KEYS=<list>   a keyboard of the test's own, in place of the real
+//                           one from the first frame (iPadKeyboard.h): entries
+//                           "frame:key[+key...][/frames]", comma separated, e.g.
+//                           "300:space/4,700:tab". Each holds its keys from that
+//                           frame for the given number of frames (6 when not
+//                           given), as TSSM_INPUT does. Key names are config.ini's
+//                           [keyboard] names (tab, space, escape, c, w, mouse1,
+//                           ...). The keys go through the [keyboard] bindings
+//                           and everything after them, as real keys do, whether
+//                           or not the window has the focus; the real keyboard
+//                           and mouse are not read. Leave TSSM_INPUT unset: a
+//                           scripted controller ignores the keyboard.
+//
 //   TSSM_TEST_UILOG=<n>     every n frames, logs the menu widgets a pointer could
 //                           mean (iMenuMouse.h): each one's name, rectangle,
 //                           state, text and pad links, which are items of a list
 //                           or hints, and what the pointer is on.
+//
+//   TSSM_TEST_CHEAT=<list>  asks for cheats at given frames as the Cheats tab does, a
+//                           comma-separated list of "frame:what" (iCheats.h,
+//                           docs/CHEATS.md): code:<id>, extra:<word>, refill,
+//                           port:<key>:on|off, port:alloff, hit:<n> (a hit of n
+//                           health units), host:... (a co-op host's state) and
+//                           release.
+//
+//   TSSM_TEST_CHEATLOG=<n>  every n frames, logs the cheats' state: the game's cheat
+//                           word, points multiplier, health, moves, the developers'
+//                           switches, the Extras items that are on, the task
+//                           counters and the port's cheats in force.
+//
+//   TSSM_TEST_HUDLOG=<n>    every n frames, logs the HUD widgets drawn
+//                           (iHudAnchor.h): each one's name, the rectangle it
+//                           was authored at and is at now (640x480 units), the
+//                           edges it belongs to and where its top left corner
+//                           lands on the screen in pixels ("tssm: test: frame
+//                           1900: hud 5A1D6F0E 'HUD_FONT_NITRO' authored 520 405
+//                           30 36 now 520 405 30 36 right bottom at pixel 902.5
+//                           607.5").
 //
 //   TSSM_TEST_CRASH=<frame> a write through a null pointer at that frame (a
 //                           number above 1), for the crash handler, crash.log
@@ -110,6 +144,31 @@
 //   TSSM_TEST_CLOSE=<frame> asks the window to close at that frame, as the
 //                           window's close button, the overlay's Quit and
 //                           the 3DS's HOME menu Close do (iWindowRequestClose).
+// A level load is one frame to all of the above, however many frames of the
+// loading screen are shown in it, so the load has hooks of its own, read by
+// iAsync.cpp:
+//
+//   TSSM_TEST_LOADLOG=1     one line per load ("tssm: load 1: 106.7 ms, 3 loading
+//                           frames (0 skipped), 2.8 ms drawing them (longest 2.47
+//                           ms), longest gap 66.2 ms ended by the load's end, 608
+//                           pumps; frames by pump: start 1 file read 1 textures
+//                           1"). 2 also logs every stretch of 5 ms or more in
+//                           which the load gave the screen no chance of a frame.
+//
+//   TSSM_CAPTURE_LOAD=<n>   saves the first n loading frames of every load to
+//                           TSSM_CAPTURE_DIR as load<load>_<frame>.png. The time
+//                           the saving takes is not counted as the frame's, but
+//                           it is part of the load's time and of the gaps
+//                           TSSM_TEST_LOADLOG reports.
+//
+//   TSSM_TEST_LOADSLOW=<ms> a slow machine's load: every package step waits that
+//                           long, asking for loading frames the way a long read
+//                           does.
+//
+//   TSSM_TEST_LOADEVENT=<frame>:<what>
+//                           at that loading frame of the first load, "mode"
+//                           switches between windowed and borderless as Alt+Enter
+//                           does, and "close" asks the window to close.
 //
 // Nothing happens unless a variable is set.
 

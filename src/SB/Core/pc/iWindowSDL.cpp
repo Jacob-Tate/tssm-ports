@@ -4,6 +4,7 @@
 #include "iMouseLook.h"
 #include "iPerf.h"
 #include "iScreen.h"
+#include "iSteadyFrame.h"
 #include "rw/backend.h"
 
 // The window, on SDL, for both render backends.
@@ -671,6 +672,9 @@ S32 iWindowGetVSync()
     return sVSync;
 }
 
+// The rate iWindowGetDisplayRefreshRate last found, unrounded (59.94, not 60).
+static F32 sRefreshHz = 0.0f;
+
 S32 iWindowGetDisplayRefreshRate()
 {
     // The display the window is on, not the primary one -- on a two-monitor
@@ -699,6 +703,7 @@ S32 iWindowGetDisplayRefreshRate()
         return 0;
     }
 
+    sRefreshHz = mode->refresh_rate;
     return (S32)(mode->refresh_rate + 0.5f);
 }
 
@@ -789,6 +794,12 @@ static bool VSyncHoldsRate(S32 rate, Uint64 now)
     }
     return sRefreshRate > 0 && rate >= sRefreshRate;
 }
+
+// The period that paced the frame just shown, for iWindowGameFrameTime: what
+// the sleep held, or one refresh where vsync held the rate. 0 when nothing
+// paced it (no cap) or nothing will make up for its lateness (a late frame
+// under the hold).
+static Uint64 sPacedPeriodNs = 0;
 
 // When the frame's work began: the end of the last pace. See
 // iWindowFrameWorkDone.
@@ -910,6 +921,7 @@ static void PaceSleep()
     if (rate <= 0)
     {
         sPacerStarted = false;
+        sPacedPeriodNs = 0;
         return;
     }
 
@@ -926,6 +938,14 @@ static void PaceSleep()
         {
             framePeriodNs = framePeriodNs * 4 / 5;
         }
+    }
+
+    // Where vsync holds the rate the display paces the frame, unless the
+    // backstop below ends up sleeping, which means it does not.
+    sPacedPeriodNs = framePeriodNs;
+    if (backstop && sRefreshHz > 1.0f)
+    {
+        sPacedPeriodNs = (Uint64)(1e9 / (double)sRefreshHz);
     }
 
     if (!sPacerStarted)
@@ -956,9 +976,17 @@ static void PaceSleep()
         {
             sNextFrame = now;
         }
+        // Under the hold no short frame makes up for a late one, so a late
+        // frame keeps its measured time, as on the console. (Where vsync
+        // paces, the backstop's deadline is always behind.)
+        if (HoldPaces() && !backstop)
+        {
+            sPacedPeriodNs = 0;
+        }
         return;
     }
     const Uint64 want = sNextFrame - now;
+    sPacedPeriodNs = framePeriodNs;
 
 #ifdef __ANDROID__
     // Android: one sleep. Its nanosleep is a high-resolution timer that wakes
@@ -971,6 +999,15 @@ static void PaceSleep()
     SleepUntil(sNextFrame, now);
 #endif
     iPerfPace(want, (S64)(SDL_GetTicksNS() - sNextFrame));
+}
+
+// The game's frame time: steady for a frame that came on time, so the enemies'
+// end-of-animation checks see their ends as the console does (iSteadyFrame.h).
+static iSteadyFrame sSteady;
+
+F32 iWindowGameFrameTime(F32 measured)
+{
+    return iSteadyFrameTime(&sSteady, sPacedPeriodNs, measured);
 }
 
 void iWindowPaceFrame()

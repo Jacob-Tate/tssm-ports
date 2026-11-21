@@ -138,6 +138,13 @@ S32 iWindowGetFrameLock();
 // no cap. For the frame metrics (iPerf.h).
 S32 iWindowGetPacedRate();
 
+// The frame time the game loop runs on (zGameLoop), from the measured one: for
+// a frame within a quarter of the period that paced it, the same steady time
+// every frame (the on-time frames' average, a ten-thousandth long), with what
+// that gives too much or too little paid back at three eighths of a period;
+// otherwise the measured time. Why: iSteadyFrame.h.
+F32 iWindowGameFrameTime(F32 measured);
+
 // The monitor's refresh rate in Hz, or 0 if it cannot be determined. This is
 // what video.framerate = display resolves to.
 S32 iWindowGetDisplayRefreshRate();

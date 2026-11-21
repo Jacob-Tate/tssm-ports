@@ -16,6 +16,7 @@
 
 #include "iHost.h"
 #include "iSpike.h"
+#include "iSteadyFrame.h"
 #include "3ds/i3DS.h"
 #ifdef RW_C3D
 #include "3ds/c3d/rwc3d.h"
@@ -186,6 +187,11 @@ void iWindowPump()
     }
 }
 
+// The period the pacer below slept to for the frame just shown, or 0 when it
+// did not pace the frame (citro3d paced it, there is no cap, or the frame was
+// late), for iWindowGameFrameTime.
+static U64 sPacedPeriodNs;
+
 // The same deadline pacing as iWindowSDL.cpp, without SDL_DelayPrecise: its
 // spin for the last fraction would hold core 0, which is cooperative on the
 // 3DS, and the kernel's sleep is fine-grained enough on its own.
@@ -193,6 +199,7 @@ void iWindowPaceFrame()
 {
     // The spike runs its frames back to back and keeps the game's time step
     // itself (iSpike.h).
+    sPacedPeriodNs = 0;
     const S32 rate = PacedRate();
     if (rate <= 0 || iSpikeOn())
     {
@@ -229,6 +236,18 @@ void iWindowPaceFrame()
     }
 
     iHostSleepUntilNs(sNextFrame);
+    sPacedPeriodNs = framePeriodNs;
+}
+
+// The game's frame time (iSteadyFrame.h, zGameLoop). citro3d paces the frame
+// (C3D_FrameBegin) and the pacer above returns before its sleep, so the game
+// keeps the measured time there: the 3DS runs under 30 fps, and two of its
+// screen's refreshes are not 1/30 s (src/SB/Core/pc/PORTING.md).
+static iSteadyFrame sSteady;
+
+F32 iWindowGameFrameTime(F32 measured)
+{
+    return iSteadyFrameTime(&sSteady, sPacedPeriodNs, measured);
 }
 
 void iWindowSetFrameRate(S32 fps)

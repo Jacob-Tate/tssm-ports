@@ -11,6 +11,9 @@
 #include "zEnt.h"
 #include "zScene.h"
 #include "xstransvc.h"
+#ifdef PLATFORM_PC
+#include "iHudAnchor.h"
+#endif
 
 xhud::block_allocator xhud::widget::motive_allocator;
 
@@ -402,6 +405,11 @@ namespace xhud
         {
             if (w.visible())
             {
+#ifdef PLATFORM_PC
+                // PC: the widget goes to its edge of a screen that is not 4:3 when the HUD
+                // is set to (iHudAnchor.h). Nothing moves otherwise.
+                iHudAnchorScope anchor(w);
+#endif
                 w.render();
             }
         }

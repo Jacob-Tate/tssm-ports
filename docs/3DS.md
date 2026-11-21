@@ -129,7 +129,7 @@ takes no input from the buttons.
   chooses, **A** goes back (and closes a box), **L** and **R** change the tab. In the file
   browser **X** goes up a folder and L and R move a page.
 - **Touch:** tap anything; drag a scroll bar (a stylus helps: the text is small).
-- **Tabs:** Settings, Controls, Saves, Mods, About. **Resume** closes the menu; **Quit
+- **Tabs:** Settings, Controls, Saves, Mods, Cheats, About. **Resume** closes the menu; **Quit
   game** asks, then returns to the HOME Menu (the .cia) or the Homebrew Launcher (the
   .3dsx), the same way HOME's Close does (progress since the last save is lost).
 - **Settings:** the frame rate (30, or 60 for light scenes), field of view, the glow and
@@ -151,7 +151,12 @@ takes no input from the buttons.
   crowds of No Cheese! and Sandwich Driving 101 stand still, and the water (the tanks in
   Google-Eyes and Smelly Knick Knacks, the sea in Dennis Strikes Back) is the GameCube's.
   The 3DS's renderer has no Xbox glow, light beams or Xbox water, so those stay `gamecube`
-  whatever `config.ini` says.
+  whatever `config.ini` says. The Sonic Wave Guitar's swirl and the HUD at the screen's
+  edges (0.9.5 on the other ports) are not on the 3DS either.
+- **Cheats** (since 0.9.5): the game's nine button codes and its Extras screen as switches
+  and buttons, and a few port cheats (`docs/CHEATS.md`). Its text names ZL and ZR for the
+  codes' buttons and L and R for flight, and shows the codes and flight's rise button in
+  the 3DS's printed letters (X and Y are the other way round from the Xbox's).
 
 The game sees START and SELECT a moment late: each is held back for up to 120 ms in case
 the other follows. If the menu ever misbehaves, `[gui] overlay = off` in `config.ini`
@@ -164,6 +169,11 @@ turns it off: the bottom screen stays dark and START and SELECT go straight to t
 backup. **Export** beside a slot, **Every save as a .zip** and **Every save into a GCI
 folder** write into `/3ds/tssm/export/`. A file too big for the memory free at the time is
 refused with a message (a 16 MB Dolphin card fits); anything over 64 MB is no save.
+
+From 0.9.5 **Import...** also takes the Xbox's, the PlayStation 2's and a PlayStation 3's
+saves (`docs/SAVES.md` sections 7 to 9; they are converted with the game's own files),
+which has not been tried on a 3DS yet. Exporting to those consoles is left out of the 3DS:
+its code would take memory the game plays in, and the PC does it with the same saves.
 
 ### Updates
 
@@ -442,11 +452,11 @@ At run time only where closing goes differs: libctru's exit returns an installed
 the HOME Menu and a .3dsx to the Homebrew Launcher. The log's start says which it is, and
 the settings menu's Quit names that menu.
 
-The title version follows `TSSM_3DS_VERSION`: 0.9.4 is the TMD's and the ticket's 0.9.4
-(`0 << 10 | 9 << 4 | 4`, 148), which the system compares when one build is installed over
-another. makerom v0.19.0 loses the minor number, so CMake gives makerom the major and the
-micro and `tools/3ds/cia_version.py` then writes the whole version into the TMD and the
-ticket (no hash covers the field). Without Python the version stays `major.0.micro` (a
+The title version follows `TSSM_3DS_VERSION`: 0.9.5 is the TMD's and the ticket's 0.9.5
+(`0 << 10 | 9 << 4 | 5`, 149; 0.9.4 was 148), which the system compares when one build is
+installed over another. makerom v0.19.0 loses the minor number, so CMake gives makerom the
+major and the micro and `tools/3ds/cia_version.py` then writes the whole version into the
+TMD and the ticket (no hash covers the field). Without Python the version stays `major.0.micro` (a
 warning says so). The releases up to 0.9.1 carry 0.0.0 and 0.0.1.
 
 ### Building the TSSM Dehydrated release
@@ -455,7 +465,7 @@ The prebuilt `tssm.3dsx` and `tssm.cia` on this repository's Releases page, *TSS
 Dehydrated*, are this build with six settings: the name "TSSM Dehydrated"
 (`TSSM_3DS_TITLE`: the SMDH's short and long title in the Homebrew Launcher and the HOME
 Menu, the About tab's heading and the game-files screen), the release's version
-(`TSSM_3DS_VERSION`, 0.9.4 for TSSM Dehydrated 0.9.4), author "aidp2", the updater
+(`TSSM_3DS_VERSION`, 0.9.5 for TSSM Dehydrated 0.9.5), author "aidp2", the updater
 (`TSSM_UPDATE`), the port's own icon for both files (`dist/3ds/cia_icon.png`) and the
 banner picture
 `dist/3ds/cia_banner_dehydrated.png` with the port's chime (`TSSM_3DS_BANNER` takes a
@@ -480,7 +490,7 @@ bannertool on the `PATH` and FFmpeg n9.0.2's source extracted into the work fold
     sh tools/3ds/build_ffmpeg.sh $R/FFmpeg-n9.0.2 $R/ffmpeg $R/prefix
     CFLAGS="$MAP" CXXFLAGS="$MAP" sh tools/3ds/build_port.sh $R/build $R/prefix \
       -DTSSM_PYTHON=/c/Python314/python.exe \
-      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.4 -DTSSM_3DS_AUTHOR=aidp2 \
+      "-DTSSM_3DS_TITLE=TSSM Dehydrated" -DTSSM_3DS_VERSION=0.9.5 -DTSSM_3DS_AUTHOR=aidp2 \
       -DTSSM_3DS_ICON=$S/dist/3ds/cia_icon.png \
       -DTSSM_3DS_BANNER=$S/dist/3ds/cia_banner_dehydrated.png \
       -DTSSM_UPDATE=ON
@@ -940,6 +950,15 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
 
 ## Known gaps
 
+- **0.9.5 has not been played on a console yet.** It brings the Windows 0.9.5 work that
+  fits the 3DS: the loading screen (the life preserver, drawn between pieces of each load
+  as on the PC; its frames have not been seen on a 3DS or captured in an emulator yet),
+  the Cheats tab, and the import of Xbox, PlayStation 2 and PlayStation 3 saves. It is
+  checked in Azahar: the title, BB02, the settings menu's six tabs, the updater of the
+  .3dsx and of the installed .cia, and the .cia's title version 0.9.5 (149). Memory is no
+  worse than 0.9.4's: the program is 124 KB smaller, so the heap is that much larger, and
+  what the game takes at the title and in BB02 is the same. The shadow fix (shadows close
+  together no longer break up or turn dotted up close) has run on a console.
 - **0.9.4 has not been played on a console yet.** It brings the Windows 0.9.3 and 0.9.4
   work (*The GameCube look*, *Save screen text*, mod levels without a `.HOP`, the menu's
   shared tabs) and the updater's connect fix. It is checked on the PC and in Azahar: the
@@ -956,7 +975,10 @@ librw draws through a device per platform; the 3DS's is `rw::c3d` in
 - **GameCube disc files** start and play in Azahar, as on the PC, but take about 13 MB
   more memory in the first level, and the game's font is drawn too widely spaced with
   them. No console has run them, so the settings menu and the game-files screen still ask
-  for the Xbox files.
+  for the Xbox files. The spacing comes from the game measuring each letter by reading the
+  font's texture back (`xFont.cpp`): the 3DS keeps a copy to read back only of a paletted
+  texture, and librw's GameCube reader turns the disc's paletted fonts into 32-bit pixels
+  before the 3DS sees them.
 - **Played on a console mostly in scripted runs.** On a New 3DS XL the console probes
   14-16 (*Developer tools*) have played BB01, BB02, GG02, TR01 and JK01, the opening
   fly-through, the title screen and the pause menu with every effect on: 27 to 30 fps in 2D

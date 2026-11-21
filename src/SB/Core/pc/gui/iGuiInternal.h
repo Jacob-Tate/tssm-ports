@@ -96,13 +96,14 @@ namespace iGui
     void DrawControls();
     void DrawSaves();
     void DrawMods();
+    void DrawCheats();
     void DrawAbout();
 
     // --- the tabs -------------------------------------------------------------------
 
     // Every tab, in order, for the overlay and the launcher alike
     // (gui/iGuiTabs.cpp): a tab added to the list -- the co-op builds' Co-op,
-    // a later Cheats -- is in both, with every setting it has.
+    // Cheats -- is in both, with every setting it has.
     struct Tab
     {
         const char* name;  // TSSM_GUI_TAB's word for it, and capture names

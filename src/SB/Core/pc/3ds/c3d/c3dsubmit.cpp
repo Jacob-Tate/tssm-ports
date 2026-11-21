@@ -58,6 +58,10 @@
 #include "c3d_shbin.h" // kC3dShbin, made by CMakeLists.txt from shaders/*.vsh
 #include "../i3DS.h"
 
+// iLoadFrame.h's, declared here: librw is built without the game's include
+// folder, which that header needs (types.h).
+int iLoadFrameDrawing();
+
 // citro3d 1.7.1's own (source/internal.h), global in libcitro3d.a: the
 // commands so far as one list, as C3D_FrameSplit takes it, without the
 // frame C3D_FrameSplit wants open (L4's frames recorded ahead).
@@ -1829,7 +1833,11 @@ namespace rw
                 freeUpTo(s.frames - 1);
             }
             deviceResetStats();
-            if (s.loadTextures >= 16)
+            // A loading frame (iLoadFrame.h) comes in the middle of a load: the
+            // textures made around it are counted on, and the line waits for the
+            // game's first frame after the load.
+            const bool loadingFrame = iLoadFrameDrawing() != 0;
+            if (s.loadTextures >= 16 && !loadingFrame)
             {
                 // A level was loaded since the last frame: what it left
                 // (the margins it keeps).
@@ -1854,7 +1862,10 @@ namespace rw
                       (unsigned)(vramSpaceFree() >> 10), (unsigned)(linearSpaceFree() >> 10));
                 stereoLevelLoaded();
             }
-            s.loadTextures = 0;
+            if (!loadingFrame)
+            {
+                s.loadTextures = 0;
+            }
             drawPendingEdges();
             if (modes.gpuSplit && !s.splitCalibrated)
             {

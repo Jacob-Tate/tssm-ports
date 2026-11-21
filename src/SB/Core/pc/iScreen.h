@@ -97,79 +97,137 @@ F32 iScreenUIOriginYF();
 F32 iScreenUIFracXF();
 F32 iScreenUIFracYF();
 
-// How the interface is placed on a screen that is not 4:3.
-//
-// NOT WIRED UP YET. Nothing calls iScreenSetAnchorRect, so the HUD is always in
-// the box (PILLARBOX) whatever the mode says, and config.ini has no setting for
-// it. The anchoring below is kept for an edge-anchored HUD; kAnchorZone in
-// iScreen.cpp was measured on another game's HUD and must be measured again on
-// this one first.
+// How the HUD is placed on a screen that is not 4:3: config.ini's video.ui.
 //
 //   PILLARBOX  everything in the centred 4:3 box. Nothing moves relative to
 //              anything else; the interface simply sits in the middle with
-//              black either side of it. This is the default, and it is the
-//              only mode that is exactly what the console drew.
-//   NATIVE     each HUD widget is anchored: the group it belongs to is carried
-//              out to the edge of the real screen, so a counter authored near
-//              the left edge ends up near the real left edge. Menus, textboxes
-//              and cutscene overlays stay in the 4:3 box -- they are
-//              full-screen art, and there is nothing in them to anchor.
+//              the wider picture either side of it. This is the default, and
+//              it is exactly what the console drew.
+//   NATIVE     each group of HUD widgets is anchored: a group authored at the
+//              left of the 4:3 screen is carried out to the real left edge, one
+//              at the right to the right edge, one in the middle stays (the
+//              same top and bottom on a screen taller than 4:3). Menus, talk
+//              boxes and full-screen art stay in the 4:3 box.
 //
 // The two are IDENTICAL on a 4:3 render size, where the box is the screen and
-// the anchor is the identity, so this only ever means anything in widescreen.
+// the anchor is the identity, so this only ever means anything off 4:3.
+//
+// On a screen TALLER than 4:3 (a phone held upright, a tall window) the HUD is
+// NATIVE whatever the setting says: a 4:3 band across the middle of a tall
+// screen is not where a player looks for it. The safe margin still applies.
+// The setting chooses only on a wide screen.
+//
+// Which widgets are HUD, and which belong together, is iHudAnchor.h's to say;
+// here is only the arithmetic. It can change at any time: nothing is built
+// from it, each frame's draws read it.
 enum iScreenUIMode
 {
     iSCREENUI_PILLARBOX,
     iSCREENUI_NATIVE
 };
 
+// The setting (video.ui).
 void iScreenSetUIMode(iScreenUIMode mode);
 iScreenUIMode iScreenGetUIMode();
 
-// The anchor is a TRANSLATION, and this is the widget it currently translates.
-//
-// The rect is the one the widget was AUTHORED at -- asset loc and size, not the
-// live position, which slides around as widgets show and hide. Two things come
-// out of that choice. A widget animating across the screen keeps whatever
-// motion the artist gave it, because its offset does not change while it moves;
-// and, more importantly, an icon and the number beside it get the SAME offset,
-// so they stay the distance apart they were drawn.
-//
-// That is the whole reason this is not the one-liner it looks like it should
-// be. Reading a position as a fraction of the real screen -- x / frac - margin,
-// the obvious mapping -- moves the centre of a group correctly and pulls the
-// group apart, because the gap between two widgets is a distance and gets
-// scaled along with everything else. On a 16:9 screen that is a third again on
-// every gap, which is a counter no longer touching its icon.
-//
-// So the offset is quantized: a widget belongs to the left edge, to the right
-// edge, or to the middle, and every member of a group lands in the same one.
-void iScreenSetAnchorRect(F32 x, F32 y, F32 w, F32 h);
+// TRUE when the render size is taller than 4:3.
+S32 iScreenUITall();
 
-// A normalized UI-space coordinate, translated by the offset the rect above
-// asked for -- still in UI space, so the pillarbox mapping that follows lands
-// it on the screen.
+// The mode the HUD is drawn in: the setting, or NATIVE on a tall screen.
+iScreenUIMode iScreenUIModeInForce();
+
+// "pillarbox" or "native", any case; anything else is PILLARBOX.
+iScreenUIMode iScreenUIModeFromName(const char* name);
+
+// A safe area for a television that cuts the picture's edges off: how far short
+// of the real edges the anchored HUD stops, as a share of the screen's width
+// (of its height, on a tall screen) at each side, 0 to 0.25. config.ini's
+// video.ui_margin, in percent. It never moves anything inwards of where the
+// 4:3 box puts it, so it means nothing at 4:3, or in PILLARBOX on a wide
+// screen.
+void iScreenSetUISafeMargin(F32 share);
+F32 iScreenGetUISafeMargin();
+
+// The anchor is a TRANSLATION of everything drawn while it is set: -1 carries
+// it to the left (top) edge, +1 to the right (bottom) edge, 0 leaves that axis
+// alone, and a value between goes part of the way. A whole group gets one
+// anchor, so an icon and the number beside it stay the distance apart they
+// were drawn, and a widget sliding in or out keeps its motion.
 //
-// Identity in PILLARBOX, and identity at 4:3 whatever the mode, where the
-// margin is zero because the box IS the screen.
+// (Reading a position as a fraction of the real screen, the obvious mapping,
+// would move a group's centre correctly and pull the group apart: the gap
+// between two widgets is a distance and would be scaled with everything else.)
+//
+// Set around one widget's draw and cleared after it. rw/im.cpp adds it to
+// every RwIm2D draw it puts in the box, and xModelRender2D to its rect. No
+// effect when the mode in force is PILLARBOX, or at 4:3, where the reach is
+// zero.
+void iScreenSetAnchor(F32 sideX, F32 sideY);
+void iScreenClearAnchor();
+
+// A normalized UI-space coordinate, translated by the anchor in force -- still
+// in UI space, so the box mapping that follows lands it on the screen.
 F32 iScreenAnchorX(F32 x);
 F32 iScreenAnchorY(F32 y);
 
 // How far outside the 0..1 box the screen reaches, in UI units. Zero when the
-// box is the screen. What this is for is culling: xModelRender2D throws away a
-// rect outside 0..1, which is the screen only while nothing is anchored.
+// box is the screen.
 F32 iScreenUIMarginXF();
 F32 iScreenUIMarginYF();
 
-// The same distance, but only as far as the anchor will actually reach: zero in
-// PILLARBOX, where nothing moves and the box IS everything the HUD may touch.
-//
-// This is the one the culling and the clipping want. Using the geometric margin
-// there would let a widget that slides in from off the box become visible in
-// the pillar bars in a mode whose whole promise is that it draws what the
-// console drew.
+// The same distance, but only as far as the anchor will actually reach: zero
+// when the mode in force is PILLARBOX, and less the safe margin in NATIVE.
 F32 iScreenAnchorMarginXF();
 F32 iScreenAnchorMarginYF();
+
+// What a 4:3 television does not show stays unseen on a tall screen.
+//
+// The game slides menu panels and HUD pieces in from, and out to, beyond the
+// top and bottom of its 4:3 screen, and parks some there (the pause screen's
+// sub-menu stays above it after the game resumes). A 4:3 television never
+// shows that ground; a tall screen has room for it. So on a screen taller than
+// 4:3, rw/im.cpp cuts a 2D draw it puts in the box at the box's top and
+// bottom, for two kinds of draw:
+//
+//   - the menus (zUI): zUIMgrRender opens the scope below around them, and a
+//     panel sliding in comes out of the box's edge, as from a 4:3 screen's
+//     (one quad as wide as the screen is a backdrop layer, such as the title's
+//     surf, and is not cut: rw/im.cpp);
+//   - each HUD group while its anchor is set: at the top and bottom of the box
+//     MOVED BY THE ANCHOR, the 4:3 screen that group is drawn for. At the real
+//     edge with no margin, so a piece hides past the real edge as on a 4:3
+//     screen; with a margin, at the margin's line, where the group's models
+//     already stop (xModelRender2D drops a rect outside its 0..1).
+//
+// Nothing else is cut: talk boxes, prompts and the guitar's sights are where
+// the game puts them (the sights sit on what they aim at, which a tall screen
+// shows). Full-screen layers and full-bleed art are not drawn in the box. A
+// wide screen is never cut. The menus' mouse (iMenuMouse.cpp) points at
+// nothing outside the box on a tall screen, so it hits only what is shown.
+//
+// The scope nests.
+void iScreen2DBoxClipBegin();
+void iScreen2DBoxClipEnd();
+
+#ifdef __cplusplus
+struct iScreenBoxClip
+{
+    iScreenBoxClip()
+    {
+        iScreen2DBoxClipBegin();
+    }
+    ~iScreenBoxClip()
+    {
+        iScreen2DBoxClipEnd();
+    }
+};
+#endif
+
+// Where a 2D draw mapped into the box is cut now, in pixels of the render size
+// from its top: the band from *top to *bottom is kept. FALSE when nothing is
+// cut: the screen is not taller than 4:3, or neither the menus' scope nor a HUD
+// anchor is in force.
+S32 iScreen2DClipY(F32* top, F32* bottom);
 
 // The 2D layer's coordinate space.
 //

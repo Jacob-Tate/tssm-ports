@@ -282,9 +282,14 @@ void iD0Init()
     }
     // A line per frame: on a console's SD card every write is slow, so they
     // are gathered (the 3DS spike; the writes come after a frame's work is
-    // timed, but they still take the run's time).
-    static char sBuffer[256 * 1024];
-    setvbuf(sFile, sBuffer, _IOFBF, sizeof(sBuffer));
+    // timed, but they still take the run's time). Made only for a run that
+    // measures, so the game's own runs keep those 256 KB.
+    const size_t bufferSize = 256 * 1024;
+    char* buffer = (char*)malloc(bufferSize);
+    if (buffer != NULL)
+    {
+        setvbuf(sFile, buffer, _IOFBF, bufferSize);
+    }
 
     new (&sCur) Scene();
     NameOf(0, sCur.name);

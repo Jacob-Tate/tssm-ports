@@ -10,6 +10,7 @@ spotlights = xbox
 crowds = xbox
 water = xbox
 frame_lock = xbox
+guitar_distortion = xbox
 ```
 
 Every key is `xbox` by default (on the 3DS, `gamecube`: each one waits until it has been timed
@@ -28,6 +29,7 @@ overlay's row says what `config.ini` has and which look is used (`iExtrasSetting
 | `glow` | the Xbox's wide, soft glow, stronger in some levels | the GameCube's tighter, fainter glow | yes |
 | `spotlights` | the moving spotlights of No Cheese!, Bubble Blowing Baby Hunt and Turn the Tables on Plankton are on, and every spotlight lights what it shines on and has a lamp flare | those lights are off, and a spotlight is its cone only | yes |
 | `water` | the Xbox water of SC02's tanks and B301's sea (reflections, refraction, ripples; `docs/RENDERING.md`, "Water") | the GameCube's water | yes |
+| `guitar_distortion` | the screen swirls while the Sonic Wave Guitar's wave is steered | no swirl | yes |
 
 `video.hdr_glow = off` still turns all glow off, the Xbox's and the menus' included.
 
@@ -48,6 +50,9 @@ things:
 
 When the files or the renderer cannot give the Xbox version, the level gets the GameCube one and
 the overlay's row says why in a line under it.
+
+The guitar's distortion is the one feature decided from the game's own files (`boot.HIP`'s
+release) and not the level's: its swirl map is in `plat.HIP`.
 
 ### With GameCube files
 
@@ -104,16 +109,16 @@ the Xbox files' 18 do).
 One log line per level says what it got:
 
 ```
-tssm: extras: BB02 (Xbox files): glow xbox 0.55, spotlights xbox, crowds xbox, water xbox, frame lock xbox
-tssm: extras: BB02 (GameCube files): glow xbox 0.55, spotlights xbox (the GameCube files' links of 1 object as the Xbox's), crowds xbox (11 given the skinned crowd), water gamecube [asked for xbox: This level's files are GameCube files: they have no Xbox water.], frame lock xbox
-tssm: extras: BB01 (GameCube files): glow xbox 0.45, spotlights xbox, crowds gamecube [asked for xbox: This level's files are GameCube files: they have no moving crowd, so it stands still.], water gamecube [asked for xbox: ...], frame lock xbox (a 29.97 fps level, at the cap)
+tssm: extras: BB02 (Xbox files): glow xbox 0.55, spotlights xbox, crowds xbox, water xbox, frame lock xbox, guitar distortion xbox
+tssm: extras: BB02 (GameCube files): glow xbox 0.55, spotlights xbox (the GameCube files' links of 1 object as the Xbox's), crowds xbox (11 given the skinned crowd), water gamecube [asked for xbox: This level's files are GameCube files: they have no Xbox water.], frame lock xbox, guitar distortion xbox
+tssm: extras: BB01 (GameCube files): glow xbox 0.45, spotlights xbox, crowds gamecube [asked for xbox: This level's files are GameCube files: they have no moving crowd, so it stands still.], water gamecube [asked for xbox: ...], frame lock xbox (a 29.97 fps level, at the cap), guitar distortion gamecube [asked for xbox: The game's files are GameCube files: they have no swirl map, so none is drawn.]
 ```
 
 `water xbox` in a level without water says only what the setting gave: the water changes nothing
 there.
 
-The frame lock and the glow follow the setting at once. The others hold until the next level
-loads; their rows are tagged **next level** until then.
+The frame lock, the glow and the guitar's distortion follow the setting at once. The others hold
+until the next level loads; their rows are tagged **next level** until then.
 
 ## frame_lock: the GameCube's 30 fps levels
 
@@ -535,11 +540,13 @@ whole seconds against the 60 fps drive):
   sentence and the level's line; with GameCube files, the skinned crowd for each rigid one and the
   spotlight links turned into the Xbox files' on copies of the two discs' links (and refused for
   links that are not the disc's: one missing, one there twice, one with a parameter), and a
-  level's own fallback (`iExtrasFallBack`) reaching the overlay and cleared by the next level
-  (1313 checks).
+  level's own fallback (`iExtrasFallBack`) reaching the overlay and cleared by the next level;
+  the guitar's distortion's key, its three fallbacks' sentences, its following the setting at
+  once, the pass's own reason reaching the overlay's row and the game's files (not the level's)
+  deciding it (1550 checks).
 - `tssm_watertest` (`src/SB/Core/pc/tests/watertest.cpp`): the Xbox water's tiles, strips and bump
   clock on made-up meshes.
-- `tools/regress.py` writes all five keys as `gamecube` into every run's `config.ini`, so a
+- `tools/regress.py` writes all six keys as `gamecube` into every run's `config.ini`, so a
   change to an `xbox` version cannot move the compared frames. References captured before the
   extras still show the faint beam of BB02's two searchlights, which `gamecube` keeps off: at most
   0.03 of the gameplay frames' mean limit of 4.0, so they pass, and references captured since show
@@ -587,6 +594,94 @@ The Xbox water (`iXboxWater.h`, `docs/RENDERING.md`, "Water") was built with its
   because the setting says so; and the level's extras line agrees. Their frames are not compared:
   how the water looks was checked with fixed-step runs, against the build before it and the Xbox.
 
+## guitar_distortion: the Sonic Wave Guitar's swirl
+
+On the Xbox the screen swirls while the camera flies to the Sonic Wave Guitar's wave and rides it.
+The GameCube release draws nothing: `cruise_bubble`'s `distort_screen` is an empty function there,
+with its five calls still in place (`zEntCruiseBubble.cpp`).
+
+**What the Xbox does** (`DEFAULT.XBE`; `src/SB/Core/pc/iXboxDistort.h` has the addresses):
+
+- `distort_screen` keeps an amount: 0 to 1 on the camera's S-curve while it flies to the wave (1.5
+  s), 1 while it rides the wave (up to 6 s), 0 otherwise. `cruise_bubble::deinit` sets 0 as well.
+  There is no level check: every level where SpongeBob has the guitar.
+- `zSceneRenderPostFX` draws the pass after the screen warp, the glow and the lens flare, and the
+  guitar's HUD after it, so the HUD is not swirled. The GameCube draws the HUD first.
+- The pass reads the frame through a swirl map, `BXCruiseBubbleDistort` of the Xbox's `plat.HIP`
+  (512x512; red and green nearly equal, blue 255; the GameCube's `plat.HIP` does not have it). With
+  (r, g) the map's texel expanded to -1..1, read from the map's middle half, A = 15 x amount and
+  t = milliseconds x 0.002, a pixel (x, y) of the 640x480 frame shows the frame at
+  `x + A (r sin t + g cos t)`, `y + A (r cos t - g sin t)`: about 21 pixels at most, turning once
+  every 3.14 seconds of real time, paused or not.
+- It draws that into a 512x512 target and stretches the target back over the screen, which softens
+  the whole picture a little while the swirl is on.
+
+It is the pass of BfBB's cruise bubble under its old name, with three differences from the BfBB PC
+port's version (`rw/distort.cpp`, kept in the tree unused): the map's middle half is read where
+that one reads the whole map, the offset uses red and green in two dot products where that one
+uses red alone (21 pixels at most against 15), and it is drawn from `zSceneRenderPostFX` and not
+from `xScrFxRender`.
+
+**What the port does** (`iXboxDistort.h`, `iXboxDistort.cpp`, `rw/xboxdistort.cpp`,
+`rw/shaders/xboxdistort_PS.hlsl`, `rw/shadersgl/xboxdistort.frag`):
+
+- Under `PLATFORM_PC`, `distort_screen` hands the amount to `iXboxDistortSetAmount`, and
+  `cruise_bubble::deinit` sets 0. With the Xbox look on, `zSceneRenderPostFX` draws the pass after
+  the lens flare and the guitar's HUD after it; with it off the GameCube's order is kept exactly.
+  The HUD moves with this key alone: with `guitar_distortion = xbox` and `glow = gamecube` the
+  guitar's HUD is drawn after the GameCube glow and the screen warp, so it does not glow.
+- One pass at the picture's own size: the frame is copied (`iScreenPassCapture`) and drawn back
+  through the pixel shader with ONE/ZERO, linear, clamped. The trip through 512x512 is left out:
+  at 1920x1080 it would blur the picture, not soften it.
+- The offsets are shares of the picture (A/640 across, A/480 down), so the swirl is the same at
+  any render size, and on a wide picture it covers the whole of it, as the Xbox's own arithmetic
+  does on a 16:9 television.
+- The clock is real time (`std::chrono::steady_clock`), wrapped to one turn before it becomes a
+  float.
+- It follows the setting at once (`iExtrasApply`), like the glow.
+
+**When it is not drawn.** The GameCube look is used, and the overlay's row says why:
+
+| Case | Sentence |
+|---|---|
+| The game's files are the GameCube's (no swirl map) | "The game's files are GameCube files: they have no swirl map, so none is drawn." |
+| Direct3D 9's fixed path (no pixel shader) | "Direct3D 9's fixed path has no pixel shader for the swirl: none is drawn." |
+| The 3DS | "Not on the 3DS yet." |
+| Android and the Switch (the pass is built for their OpenGL and has never been run there) | "Not on Android or the Switch yet." |
+| Vulkan (no SPIR-V build of the shader: that needs a `dxc.exe` with SPIR-V output, `rw/shaders/make_shaders.cmd`) | "The Vulkan renderer has no shader for the swirl yet: none is drawn." |
+| Xbox files whose `plat.HIP` has no map after all (a mod's) | "The game's files have no swirl map (BXCruiseBubbleDistort in plat.HIP): none is drawn." |
+| The shader or the frame's copy failed (said once in the log) | "The swirl could not be drawn (the log says why): none is drawn." |
+
+**How it was checked** (2026-11-19 and 2026-11-20). When the pass is drawn, and what is drawn over
+it, were seen on the Xbox game itself, run in Cxbx-Reloaded: the pass is drawn exactly while the
+wave flies, and the guitar's wind streaks, reticle and countdown are drawn on top of it, not
+swirled, as here. The swirl's shape cannot be seen there (the emulator fills the pass with a flat
+colour), so the shape is compared with a model of the Xbox's arithmetic, written from the
+executable.
+
+- `TSSM_TEST_DISTORT=<amount>[,<milliseconds>]` draws the pass at that amount in every frame of a
+  level, with the clock held when a time is given. PT03 held still (`tools/regress.py`'s
+  `pt03_belt` place), 640x480, amount 1 and time 0: the frame with `xbox` against the model run on
+  the `gamecube` frame of the same build, over the wall above the lava (the lava does not repeat
+  from run to run). The two differ by a mean of 0.10 of 255 on Direct3D 9 (64-bit and 32-bit) and
+  OpenGL 3, where the pass itself moves that part of the picture by 5.5; at amount 0.5 and 785
+  ms, by 0.06 (Direct3D 9). A second model, written separately from the executable, differs from
+  the port by 0.19 on Direct3D 9, OpenGL 3 and Direct3D 11, at both widths. (Direct3D 11 is
+  measured with `vsync` off: with it on, the small test window runs at about 30 frames a second
+  on this PC and the camera is not at the same place in two runs.) Two `gamecube` runs differ by
+  0.003, and so does `xbox` with the amount at 0 from `gamecube`.
+- `TSSM_TEST_DISTORT=log` logs the game's own amount for every frame the pass is asked for.
+  BB02 with the guitar given (`TSSM_TEST_POWERUP`) and fired with rt: with `xbox` the pass is
+  asked for in 166 frames, the amount rising from 0 to 1 over about 95 of them and staying at 1
+  until the wave ends; with `gamecube` in none, and the frames show no swirl. `tools/regress.py`'s
+  runs `bb02_guitar_xbox` and `bb02_guitar_gamecube` check this from the log (`check_guitar`).
+- What it costs, with the pass forced on in every frame (PT03 held still, 1920x1080, 4x
+  anti-aliasing, no cap, x64 Debug, RTX 5070 Ti; medians of frames 300 to 1200, two runs each,
+  `TSSM_PERF`): GPU time on OpenGL 3 0.35 to 0.44 ms a frame (+0.08 ms); the whole frame 1.09 to
+  1.13 ms on OpenGL 3, 1.04 to 1.06 ms on Direct3D 11 and 1.19 to 1.22 ms on Direct3D 9. One more
+  camera update a frame (17 to 18), for the copy. At an amount of 0, which is all the time the
+  wave is not steered, nothing is drawn.
+
 ## Per platform
 
 | Key | PC: D3D9 (both paths), D3D11, OpenGL 3 | Android: GLES 3 | Switch: OpenGL | 3DS |
@@ -596,11 +691,14 @@ The Xbox water (`iXboxWater.h`, `docs/RENDERING.md`, "Water") was built with its
 | `crowds` | xbox | xbox | xbox | gamecube, row hidden |
 | `water` | xbox (D3D9's shader path, D3D11, OpenGL 3; Vulkan and D3D9's fixed path use the GameCube water) | xbox | xbox | gamecube, row hidden |
 | `frame_lock` | xbox | xbox | xbox | gamecube, row hidden (the 3DS's cap is 30) |
+| `guitar_distortion` | xbox (D3D9's shader path, D3D11, OpenGL 3; Vulkan and D3D9's fixed path draw none) | not yet: built for GLES 3, never run there, so none is drawn ("Other platform branches") | not yet, as Android | gamecube, row hidden |
 
-Android and the Switch get the PC's rows and defaults. The 3DS defaults every key to `gamecube`
+Android and the Switch get the PC's rows and defaults, the guitar's included: its key defaults to
+`xbox` there too, and `iExtrasResolve` answers `gamecube` ("Not on Android or the Switch yet.")
+until the pass has been run on them. The 3DS defaults every key to `gamecube`
 (`#ifdef __3DS__` in `iConfigTable.cpp`) and shows no rows (`ExtrasRowShown`) until each feature has
-been timed on the console; its renderer also resolves the glow, the spotlights and the water to
-`gamecube` ("Not on the 3DS yet."), so only a hand-edited `crowds` or `frame_lock` would take
+been timed on the console; its renderer also resolves the glow, the spotlights, the water and the guitar's
+distortion to `gamecube` ("Not on the 3DS yet."), so only a hand-edited `crowds` or `frame_lock` would take
 effect there.
 
 **What the extras cost.** GPU time a frame on the PC (RTX 5070 Ti, OpenGL 3, which runs the GLSL the
@@ -658,6 +756,18 @@ update (3 fewer camera updates a frame) measured 0.55 to 0.69 ms on D3D9 and no 
   `iFileAssetPlatform` in `iFile.cpp`). A platform build without those files needs stand-ins that
   say "no Xbox water" (false, NULL) and "Xbox files" (`IGCPLAT_XBOX`, NULL), as
   `tests/extrastest.cpp` has.
+- The guitar's distortion: `iXboxDistort.cpp` is a game unit (`tssm_game` in `CMakeLists.txt`,
+  beside `iExtrasGC.cpp`); a platform with a CMake of its own adds it there, or the link misses
+  `iXboxDistortSetAmount`, `iXboxDistortActive` and `iXboxDistortRender`, which
+  `zEntCruiseBubble.cpp` and `zScene.cpp` call under `PLATFORM_PC`, and `iXboxDistortStatus`,
+  which `iExtras.cpp` calls. `rw/xboxdistort.cpp` comes with the `rw/*.cpp` glob. Android and the
+  Switch run its GL3 arm (`rw/shadersgl/xboxdistort.frag`, written as the other passes' are;
+  `iXboxDistortRegisterShaderUniforms` is called from `RwEngineOpen`) and need the Xbox files'
+  `plat.HIP`; neither has been run, so `iExtrasResolve` gives them `gamecube` for now
+  (`iEXTRAS_RENDERER_DEVICE_GL`, from `CurrentRenderer` in `iExtras.cpp`): once the swirl has
+  been seen right on a device, that case goes. The swirl turns on `std::chrono::steady_clock`. The 3DS
+  resolves it to `gamecube` (`iExtrasResolve`), and a renderer without Direct3D or GL3 gets
+  `rw/xboxdistort.cpp`'s stand-in, which draws nothing.
 - The 3DS: the `[extras]` defaults are already `gamecube` there and the overlay shows no rows
   (above). Its CMake globs `src/SB/Core/pc/rw/*.cpp`, so `rw/lightvolume.cpp` (with
   `iLightVolumeForgetCones`, which `zSpotlight::setup_all` calls) and `rw/xboxglow.cpp` come with

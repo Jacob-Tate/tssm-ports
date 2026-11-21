@@ -52,6 +52,7 @@
 #include "backend.h"
 #include "iDeviceReset.h"
 #include "iDistort.h"
+#include "iXboxDistort.h"
 #include "iGpuOpt.h"
 #include "iGlow.h"
 #include "iScreen.h"
@@ -922,6 +923,7 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
     // The notes on the definitions have the rest.
     iGlowRegisterShaderUniforms();
     iDistortRegisterShaderUniforms();
+    iXboxDistortRegisterShaderUniforms();
     iXboxWaterRegisterShaderUniforms();
 
     // The backend. Already done by RenderWareInit before the window was

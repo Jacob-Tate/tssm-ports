@@ -93,8 +93,11 @@ namespace
     const ExpectWords kExpectWords[ISAVETEXT_COUNT] = {
         { "auto", NULL, NULL },
         { "xbox", "Please don't turn off your Xbox console.", "do not turn off your Xbox console." },
-        { "ps2", "Do not remove the {i:PS2_MEMCARD}, or reset/switch off the console.",
-          "do not remove the {i:PS2_MEMCARD}, or reset/switch off the console." },
+        { "ps2",
+          "Do not remove {i:PS2_MEMCARD} in {var:MCSelectedCard}, or the {i:PS2_PAD_NAME}, or "
+          "reset/switch off the console.",
+          "Do not remove {i:PS2_MEMCARD}, the {i:PS2_PAD_NAME}, or reset/switch off the "
+          "console." },
         { "gamecube", "Do not touch the Memory Card or the POWER Button",
           "Do not remove the Memory Card or power off the Nintendo GameCube." },
         { "generic", "Please don't turn off the power or quit the game.",
