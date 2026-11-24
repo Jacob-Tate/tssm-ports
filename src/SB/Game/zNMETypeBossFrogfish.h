@@ -359,6 +359,11 @@ struct zNMEFrogfish : zNMEBoss
     void OneLinersReset();
     void OneLinersUpdate(F32 dt);
     void RenderHud();
+#ifdef PLATFORM_PC
+    // Online co-op (docs/MULTIPLAYER.md 16): the guest's copy shows the
+    // host's fight (zNMETypeBossFrogfish.cpp).
+    void CoopGuestShow(S32 newState, S32 stage, S32 cam, S32 health, S32 attack, F32 dt);
+#endif
     void MeterUpdate();
     void MeterRender();
     bool LungeHit();

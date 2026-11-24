@@ -561,7 +561,10 @@ namespace
 
     bool EnemyType(U32 t)
     {
-        return (t >= NME_TYPE_TIKI && t <= NME_TYPE_TIKI_STONE) || (t >= NME_TYPE_CRITTER && t <= NME_TYPE_BUCKOTRON_V7);
+        // Protocol 9 (docs/MULTIPLAYER.md 16): the Frogfish and its tongue are
+        // shared too; iCoopBoss.cpp carries the fight's own state.
+        return (t >= NME_TYPE_TIKI && t <= NME_TYPE_TIKI_STONE) || (t >= NME_TYPE_CRITTER && t <= NME_TYPE_BUCKOTRON_V7) ||
+               t == NME_TYPE_FROGFISH || t == NME_TYPE_TONGUESPIN;
     }
 
     bool MoverPlatform(const zPlatform* p)
@@ -2501,6 +2504,7 @@ namespace
 void iCoopWorldReset()
 {
     iCoopHudReset();
+    iCoopBossReset();
     iCoopCombatReset();
     iCoopFlowReset();
     if (!sDirty)
@@ -2777,6 +2781,10 @@ bool iCoopWorldGuestPose(xBase* b, F32 dt)
             }
         }
         Pose(sThings[i], g, w, dt);
+    }
+    if (sThings[i].kind == K_ENEMY)
+    {
+        iCoopBossGuestShow(i, sThings[i].ent, dt);
     }
     return true; // nothing from the host yet: it keeps still
 }
@@ -3067,6 +3075,18 @@ void iCoopStandInEnd()
 bool iCoopStandInActive()
 {
     return sStand.active;
+}
+
+bool iCoopStandInRealPos(F32 out[3])
+{
+    if (!sStand.active || sStand.mats < 1)
+    {
+        return false;
+    }
+    out[0] = sStand.mat[0].pos.x;
+    out[1] = sStand.mat[0].pos.y;
+    out[2] = sStand.mat[0].pos.z;
+    return true;
 }
 
 void iCoopWorldDeathFx(xBase* b)

@@ -59,6 +59,21 @@ void iCoopWorldPlaceSoon(const char* why);
 // of it, 5.7).
 bool iCoopWorldFollowedHere();
 
+// --- iCoopBoss.cpp (docs/MULTIPLAYER.md 16) ---------------------------------------------------
+
+// Once a frame from iCoopCombatFrame, connected: the host sends its bosses'
+// fight state (EV_BOSS) when it changes, and once a second.
+void iCoopBossFrame(U64 now, bool guest);
+// Guest: an EV_BOSS from the host.
+void iCoopBossEvent(const iNet::GameEvent& e);
+// Guest: from iCoopWorldGuestPose, after posing thing `id`: a boss shows the
+// host's fight.
+void iCoopBossGuestShow(S32 id, xEnt* e, F32 dt);
+void iCoopBossReset();
+// Host, a guest's hit on `e`: how much further than the attack's own reach it
+// may land (a boss's size; 0 for any other enemy).
+F32 iCoopBossReach(xEnt* e);
+
 // --- iCoopCombat.cpp ------------------------------------------------------------------------
 
 // Once a frame from iCoopWorldFrame, connected: `partner` is the newest state

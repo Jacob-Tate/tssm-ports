@@ -41,7 +41,7 @@ namespace iNet {
 // as 0 and 1 in a join code
 enum : uint16_t
 {
-    kProtoVersion = 8
+    kProtoVersion = 9 // 9: EV_BOSS (docs/MULTIPLAYER.md 16)
 };
 extern const uint8_t kMagic[4]; // "TSCP"
 
@@ -374,6 +374,8 @@ enum EventType : uint8_t
     EV_UPGRADE =
         10, // guest to host: the guest's game would give its player a move (a claim the host checks)
     EV_UPGRADE_ACK = 11, // host to guest: the answer to an EV_UPGRADE
+    // Protocol 9 (docs/MULTIPLAYER.md 16)
+    EV_BOSS = 12, // host to guest: a shared boss's fight state (BOSS_*: state, stage, camera, health, attack)
     EV_END
 };
 
@@ -460,6 +462,26 @@ enum : uint8_t
     kMoves = 8
 };
 
+// EV_BOSS (protocol 9): which boss (`kind`), and the limits of its fields:
+// dir[0] the boss's own state number, dir[1] its health, dir[2] its attack;
+// level its stage, sub its camera state.
+enum BossKind : uint8_t
+{
+    BOSS_FROGFISH = 1,
+    BOSS_END
+};
+enum : int16_t
+{
+    kBossStateMax = 0x1FFF, // Neptune's states go to 0x1005
+    kBossHealthMax = 999,
+    kBossAttackMax = 63,
+};
+enum : uint8_t
+{
+    kBossStageMax = 15,
+    kBossCamMax = 31,
+};
+
 // One game event. Only the fields its type uses are on the wire; the rest are
 // zero after parsing and ignored when encoding.
 struct GameEvent
@@ -473,7 +495,7 @@ struct GameEvent
     // PICKUP, GRANT: < kMaxPickups; SHOW: < kMaxShows
     uint8_t
         kind; // HIT: ATK_*; DAMAGE: DK_*; PICKUP: PW_*; GRANT: GR_*; SHOW: SHOW_*; LOOK: the character,
-    // CHAR_*; UPGRADE, UPGRADE_ACK: UPG_*
+    // CHAR_*; UPGRADE, UPGRADE_ACK: UPG_*; BOSS: BOSS_*
     uint8_t level;    // HIT: kPowerupMin..kPowerupMax; DAMAGE: health taken, 1..kPlayerHealthMax; SHOW:
                       // SHOWF_* (SHOW_CUTSCENE_START only, 0 otherwise); LOOK: SpongeBob's costume,
     // < kCostumeChoices; UPGRADE_ACK: GR_YOURS (given) or GR_NO

@@ -845,7 +845,9 @@ add_library(tssm_game STATIC ${TSSM_GAME_SOURCES}
   ${PC_DIR}/iCoopCombat.cpp
   ${PC_DIR}/iCoopFlow.cpp
   ${PC_DIR}/iCoopLook.cpp
-  ${PC_DIR}/iCoopHud.cpp)
+  ${PC_DIR}/iCoopHud.cpp
+  # The boss fights (docs/MULTIPLAYER.md 16).
+  ${PC_DIR}/iCoopBoss.cpp)
 target_link_libraries(tssm_game PUBLIC tssm_platform tssm_rw)
 target_compile_definitions(tssm_game PRIVATE NON_MATCHING)
 # TSSM_TEST_SEND, an event to a scene object at a frame (iTestSend.h): a game

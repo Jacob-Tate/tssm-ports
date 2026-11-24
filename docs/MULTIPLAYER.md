@@ -37,6 +37,7 @@ Contents
 13. Playing as one game: hits that land, and one progress (protocol version 7)
 14. Co-op on the home network, across devices (protocol version 8)
 15. Co-op through a relay server
+16. Boss fights: the Frogfish (protocol version 9)
 
 ---
 
@@ -3544,3 +3545,50 @@ port (7865 by default) must be reachable by both players.
 - The relay adds the trip to the server to the ping. A server near both
   players matters more than their bandwidth.
 - The server sees who plays and when (addresses, names, room codes), not what.
+
+---
+
+## 16. Boss fights: the Frogfish (protocol version 9)
+
+Until protocol 9 each game ran its own boss for its own player. Protocol 9
+shares the first boss, the Frogfish (B101), the same way as the other enemies,
+and carries what a snapshot cannot: the fight itself. The other bosses (Dennis
+in B201 and B301, King Neptune in B401) are still each game's own.
+
+### 16.1 How it works
+
+- **The Frogfish and its tongue are shared enemies.** They are in the level's
+  table (`EnemyType`, iCoopWorld.cpp). The host's game runs the fight; the
+  guest's copy thinks nothing and is posed from the host's snapshots (5.5).
+- **The fight's state goes to the guest as EV_BOSS.** On change and once a
+  second (for a guest that arrives mid-fight), the host sends the boss's state,
+  stage, health, current attack and camera state (iCoopBoss.cpp). The event is
+  reliable and host-only; its fields are checked against fixed limits
+  (iNetProto.cpp), then against the game's own enum ranges before use.
+- **The guest's copy shows it** (`zNMEFrogfish::CoopGuestShow`): the health
+  meter, the sounds a new state starts with (as `EnterState` plays them), and
+  this game's own boss camera. The camera follows the guest's own player; when
+  the host's camera locks its player still (the jump to the tongue), the
+  guest's does too, at the same moment.
+- **The boss can go for the guest.** On the host, the Frogfish's update runs
+  with the guest standing in when the guest is the nearer player (5.4), so its
+  charge, lunge and knock-back reach the guest as EV_DAMAGE. The boss's camera
+  on the host follows the host's real place during a stand-in
+  (`iCoopStandInRealPos`), not the guest's.
+- **The guest's hits are claims** (6.2) and land through the Frogfish's own
+  damage mail, which takes damage only while it teeters, as for the host's
+  player. A boss's hit may land anywhere on its bound: the reach check adds the
+  bound's far side to the attack's reach (`iCoopBossReach`, at most 30 units).
+- **The end of the fight** is the host's: its death cutscene reaches the guest
+  as a show (7.3), and the guest follows the host's exit (7.2).
+
+### 16.2 Limits
+
+- Not yet played through in a test with two games; the protocol checks are in
+  tssm_nettest.
+- The Frogfish's phlegm and other hazards are drawn on the host only (5.10).
+  They can still hit the guest (iCoopStandInNear).
+- Effects that happen in the middle of a state on the host (the dust ring and
+  rumble when the lunge lands) do not play on the guest.
+- The level's own scripts that react to the boss's events
+  (`eEventBossStageEndedC`, `eEventDeath`) run on the host only.

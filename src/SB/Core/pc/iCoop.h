@@ -81,6 +81,9 @@ void iCoopStandInEnd();
 // zEntPlayer's damage and event entry points: TRUE during a stand-in (the
 // hit was meant for the guest, not this player).
 bool iCoopStandInActive();
+// During a stand-in: where this game's player really is (its own camera, which
+// a boss's update sets, follows it). FALSE outside one.
+bool iCoopStandInRealPos(F32 out[3]);
 
 // Host, xUpdateCull_DistanceSquaredCB: TRUE when the point `pos` (x, y, z) is
 // within the update distance (squared) of the guest.

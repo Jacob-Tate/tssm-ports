@@ -7,6 +7,25 @@
 #include "zCam.h"
 #include "zNMETypeTongueSpin.h"
 
+#ifdef PLATFORM_PC
+#include "iCoop.h"
+
+// Online co-op (docs/MULTIPLAYER.md 16): on the host, the fight can run with
+// the guest standing in for this game's player (iCoopStandInBegin), but the
+// boss's camera is this game's own: it follows this player's real place.
+static xVec3* FFCamPlayerPos()
+{
+    static xVec3 real;
+    if (iCoopStandInRealPos(&real.x))
+    {
+        return &real;
+    }
+    return xEntGetPos(xglobals->___player_ent_dont_use_directly);
+}
+#else
+#define FFCamPlayerPos() xEntGetPos(xglobals->___player_ent_dont_use_directly)
+#endif
+
 U32 gHashFrogFishAnim[33];
 char* gStrFrogFishAnim[33] = {
     "Unknown",      "Idle",          "WalkLeft",   "WalkRight",   "Taunt1",       "Hit",
@@ -261,7 +280,7 @@ void zNMEFrogfish::SetCamState(eFFBossCameraState newState)
         camTimer = 0.35f;
         break;
     case ezFFBOSS_CAMERA_STATE_AFTERJUMP:
-        camTargetStart = *xEntGetPos(xglobals->___player_ent_dont_use_directly);
+        camTargetStart = *FFCamPlayerPos();
         CalcPos(&tongueLoc, ezFFBOSS_LOC_TONGUE);
         xVec3Lerp(&camTargetEnd, &camTargetStart, &tongueLoc, 0.75f);
         camInterpTime = 0.0f;
@@ -273,7 +292,7 @@ void zNMEFrogfish::SetCamState(eFFBossCameraState newState)
         break;
     case ezFFBOSS_CAMERA_STATE_PREPGENERATION:
         camTargetStart = camTarget1;
-        camTargetEnd = *xEntGetPos(xglobals->___player_ent_dont_use_directly);
+        camTargetEnd = *FFCamPlayerPos();
         camInterpTime = 0.0f;
         camInterpDuration = 1.0f;
         camTimer = camInterpDuration;
@@ -283,7 +302,7 @@ void zNMEFrogfish::SetCamState(eFFBossCameraState newState)
         break;
     case ezFFBOSS_CAMERA_STATE_TRANSTOREGULAR:
         camTargetStart = camTarget1;
-        camTargetEnd = *xEntGetPos(xglobals->___player_ent_dont_use_directly);
+        camTargetEnd = *FFCamPlayerPos();
         camInterpTime = 0.0f;
         camInterpDuration = 1.0f;
         camTimer = camInterpDuration;
@@ -315,7 +334,7 @@ void zNMEFrogfish::UpdateCam(F32 dt)
         gzBinaryCam->cfg_common.priority = 5;
         gzBinaryCam->create();
         gzBinaryCam->attach(xglobals->___player_ent_dont_use_directly);
-        gzBinaryCam->set_targets(*xEntGetPos(xglobals->___player_ent_dont_use_directly),
+        gzBinaryCam->set_targets(*FFCamPlayerPos(),
                                  *(xVec3*)&model->Mat[3].pos, 0.5f);
         zCamAdd(*gzBinaryCam, true);
         cameraSetup = 1;
@@ -329,13 +348,13 @@ void zNMEFrogfish::UpdateCam(F32 dt)
             camTarget2 = *(xVec3*)&model->Mat[3].pos;
             xMat3x3RMulVec(&camTarget2, (xMat3x3*)model->Mat, &camTarget2);
             camTarget2 += *(xVec3*)&model->Mat->pos;
-            gzBinaryCam->set_targets(*xEntGetPos(xglobals->___player_ent_dont_use_directly),
+            gzBinaryCam->set_targets(*FFCamPlayerPos(),
                                      camTarget2, 0.5f);
             camTimer = -1.0f;
             break;
         case ezFFBOSS_CAMERA_STATE_PREPJUMP:
             CalcPos(&camTarget2, ezFFBOSS_LOC_TONGUE_TRENCH);
-            gzBinaryCam->set_targets(*xEntGetPos(xglobals->___player_ent_dont_use_directly),
+            gzBinaryCam->set_targets(*FFCamPlayerPos(),
                                      camTarget2, 0.5f);
             camTimer -= dt;
             break;
@@ -2092,3 +2111,65 @@ void zNMEFrogfish::MeterRender()
 {
     FFMeterHealth.Render();
 }
+
+#ifdef PLATFORM_PC
+// Online co-op (docs/MULTIPLAYER.md 16): the guest's copy of the boss thinks
+// nothing (iCoopWorldGuestPose poses it from the host's snapshots); this shows
+// the host's fight on it: the sounds a new state starts with (as EnterState
+// plays them), the stage and health on the meter, and this game's own boss
+// camera, which follows this game's player and holds it still when the host's
+// camera does (SetCamState).
+void zNMEFrogfish::CoopGuestShow(S32 newState, S32 stage, S32 cam, S32 health, S32 attack, F32 dt)
+{
+    eFFBossState st = (eFFBossState)newState;
+    if (st != state)
+    {
+        switch (st)
+        {
+        case ezFFBOSS_STATE_CHARGE:
+            xSndMgrPlay(sSoundAsset[eSoundChargePrep], 2, NULL, NULL, this, NULL, NULL);
+            break;
+        case ezFFBOSS_STATE_STOPPING:
+        case ezFFBOSS_STATE_TAUNT:
+            xSndMgrPlay(sSoundAsset[eSoundSkid], 2, NULL, NULL, this, NULL, NULL);
+            break;
+        case ezFFBOSS_STATE_WAIT_IN_PIT:
+            xSndMgrPlay(sSoundAsset[eSoundLand], 2, NULL, NULL, this, NULL, NULL);
+            break;
+        case ezFFBOSS_STATE_DAMAGE:
+            xSndMgrPlay(sSoundAsset[eSoundYelp], 2, NULL, NULL, this, NULL, NULL);
+            FFOneLiners.PlaySound(eFFOneLinerFFHit);
+            break;
+        case ezFFBOSS_STATE_TONGUEDAMAGE:
+            xSndMgrPlay(sSoundAsset[eSoundTongueBite], 2, NULL, NULL, this, NULL, NULL);
+            FFOneLiners.PlaySound(eFFOneLinerFFHit);
+            break;
+        case ezFFBOSS_STATE_DYING:
+            deadSndHandle = xSndMgrPlay(sSoundAsset[eSoundDead], 2, NULL, NULL, this, NULL, NULL);
+            break;
+        default:
+            break;
+        }
+        state = st;
+    }
+    stageCurr = stage;
+    ptsHealth = health;
+    attackCurr = attack;
+    if (!IsAlive())
+    {
+        flg_hudrend = 0;
+        if (simpShadow != NULL || entShadow != NULL)
+        {
+            ShadStufIAmDead();
+        }
+        return;
+    }
+    ShadStufUpdate();
+    SetCamState((eFFBossCameraState)cam);
+    UpdateCam(dt);
+    MeterUpdate();
+    flg_hudrend = 1;
+    // Where the guest's own attacks find it (its bound moves with its state).
+    BUpdate(NULL);
+}
+#endif

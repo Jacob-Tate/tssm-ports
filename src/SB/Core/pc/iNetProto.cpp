@@ -553,6 +553,7 @@ size_t event_size(uint8_t type)
         return 1 + 4 + 1 + 1;
     case EV_UPGRADE_ACK:
         return 1 + 4 + 1 + 1 + 1;
+    case EV_BOSS: return 1 + 4 + 4 + 2 + 1 + 1 + 1 + 6;
     default: return 0;
     }
 }
@@ -600,7 +601,8 @@ static bool event_from_ok(uint8_t type, Role from)
     case EV_UPGRADE_ACK:
     case EV_LEVEL:
     case EV_GO:
-    case EV_SHOW: return from == Role::Host;
+    case EV_SHOW:
+    case EV_BOSS: return from == Role::Host;
     case EV_LOOK: return true;
     default: return false;
     }
@@ -638,6 +640,10 @@ bool event_valid(const GameEvent& e, Role from)
         if (e.id >= kMaxShows || e.kind < SHOW_CUTSCENE_START || e.kind >= SHOW_END) return false;
         return e.kind == SHOW_CUTSCENE_START ? (e.level & ~SHOWF_MASK) == 0 : e.level == 0;
     case EV_LOOK: return e.kind < CHAR_END && e.level < kCostumeChoices && e.sub < kCostumeChoices;
+    case EV_BOSS:
+        return e.id < kMaxNetIds && e.kind >= BOSS_FROGFISH && e.kind < BOSS_END && e.level <= kBossStageMax &&
+               e.sub <= kBossCamMax && e.dir[0] >= 0 && e.dir[0] <= kBossStateMax && e.dir[1] >= 0 &&
+               e.dir[1] <= kBossHealthMax && e.dir[2] >= 0 && e.dir[2] <= kBossAttackMax;
     default: return false;
     }
 }
@@ -764,6 +770,14 @@ static void put_event(Writer& w, const GameEvent& e)
         w.u8(e.level);
         w.u8(e.sub);
         break;
+    case EV_BOSS:
+        w.u32(e.table);
+        w.u16(e.id);
+        w.u8(e.kind);
+        w.u8(e.level);
+        w.u8(e.sub);
+        for (int i = 0; i < 3; i++) w.i16(e.dir[i]);
+        break;
     }
 }
 
@@ -823,6 +837,14 @@ static void get_event(Reader& r, Role from, GameEvent* e)
         e->kind = r.u8();
         e->level = r.u8();
         e->sub = r.u8();
+        break;
+    case EV_BOSS:
+        e->table = r.u32();
+        e->id = r.u16();
+        e->kind = r.u8();
+        e->level = r.u8();
+        e->sub = r.u8();
+        for (int i = 0; i < 3; i++) e->dir[i] = r.i16();
         break;
     }
     if (r.ok && !event_valid(*e, from)) r.fail();

@@ -662,6 +662,16 @@ static GameEvent good_event(uint8_t type)
         e.level = 1;
         e.sub = 4;
         break;
+    case EV_BOSS:
+        e.table = 0x5EED0002;
+        e.id = 41;
+        e.kind = BOSS_FROGFISH;
+        e.level = 2;   // stage
+        e.sub = 6;     // camera state
+        e.dir[0] = 18; // state
+        e.dir[1] = 7;  // health
+        e.dir[2] = 1;  // attack
+        break;
     }
     return e;
 }
@@ -696,11 +706,11 @@ static void test_events()
     uint8_t buf[kMaxPayload];
     static Payload q;
     // Each type round-trips from its own side, and is refused from the other.
-    const uint8_t types[6] = { EV_HIT, EV_DAMAGE, EV_PICKUP, EV_GRANT, EV_UPGRADE, EV_UPGRADE_ACK };
-    const Role sides[6] = { Role::Client, Role::Host,   Role::Client,
-                            Role::Host,   Role::Client, Role::Host };
-    const size_t sizes[6] = { 31, 22, 12, 12, 7, 8 };
-    for (int k = 0; k < 6; k++)
+    const uint8_t types[7] = { EV_HIT, EV_DAMAGE, EV_PICKUP, EV_GRANT, EV_UPGRADE, EV_UPGRADE_ACK, EV_BOSS };
+    const Role sides[7] = { Role::Client, Role::Host,   Role::Client, Role::Host,
+                            Role::Client, Role::Host,   Role::Host };
+    const size_t sizes[7] = { 31, 22, 12, 12, 7, 8, 20 };
+    for (int k = 0; k < 7; k++)
     {
         GameEvent e = good_event(types[k]);
         Role other = sides[k] == Role::Host ? Role::Client : Role::Host;
@@ -809,6 +819,25 @@ static void test_events()
         EXPECT(event_patched(a, Role::Host, 7, GR_YOURS) && !event_patched(a, Role::Host, 7, 0) &&
                    !event_patched(a, Role::Host, 7, GR_END),
                "an upgrade's answer of yes or no only");
+    }
+    // Protocol 9, EV_BOSS (offsets: type 0, scene 1, table 5, id 9, kind 11,
+    // stage 12, camera 13, state 14, health 16, attack 18).
+    {
+        GameEvent b = good_event(EV_BOSS);
+        EXPECT(event_patched(b, Role::Host, 11, BOSS_FROGFISH) && !event_patched(b, Role::Host, 11, 0) &&
+                   !event_patched(b, Role::Host, 11, BOSS_END),
+               "a boss's kind of 0 or past the last refused");
+        EXPECT(event_patched(b, Role::Host, 12, kBossStageMax) && !event_patched(b, Role::Host, 12, kBossStageMax + 1) &&
+                   event_patched(b, Role::Host, 13, kBossCamMax) && !event_patched(b, Role::Host, 13, kBossCamMax + 1),
+               "a boss's stage past 15 or camera state past 31 refused");
+        EXPECT(!event_patched(b, Role::Host, 15, 0x80) && !event_patched(b, Role::Host, 17, 0x80) &&
+                   !event_patched(b, Role::Host, 19, 0x80),
+               "a boss's negative state, health or attack refused");
+        EXPECT(!event_patched(b, Role::Host, 17, 0x04) && !event_patched(b, Role::Host, 18, 64) &&
+                   event_patched(b, Role::Host, 18, 63) && !event_patched(b, Role::Host, 15, 0x20),
+               "a boss's health past 999, attack past 63 or state past 0x1FFF refused");
+        b.id = kMaxNetIds;
+        EXPECT(encode_events(&b, 1, Role::Host, buf, sizeof buf) == 0, "a boss's net ID past the table refused");
     }
     // The message: 1-8 events, ids from `first` on (across the wrap), no
     // trailing bytes, nothing cut short.
@@ -1426,23 +1455,23 @@ static void test_m4_events()
 
 static void test_identity()
 {
-    printf("[2e] protocol 8: the build ID, the version code, join codes\n");
-    EXPECT(kProtoVersion == 8, "protocol version %u", (unsigned)kProtoVersion);
+    printf("[2e] protocol 9: the build ID, the version code, join codes\n");
+    EXPECT(kProtoVersion == 9, "protocol version %u", (unsigned)kProtoVersion);
 
-    // Known answers: SHA-256 of "tssm-coop build/2 <id> proto 8[ test-salt]".
+    // Known answers: SHA-256 of "tssm-coop build/2 <id> proto 9[ test-salt]".
     uint8_t id[kBuildIdSize];
     build_id("unknown", false, id);
-    EXPECT(hex(id, kBuildIdSize) == "5d04eb339b16e1534ac7b7eb5e17d1d1",
+    EXPECT(hex(id, kBuildIdSize) == "30c937fd183328ac8c500292025dcadc",
            "the ID of an unknown build: %s", hex(id, kBuildIdSize).c_str());
     build_id("unknown", true, id);
-    EXPECT(hex(id, kBuildIdSize) == "c346729a8e141505867cccfd4a1045ca", "the test salt's: %s",
+    EXPECT(hex(id, kBuildIdSize) == "2547473705a31a0d5ac246dd4a27f6ad", "the test salt's: %s",
            hex(id, kBuildIdSize).c_str());
     build_id("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", false, id);
-    EXPECT(hex(id, kBuildIdSize) == "5fd9ec277b986368282cafc78720e3b5", "a fingerprint's: %s",
+    EXPECT(hex(id, kBuildIdSize) == "015c443e0ff0b73c931d040285ae12dd", "a fingerprint's: %s",
            hex(id, kBuildIdSize).c_str());
     char code[9];
     version_code(id, code);
-    EXPECT(strcmp(code, "5fd9ec27") == 0, "its version code: %s", code);
+    EXPECT(strcmp(code, "015c443e") == 0, "its version code: %s", code);
 
     // This build's: tools/coop_id.cmake's own SHA-256 of the same text gives
     // the code the Co-op tab shows.

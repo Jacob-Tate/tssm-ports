@@ -1014,7 +1014,7 @@ namespace
         const F32* at = (const F32*)&ent->model->Mat->pos;
         F32 slack = Dist(e.pos, at);
         F32 reach = Dist(guestPos, e.pos);
-        if (slack > kTargetSlack || reach > ReachOf(e.kind))
+        if (slack > kTargetSlack || reach > ReachOf(e.kind) + iCoopBossReach(ent))
         {
             if (LogOk(LOG_HIT))
             {
@@ -2324,10 +2324,18 @@ void iCoopCombatFrame(U64 now, const PlayerState* partner, U64 partnerAt)
         case EV_LOOK:
             iCoopLookEvent(e);
             break;
+        // Protocol 9: the host's bosses (iCoopBoss.cpp).
+        case EV_BOSS:
+            if (guest)
+            {
+                iCoopBossEvent(e);
+            }
+            break;
         default:
             break;
         }
     }
+    iCoopBossFrame(now, guest);
 
     if (!guest)
     {
