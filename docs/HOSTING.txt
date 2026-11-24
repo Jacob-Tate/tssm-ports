@@ -17,6 +17,25 @@ other device finds your game in its list, and its player types the code.
 LAN.txt explains it. The rest of this guide is for playing over the internet.
 
 
+THE EASY WAY: THROUGH THE CO-OP SERVER
+--------------------------------------
+No router settings and no IP address are needed. Both games connect to a
+co-op server, which puts you in one room.
+
+1. Start the game, open the overlay (F1, or hold Back and press Start on a
+   controller) and go to the Co-op tab.
+2. Check the "Co-op server" box (it is filled in already) and press
+   "Host on the server".
+3. The tab shows a room code (4 characters) and a join code. Give both to the
+   other player in person or in a message.
+
+The other player types both codes (JOINING.txt). The join code stays between
+the two of you: the server cannot read your game. If the other player leaves,
+the room stays open. If you stop hosting, the room closes.
+The rest of this guide is the other way, with a forwarded port, for when you
+have no co-op server.
+
+
 WHAT HOSTING MEANS
 ------------------
 Your game runs the world for both of you: the enemies, the moving platforms,

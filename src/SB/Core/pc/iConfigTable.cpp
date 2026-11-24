@@ -225,6 +225,11 @@ const iConfigSetting kConfigSettings[] = {
     { "coop", "address", "",
       "Address to join: numbers only, like 203.0.113.7 or 203.0.113.7:2171.",
       ICONFIG_STRING, NULL, kNone, kNone },
+    { "coop", "server", "10.0.0.5:7865",
+      "The co-op server (docs/MULTIPLAYER.md 15): host or host:port. Hosting and\n"
+      "; joining through it need no forwarded port; the room code takes the\n"
+      "; place of the address.",
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "coop", "name", "",
       "Your name, shown above your head on the other player's screen: 1 to 16\n"
       "; letters, digits, spaces, _ . or -. Empty: Player.",

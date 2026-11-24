@@ -48,6 +48,9 @@ namespace
     char sCode[16];
     char sOwnPassword[iNet::kMaxPassword + 1];
     char sAddress[64];
+    char sServer[96]; // the co-op server, "host" or "host:port"
+    char sRoom[8]; // the room code typed to join through the server
+    bool sJoinViaServer; // the last join went through the server (Try again)
     char sJoinPassword[iNet::kMaxPassword + 1];
     char sWhy[200];
     // The code a running host was started with, to show and copy.
@@ -71,6 +74,7 @@ namespace
         snprintf(sName, sizeof(sName), "%s", iCoopDefaultName());
         sPort = iCoopDefaultPort();
         snprintf(sAddress, sizeof(sAddress), "%s", iCoopDefaultAddress());
+        snprintf(sServer, sizeof(sServer), "%s", iCoopDefaultServer());
         iCoopNewJoinCode(sCode);
         snprintf(sActiveCode, sizeof(sActiveCode), "%s", iCoopStartupJoinCode());
         sMode = iCoopNeedsPassword() ? 1 : 0;
@@ -98,6 +102,27 @@ namespace
         bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '.' ||
                   c == ':' || c == '[' || c == ']';
         return ok ? 0 : 1;
+    }
+
+    // Host names and numbers, with a port.
+    int ServerFilter(ImGuiInputTextCallbackData* data)
+    {
+        ImWchar c = data->EventChar;
+        bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' ||
+                  c == ':' || c == '-' || c == '[' || c == ']';
+        return ok ? 0 : 1;
+    }
+
+    // A room code: letters and digits, in capitals.
+    int RoomFilter(ImGuiInputTextCallbackData* data)
+    {
+        ImWchar c = data->EventChar;
+        if (c >= 'a' && c <= 'z')
+        {
+            data->EventChar = (ImWchar)(c - 'a' + 'A');
+            return 0;
+        }
+        return ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ? 0 : 1;
     }
 
     int PasswordFilter(ImGuiInputTextCallbackData* data)
@@ -517,11 +542,55 @@ namespace
     // password): iCoop.cpp writes it then, from the parsed numbers.
     void StartJoin()
     {
+        sJoinViaServer = false;
         if (iCoopJoin(sAddress, sJoinPassword, sName, sWhy, sizeof(sWhy), true))
         {
             sWhy[0] = '\0';
             sFromList = false;
             iGui::Commit("coop.name", sName);
+        }
+    }
+
+    // Through the co-op server (docs/MULTIPLAYER.md 15): a new join code every
+    // time, as "Host on this network" makes one. The server is kept once the
+    // room is entered.
+    void StartHostServer()
+    {
+        iCoopNewJoinCode(sCode);
+        sUseCode = true;
+        iCoopSetLanVisible(false);
+        if (iCoopHostServer(sServer, sCode, sName, sWhy, sizeof(sWhy)))
+        {
+            snprintf(sActiveCode, sizeof(sActiveCode), "%s", sCode);
+            sWhy[0] = '\0';
+            sHostForm = false;
+            sHostedLan = false;
+            sCodeHudLogged = false;
+            iGui::Commit("coop.name", sName, false);
+        }
+    }
+
+    void StartJoinServer()
+    {
+        sJoinViaServer = true;
+        if (iCoopJoinServer(sServer, sRoom, sJoinPassword, sName, sWhy, sizeof(sWhy)))
+        {
+            sWhy[0] = '\0';
+            sFromList = false;
+            iGui::Commit("coop.name", sName);
+        }
+    }
+
+    // Try again repeats the last join, by the server or by address.
+    void RetryJoin()
+    {
+        if (sJoinViaServer)
+        {
+            StartJoinServer();
+        }
+        else
+        {
+            StartJoin();
         }
     }
 
@@ -1314,6 +1383,41 @@ namespace
             "1 to 16 letters, digits, spaces, _ . or -. Shown above your head on the other "
             "player's screen, and in the list of games on this network.");
 
+        ImGui::SeparatorText("Co-op server (no port forwarding)");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+        ImGui::InputText("Co-op server", sServer, sizeof(sServer), ImGuiInputTextFlags_CallbackCharFilter,
+                         ServerFilter);
+        iGui::HelpMarker(
+            "The server both players connect to, so nobody forwards a port. It is kept for next time. "
+            "The default is the one this release was set up with.");
+        ImGui::TextUnformatted("Join a game on the server:");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+        ImGui::InputText("Room code", sRoom, sizeof(sRoom), ImGuiInputTextFlags_CallbackCharFilter, RoomFilter);
+        iGui::HelpMarker("The 4 letters or digits the host's Co-op tab shows as the room code.");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+        ImGui::InputText("Join code##server", sJoinPassword, sizeof(sJoinPassword),
+                         ImGuiInputTextFlags_Password | ImGuiInputTextFlags_CallbackCharFilter, PasswordFilter);
+        if (ImGui::IsItemActivated())
+        {
+            StartPasswordKeyboard();
+        }
+        if (ImGui::IsItemDeactivated())
+        {
+            StopCodeKeyboard();
+        }
+        if (ImGui::Button("Join on the server"))
+        {
+            StartJoinServer();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Host on the server"))
+        {
+            StartHostServer();
+        }
+        iGui::HelpMarker(
+            "One press: the server gives your game a room code, and a new join code is made. The other "
+            "player types both.");
+
         ImGui::SeparatorText("Join a game");
         DrawList(st);
         ImGui::Spacing();
@@ -1446,7 +1550,33 @@ namespace
                 }
             }
         }
-        if (st.localAddress[0] != '\0' && !sHostedLan)
+        if (st.relay)
+        {
+            ImGui::TextUnformatted("Room code:");
+            if (st.relayRoom[0] != '\0')
+            {
+                ImGui::PushFont(NULL, ImGui::GetStyle().FontSizeBase * 2.6f);
+                ImGui::TextUnformatted(st.relayRoom);
+                ImGui::PopFont();
+#ifndef __SWITCH__
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Copy##room"))
+                {
+                    ImGui::SetClipboardText(st.relayRoom);
+                }
+#endif
+                ImGui::TextUnformatted("The other player types this room code and the join code.");
+            }
+            else
+            {
+                ImGui::TextDisabled("asking the server for a room...");
+            }
+            if (st.relayPingMs >= 0)
+            {
+                ImGui::TextDisabled("Server ping: %d ms", (int)st.relayPingMs);
+            }
+        }
+        else if (st.localAddress[0] != '\0' && !sHostedLan)
         {
             ImGui::Text("Hosting on UDP port %u.", (unsigned)st.port);
             iGui::Note(
@@ -1581,7 +1711,7 @@ namespace
                 }
                 else
                 {
-                    StartJoin();
+                    RetryJoin();
                 }
             }
             ImGui::SameLine();
@@ -1776,7 +1906,7 @@ void iGuiCoopTest(const char* actions)
             }
             else
             {
-                StartJoin();
+                RetryJoin();
             }
             printf("tssm: gui: coop tab (test): Try again pressed (the tab said: %s)%s%s%s\n",
                    PhaseText(st), list ? ": the code entry again" : "", sWhy[0] ? ": " : "", sWhy);

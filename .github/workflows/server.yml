@@ -1,0 +1,65 @@
+name: TSSM relay server
+
+on:
+  push:
+    branches: [coop-server]
+    paths:
+      - 'server/**'
+      - 'include/netplay/**'
+      - '.dockerignore'
+      - '.github/workflows/server.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/tssm-server
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Image name (GHCR needs lowercase)
+        run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
+
+      - name: Validate Swarm/Portainer stack file
+        run: docker compose -f server/portainer-stack.yml config --quiet
+
+      - name: Build image
+        run: docker build -f server/Dockerfile -t tssm-server .
+
+      - name: Start server container
+        run: |
+          docker run -d --name tssmserver -p 7865:7865/udp tssm-server
+          sleep 2
+          docker logs tssmserver
+
+      - name: Integration test against the container
+        run: |
+          docker run --rm --network host --entrypoint tssm-server-test tssm-server 127.0.0.1 7865
+
+      - name: Server log
+        if: always()
+        run: docker logs tssmserver
+
+      - name: Image size
+        run: docker image ls tssm-server
+
+      # Publish only tested images (this workflow only runs on the coop-server branch or by hand).
+      - name: Log in to ghcr.io
+        if: github.ref == 'refs/heads/coop-server'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish to ghcr.io
+        if: github.ref == 'refs/heads/coop-server'
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          for tag in latest "$SHORT_SHA"; do
+            docker tag tssm-server "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          echo "Published $IMAGE:latest and $IMAGE:$SHORT_SHA" >> "$GITHUB_STEP_SUMMARY"

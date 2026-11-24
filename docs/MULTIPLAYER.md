@@ -36,6 +36,7 @@ Contents
 12. Local co-op: two copies on one PC
 13. Playing as one game: hits that land, and one progress (protocol version 7)
 14. Co-op on the home network, across devices (protocol version 8)
+15. Co-op through a relay server
 
 ---
 
@@ -3432,3 +3433,114 @@ console's Wi-Fi, the keyboards' types, the time a co-op save takes on the
 phone, the Quit-then-open-the-other case on the phone, whether Horizon
 refuses the second write open, and the console's csrng, sessions and core.
 Each platform's guide lists the first session's checks.
+
+---
+
+## 15. Co-op through a relay server
+
+### 15.1 Why
+
+Playing over the internet needed the host to forward a UDP port on their
+router (`HOSTING.txt`). Many players cannot: their provider shares one public
+address between many homes (CGNAT), or the router is not theirs. A relay
+server fixes that. Both games connect out to it, so neither player forwards a
+port or needs to know an IP address. Direct hosting, the home network and local
+co-op stay as they were.
+
+### 15.2 Topology
+
+```
+host's game  <--ENet-->  relay server  <--ENet-->  guest's game
+```
+
+The server is a small dedicated ENet program (`server/`), modelled on the
+servers of partyboard and smb2-pc. Those carry lockstep input. This one carries
+the datagrams of the host-authoritative co-op instead: the host's game still
+runs the world, the guest's game still shows it. The server only seats the two
+games in a room and passes their datagrams on. It never runs the game.
+
+The messages are listed at the top of `include/netplay/protocol.h`. The game's
+side is `src/SB/Core/pc/iNetRelay.cpp`.
+
+### 15.3 Room code and join code
+
+Two codes are used, and they do different jobs:
+
+- The **room code** (4 characters, made by the server) only routes. It tells
+  the server which two games belong together. It replaces the IP address and
+  the port.
+- The **join code** (or the host's own password) is still the session's
+  password, as in direct hosting. It is checked end to end between the two
+  games and never goes to the server.
+
+The host shows both. The guest types both. A player who learns a room code
+cannot join without the join code. The server cannot read the game traffic or
+forge it: every handshake and session packet is authenticated with a key that
+comes from the join code, which the server does not have (section 9, item 11).
+At worst a hostile server can drop packets, which the game treats as a bad
+connection.
+
+### 15.4 Virtual member addresses
+
+The session code (`iNetSession`) works with a source address on every datagram.
+So that it runs unchanged, each relay member gets a virtual IPv6 address in the
+`100::/64` discard prefix (RFC 6666), with the server's connection number in the
+last bytes. No real traffic ever goes there. The host sees its guest at one
+such address, and a guest sees the host at another. The address-based rules
+(one guest only, the lockout after wrong passwords, kicking) then apply as they
+do to a real address. A guest that leaves and joins again has a new connection
+number, so a kick lasts for that connection only.
+
+### 15.5 Channels and limits
+
+- Channel 0 carries the control messages (create or join a room, leave, the
+  room's state): reliable and in order.
+- Channel 1 carries the co-op datagrams: **unreliable and unsequenced**. The
+  session has its own acknowledgements, resends and ordering. A reliable
+  channel under it would only add waiting when a packet is lost.
+- Each member may send 600 datagrams a second. More are dropped. A datagram is
+  at most 1,200 bytes, the same as without the server.
+- A room holds two players. A third is refused with "room full".
+
+### 15.6 When someone leaves
+
+- **The guest leaves** (or loses the connection): the room stays open. The
+  host's game says the guest left and waits. The same player or another can
+  join with the same room code and join code. The automatic rejoin (section 8)
+  works through the server as well.
+- **The host leaves**: the room closes at once. The guest is told, and sees
+  "Disconnected".
+- **The server is lost** (network down, server stopped): both games see it as
+  a lost connection. The rooms are gone when the server restarts, so the host
+  starts a new one.
+
+### 15.7 In the game
+
+The Co-op tab has a "Co-op server" box, the guest's room code and join code,
+and two buttons: "Host on the server" and "Join on the server". Hosting shows
+the room code (and "asking the server for a room..." until the server gave it)
+and the join code, each with a Copy button, and the round trip to the server.
+Joining and the errors work as for a direct join.
+
+The setting is `server` in `[coop]` of `config.ini`: "host" or "host:port",
+default `10.0.0.5:7865`. It is written once a room is entered, so the next start
+has it ready. Another server is another value there.
+
+### 15.8 The server
+
+`server/` holds the program (`main.cpp`), its build (`CMakeLists.txt`), a test
+client (`test_client.cpp`), a `Dockerfile` and `portainer-stack.yml` to run it
+as a container (for example from Portainer), and its own `README.md`. One UDP
+port (7865 by default) must be reachable by both players.
+
+### 15.9 Limits
+
+- One server instance. There is no list of servers and no hand-over between
+  instances.
+- Rooms are in memory only. A restart ends every room.
+- No finding of games on the home network for a host that is on a server: the
+  list of "Games on this network" does not show it. A friend joins with the
+  codes.
+- The relay adds the trip to the server to the ping. A server near both
+  players matters more than their bandwidth.
+- The server sees who plays and when (addresses, names, room codes), not what.

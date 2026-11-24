@@ -15,7 +15,8 @@ game's own decompiled code runs unchanged in behaviour; a new platform layer
 
 **This branch adds co-op for two players:** online over the internet (one player hosts and
 forwards one UDP port on their router), on the same home network (games are found
-automatically and joined with a short code), and, on Windows, two copies on one PC. Co-op is
+automatically and joined with a short code), and, on Windows, two copies on one PC. Online co-op can also go through a co-op server (`server/`), so no
+port forwarding is needed. Co-op is
 host-authoritative: the host's game runs the world for both players. The players' guides
 are `docs/HOSTING.txt`, `docs/JOINING.txt` and `docs/LAN.txt`.
 

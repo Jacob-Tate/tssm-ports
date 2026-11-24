@@ -16,6 +16,21 @@ pad). LAN.txt explains it. The rest of this guide is for joining over the
 internet.
 
 
+THE EASY WAY: THROUGH THE CO-OP SERVER
+--------------------------------------
+If the host plays through the co-op server, you need no address and no
+router settings. The host gives you two codes: a room code (4 characters)
+and a join code.
+
+1. Start the game, open the overlay (F1, or hold Back and press Start on a
+   controller) and go to the Co-op tab.
+2. Under "Co-op server", check that the server is the same as the host's
+   (it is filled in already).
+3. Type the room code and the join code, then press "Join on the server".
+
+The rest of this guide is the other way, with the host's address.
+
+
 WHAT YOU NEED
 -------------
 1. The same version of the port as the host's.

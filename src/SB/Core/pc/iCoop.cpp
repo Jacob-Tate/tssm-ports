@@ -34,6 +34,7 @@
 #include "iMod.h"
 #include "iNetCrypto.h"
 #include "iNetDisc.h"
+#include "iNetRelay.h"
 #include "iNetSession.h"
 #include "iNetSock.h"
 #include "iSaveStore.h"
@@ -60,6 +61,7 @@ namespace
     char sName[kMaxName + 1] = "Player";
     U16 sPort = kDefaultPort;
     char sAddress[64];
+    char sServer[128];
     bool sLoopback;
     bool sNameTag = true;
     bool sFollow = true;
@@ -118,6 +120,11 @@ namespace
         char name[kMaxName + 1];
         iCoopAssetJob assets;
         bool remember; // joining: keep the address once the session is up
+        // Through the relay server (docs/MULTIPLAYER.md 15): its address, and
+        // joining, the room's code. The session's password stays the join code.
+        bool relay;
+        char server[128];
+        char room[RelayLink::kMaxCodeText];
     };
 
     const S32 kSampleQueue = 32;
@@ -334,6 +341,13 @@ namespace
     {
         UdpSocket sock;
         bool open;
+        // Through the relay server (docs/MULTIPLAYER.md 15): the link stands
+        // in for `sock`. Joining waits for the host in the room before the
+        // session's HELLO goes out (relayJoinPending).
+        bool relay;
+        RelayLink link;
+        bool relayJoinPending;
+        U64 relayStatusAt;
         iCoopRole role;
         Host host;
         Client client;
@@ -420,6 +434,38 @@ namespace
 
     Io* sIo; // allocated when the thread starts, never on the network path
 
+    void IoSockSend(Io* io, const NetAddr& to, const U8* d, size_t n)
+    {
+        if (io->relay)
+        {
+            io->link.send(to, d, n);
+        }
+        else
+        {
+            udp_send(io->sock, to, d, n);
+        }
+    }
+
+    // Closes the co-op socket, or leaves the relay's room.
+    void IoSockClose(Io* io)
+    {
+        if (io->relay)
+        {
+            io->link.stop();
+            io->relay = false;
+            io->relayJoinPending = false;
+            std::lock_guard<std::mutex> hold(sLock);
+            sStatus.relay = false;
+            sStatus.relayRoom[0] = ' ';
+            sStatus.relayPartner = false;
+            sStatus.relayPingMs = -1;
+        }
+        else
+        {
+            IoSockClose(io);
+        }
+    }
+
     void IoSend(void* ctx, const NetAddr& to, const U8* d, size_t n)
     {
         Io* io = (Io*)ctx;
@@ -451,7 +497,7 @@ namespace
             }
             return;
         }
-        udp_send(io->sock, to, d, n);
+        IoSockSend(io, to, d, n);
     }
 
     void IoFlushDelayed(Io* io, U64 now, bool all)
@@ -464,7 +510,7 @@ namespace
             {
                 if (io->open && !Blackout(now))
                 {
-                    udp_send(io->sock, q.to, q.data, q.len);
+                    IoSockSend(io, q.to, q.data, q.len);
                 }
             }
             else
@@ -696,7 +742,7 @@ namespace
     // host outside the loopback test mode (only this PC can join it).
     void IoHostAddrs(Io* io, U64 now)
     {
-        bool lan = io->open && io->role == ICOOP_ROLE_HOST && !io->hostLocal &&
+        bool lan = io->open && !io->relay && io->role == ICOOP_ROLE_HOST && !io->hostLocal &&
                    (!io->hostLoopback || sLanTest);
         if (!lan)
         {
@@ -721,7 +767,7 @@ namespace
     void IoRespTick(Io* io, U64 now)
     {
         IoHostAddrs(io, now);
-        bool hosting = io->open && io->role == ICOOP_ROLE_HOST;
+        bool hosting = io->open && !io->relay && io->role == ICOOP_ROLE_HOST;
         bool want = disc_host_visible(hosting, sLanVisible.load(std::memory_order_relaxed),
                                       io->hostLoopback, io->hostLocal, sLanTest);
         if (!want)
@@ -1097,7 +1143,7 @@ namespace
             io->client.leave(now);
         }
         IoFlushDelayed(io, now, true);
-        udp_close(&io->sock);
+        IoSockClose(io);
         io->open = false;
         io->role = ICOOP_ROLE_OFF;
         io->rememberJoin = false;
@@ -1163,6 +1209,10 @@ namespace
         "on, that the host is hosting right now, that the host's router forwards that UDP port to the host's "
         "PC, and that the host allowed the game through Windows Firewall";
 
+    const char* const kNoAnswerRelayText =
+        "no answer from the host's game through the co-op server. Check that the host is still hosting in that "
+        "room, and try joining again";
+
     const char* EndText(EndReason e)
     {
         switch (e)
@@ -1174,6 +1224,166 @@ namespace
         case END_STALLED: return "the other player's game stopped for over a minute (a window held down, or a hang)";
         default: return "the session ended";
         }
+    }
+
+    // Through the relay server (docs/MULTIPLAYER.md 15). The server's build
+    // check is the co-op version in hex: the handshake checks it again, with
+    // the game files, end to end.
+    void IoStartRelay(Io* io, Command& cmd, const NetIO& nio, const U8* build, const U8* assets)
+    {
+        char buildHex[2 * kBuildIdSize + 1];
+        for (size_t i = 0; i < kBuildIdSize; i++)
+        {
+            snprintf(buildHex + 2 * i, 3, "%02x", build[i]);
+        }
+        bool create = cmd.kind == CMD_HOST;
+        if (!io->link.start(cmd.server, cmd.name, buildHex, create, cmd.room))
+        {
+            const char* why = io->link.error();
+            io->link.stop();
+            secure_zero(cmd.password, sizeof(cmd.password));
+            std::lock_guard<std::mutex> hold(sLock);
+            SetPhaseLocked(ICOOP_PHASE_ERROR, why);
+            return;
+        }
+        io->relay = true;
+        io->open = true;
+        io->relayJoinPending = !create;
+        io->relayStatusAt = 0;
+        {
+            std::lock_guard<std::mutex> hold(sLock);
+            sStatus.relay = true;
+            sStatus.relayRoom[0] = '\0';
+            sStatus.relayPartner = false;
+            sStatus.relayPingMs = -1;
+        }
+        if (create)
+        {
+            HostConfig cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            memcpy(cfg.build_id, build, kBuildIdSize);
+            memcpy(cfg.asset_hash, assets, kHashSize);
+            snprintf(cfg.name, sizeof(cfg.name), "%s", cmd.name);
+            cfg.password = cmd.password;
+            cfg.iters = kDefaultIters;
+            bool ok = io->host.init(cfg, nio, NowNs());
+            secure_zero(cmd.password, sizeof(cmd.password));
+            if (!ok)
+            {
+                IoSockClose(io);
+                io->open = false;
+                std::lock_guard<std::mutex> hold(sLock);
+                SetPhaseLocked(ICOOP_PHASE_ERROR, "hosting could not start");
+                return;
+            }
+            io->role = ICOOP_ROLE_HOST;
+            std::lock_guard<std::mutex> hold(sLock);
+            sStatus.port = 0;
+            SetPhaseLocked(ICOOP_PHASE_CONNECTING, ""); // WAITING once the server gives the room
+            Log("coop: hosting through the co-op server: asking it for a room");
+        }
+        else
+        {
+            // The session starts once the host is seen in the room
+            // (IoRelayTick); the command is kept for it, as for joining again.
+            io->rejoinCmd = cmd;
+            io->haveRejoin = true;
+            io->rejoining = false;
+            io->rejoinWait = false;
+            io->firstFullUntil = 0;
+            io->firstFullWait = false;
+            io->role = ICOOP_ROLE_JOIN;
+            io->rememberJoin = false;
+            secure_zero(cmd.password, sizeof(cmd.password));
+            std::lock_guard<std::mutex> hold(sLock);
+            SetPhaseLocked(ICOOP_PHASE_CONNECTING, "");
+            Log("coop: joining through the co-op server");
+        }
+    }
+
+    // The relay link's own changes, each pass of the I/O thread: the room
+    // given, the partner in it, the link lost. False: the link is gone (the
+    // co-op session ended with it).
+    bool IoRelayTick(Io* io, U64 now)
+    {
+        RelayLink& l = io->link;
+        if (l.state() == RelayState::Failed)
+        {
+            const char* why = l.error();
+            printf("tssm: coop: the co-op server: %s\n", why);
+            fflush(stdout);
+            if (io->role == ICOOP_ROLE_HOST)
+            {
+                io->host.close(now);
+            }
+            else if (io->role == ICOOP_ROLE_JOIN && !io->relayJoinPending)
+            {
+                io->client.leave(now);
+            }
+            IoSockClose(io);
+            io->open = false;
+            io->role = ICOOP_ROLE_OFF;
+            ForgetRejoin(io);
+            std::lock_guard<std::mutex> hold(sLock);
+            ResetPartnerLocked();
+            SetPhaseLocked(ICOOP_PHASE_ENDED, why);
+            return false;
+        }
+        bool changed = l.take_partner_changed();
+        if (l.state() == RelayState::InRoom)
+        {
+            bool first = false;
+            {
+                std::lock_guard<std::mutex> hold(sLock);
+                if (sStatus.relayRoom[0] == '\0')
+                {
+                    snprintf(sStatus.relayRoom, sizeof(sStatus.relayRoom), "%s", l.code());
+                    first = true;
+                    if (io->role == ICOOP_ROLE_HOST)
+                    {
+                        SetPhaseLocked(ICOOP_PHASE_WAITING, "");
+                    }
+                }
+                NetAddr p;
+                sStatus.relayPartner = l.partner(&p);
+                if (now >= io->relayStatusAt)
+                {
+                    sStatus.relayPingMs = l.ping_ms();
+                    io->relayStatusAt = now + kNsPerSec;
+                }
+            }
+            if (first)
+            {
+                printf("tssm: coop: in room %s on the co-op server\n", l.code());
+                fflush(stdout);
+            }
+        }
+        if (io->relayJoinPending)
+        {
+            NetAddr hostAddr;
+            if (l.partner(&hostAddr))
+            {
+                io->relayJoinPending = false;
+                io->rejoinCmd.address = hostAddr;
+                io->joinAddr = hostAddr;
+                io->firstFullUntil = now + kFirstFullFor;
+                NetIO nio = { io, IoSend, IoOnPayload, IoOnLog };
+                if (!io->client.connect(hostAddr, io->rejoinCmd.password, io->rejoinCmd.name, io->build, io->assets,
+                                        nio, now))
+                {
+                    IoSockClose(io);
+                    io->open = false;
+                    io->role = ICOOP_ROLE_OFF;
+                    ForgetRejoin(io);
+                    std::lock_guard<std::mutex> hold(sLock);
+                    SetPhaseLocked(ICOOP_PHASE_ERROR, "joining could not start");
+                    return false;
+                }
+                Log("coop: the host is in the room; joining its game");
+            }
+        }
+        (void)changed;
+        return true;
     }
 
     void IoStart(Io* io, Command& cmd)
@@ -1240,6 +1450,14 @@ namespace
         io->delayedCount = 0;
         os_random(&io->rngState, sizeof(io->rngState));
 
+        if (cmd.relay)
+        {
+            IoStartRelay(io, cmd, nio, build, assets);
+            io->wasConnected = false;
+            io->sessionId = 0;
+            return;
+        }
+
         if (cmd.kind == CMD_HOST)
         {
             if (!udp_open(&io->sock, cmd.loopback ? BindScope::Loopback : BindScope::Any, cmd.port))
@@ -1256,7 +1474,7 @@ namespace
             U16 port = cmd.port;
             if (cmd.local && (!udp_local_port(io->sock, &port) || port == 0))
             {
-                udp_close(&io->sock);
+                IoSockClose(io);
                 io->open = false;
                 std::lock_guard<std::mutex> hold(sLock);
                 SetPhaseLocked(ICOOP_PHASE_ERROR, "the port the system gave could not be read");
@@ -1274,7 +1492,7 @@ namespace
             secure_zero(cmd.password, sizeof(cmd.password));
             if (!ok)
             {
-                udp_close(&io->sock);
+                IoSockClose(io);
                 io->open = false;
                 std::lock_guard<std::mutex> hold(sLock);
                 SetPhaseLocked(ICOOP_PHASE_ERROR, "hosting could not start");
@@ -1340,7 +1558,7 @@ namespace
             if (!ok)
             {
                 ForgetRejoin(io);
-                udp_close(&io->sock);
+                IoSockClose(io);
                 io->open = false;
                 std::lock_guard<std::mutex> hold(sLock);
                 SetPhaseLocked(ICOOP_PHASE_ERROR, "joining could not start");
@@ -1613,7 +1831,7 @@ namespace
                 }
                 else if (io->client.fail() == FAIL_NO_ANSWER)
                 {
-                    SetPhaseLocked(ICOOP_PHASE_NO_ANSWER, kNoAnswerText);
+                    SetPhaseLocked(ICOOP_PHASE_NO_ANSWER, io->relay ? kNoAnswerRelayText : kNoAnswerText);
                     Log("coop: no answer from the host");
                 }
                 else if (io->client.fail() == FAIL_ENDED && sStatus.phase != ICOOP_PHASE_ENDED &&
@@ -1778,7 +1996,7 @@ namespace
             }
         }
         // The socket goes, and the join's settings with it.
-        udp_close(&io->sock);
+        IoSockClose(io);
         io->open = false;
         io->role = ICOOP_ROLE_OFF;
         ForgetRejoin(io);
@@ -1933,7 +2151,7 @@ namespace
             {
                 const UdpSocket* waits[2 + kMaxIfs];
                 size_t nw = 0;
-                if (io->open)
+                if (io->open && !io->relay)
                 {
                     waits[nw++] = &io->sock;
                 }
@@ -1945,7 +2163,21 @@ namespace
                 {
                     waits[nw++] = &io->findSock[i];
                 }
-                udp_wait_any(waits, nw, 4);
+                if (io->open && io->relay)
+                {
+                    // The relay's ENet socket waits; the home network's
+                    // sockets are not open while it runs (no LAN answers
+                    // for a relay host), so polling them is enough.
+                    if (nw > 0)
+                    {
+                        udp_wait_any(waits, nw, 0);
+                    }
+                    io->link.service(4);
+                }
+                else
+                {
+                    udp_wait_any(waits, nw, 4);
+                }
             }
             now = NowNs();
             // The home network's questions and answers, on their own sockets.
@@ -1962,10 +2194,15 @@ namespace
                                           : "tssm: coop: test: blackout over\n");
                 fflush(stdout);
             }
+            if (io->relay && !IoRelayTick(io, now))
+            {
+                IoUpdateStatus(io);
+                continue;
+            }
             for (S32 i = 0; i < 256; i++)
             {
                 NetAddr from;
-                int n = udp_recv(io->sock, buf, sizeof(buf), &from);
+                int n = io->relay ? io->link.recv(buf, sizeof(buf), &from) : udp_recv(io->sock, buf, sizeof(buf), &from);
                 if (n == 0)
                 {
                     break;
@@ -2019,7 +2256,7 @@ namespace
                 {
                     io->client.leave(now, DC_STALLED);
                     IoFlushDelayed(io, now, true);
-                    udp_close(&io->sock);
+                    IoSockClose(io);
                     io->open = false;
                     io->role = ICOOP_ROLE_OFF;
                     ForgetRejoin(io);
@@ -2545,6 +2782,7 @@ void iCoopInit()
         sPort = (U16)port;
     }
     snprintf(sAddress, sizeof(sAddress), "%s", iConfigGetString("coop.address", ""));
+    snprintf(sServer, sizeof(sServer), "%s", iConfigGetString("coop.server", "10.0.0.5:7865"));
     SetName(iConfigGetString("coop.name", ""));
     sLoopback = strcmp(iConfigGetString("coop.bind", "any"), "loopback") == 0;
     sNameTag = iConfigGetBool("coop.nametag", TRUE) != 0;
@@ -3055,6 +3293,105 @@ U16 iCoopDefaultPort()
 const char* iCoopDefaultAddress()
 {
     return sAddress;
+}
+
+const char* iCoopDefaultServer()
+{
+    return sServer;
+}
+
+namespace
+{
+    // Letters, digits, '.', '-', ':', '[' and ']' only: a name or an address,
+    // never a path or anything a shell or the log could take for more.
+    bool ServerTextValid(const char* s)
+    {
+        size_t n = s ? strnlen(s, 128) : 0;
+        if (n == 0 || n >= 128)
+        {
+            return false;
+        }
+        for (size_t i = 0; i < n; i++)
+        {
+            char c = s[i];
+            bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+                      c == '-' || c == ':' || c == '[' || c == ']';
+            if (!ok)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool PostRelay(CommandKind kind, const char* server, const char* room, const char* password, const char* name,
+                   char* why, size_t whySize)
+    {
+        Command cmd{};
+        cmd.kind = kind;
+        cmd.relay = true;
+        if (!ServerTextValid(server))
+        {
+            Why(why, whySize, "the co-op server must be a name or an address, like tssm.example.net or 203.0.113.7:7865");
+            return false;
+        }
+        snprintf(cmd.server, sizeof(cmd.server), "%s", server);
+        if (kind == CMD_JOIN)
+        {
+            // Spaces and dashes ignored, letters not case-sensitive.
+            size_t k = 0;
+            for (const char* p = room ? room : ""; *p && k < 5; p++)
+            {
+                if (*p == ' ' || *p == '-')
+                {
+                    continue;
+                }
+                cmd.room[k++] = (char)(*p >= 'a' && *p <= 'z' ? *p - 'a' + 'A' : *p);
+            }
+            if (k != 4)
+            {
+                Why(why, whySize, "the room code is 4 letters or digits");
+                return false;
+            }
+            cmd.room[4] = ' ';
+        }
+        if (password == NULL || !normalize_code(password, cmd.password, sizeof(cmd.password)))
+        {
+            Why(why, whySize, "the password must be 1 to 63 characters");
+            return false;
+        }
+        if (name == NULL || !name_valid(name, strnlen(name, kMaxName + 1)))
+        {
+            Why(why, whySize, "the name must be 1 to 16 letters, digits, spaces, _ . or -");
+            secure_zero(cmd.password, sizeof(cmd.password));
+            return false;
+        }
+        snprintf(cmd.name, sizeof(cmd.name), "%s", name);
+        cmd.assets = AssetJob();
+        if (strcmp(sServer, server) != 0)
+        {
+            snprintf(sServer, sizeof(sServer), "%s", server);
+            iConfigSet("coop.server", sServer);
+            iConfigSave();
+        }
+        sRunning = true;
+        sNeedsPassword = false;
+        LogVersion();
+        Post(cmd);
+        secure_zero(cmd.password, sizeof(cmd.password));
+        return true;
+    }
+} // namespace
+
+bool iCoopHostServer(const char* server, const char* password, const char* name, char* why, size_t whySize)
+{
+    return PostRelay(CMD_HOST, server, NULL, password, name, why, whySize);
+}
+
+bool iCoopJoinServer(const char* server, const char* room, const char* password, const char* name, char* why,
+                     size_t whySize)
+{
+    return PostRelay(CMD_JOIN, server, room, password, name, why, whySize);
 }
 
 bool iCoopDefaultLoopback()

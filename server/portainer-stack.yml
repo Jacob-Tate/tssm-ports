@@ -1,0 +1,51 @@
+# TSSM co-op relay server - Docker Swarm stack for Portainer.
+#
+# Portainer: Stacks > Add stack > Web editor (or Repository: this file's path), then Deploy.
+#
+# Runs on the same swarm node as the partyboard server (node label partyboard=true). If that label is
+# not set yet, from any manager node:
+#   docker node update --label-add partyboard=true <node-name>
+#
+# Players connect to <that node's address>:7865 over UDP. Open that port on the node's firewall
+# (and forward it on the router if the node is at home).
+
+version: "3.8"
+
+services:
+  relay:
+    image: ghcr.io/jacob-tate/tssm-server:latest
+    environment:
+      TSSM_SERVER_PORT: "7865"
+    ports:
+      # Host mode: the port opens directly on the node running the container. The ingress routing
+      # mesh would hide players' real addresses and can drop idle UDP mappings.
+      - target: 7865
+        published: 7865
+        protocol: udp
+        mode: host
+    deploy:
+      # Rooms live in memory, so there must be exactly one instance.
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.partyboard == true
+      update_config:
+        # The host port can't be held by two containers on one node: stop the old one first.
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+        reservations:
+          memory: 16M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

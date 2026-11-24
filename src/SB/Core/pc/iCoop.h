@@ -337,6 +337,13 @@ struct iCoopStatus
     // Finding games (iCoopFindGames): asking, and for how many more seconds.
     bool finding;
     U32 findLeftSec;
+    // Through the relay server (docs/MULTIPLAYER.md 15): the room's code once
+    // the server gave it ("" before), whether the other player is in the room,
+    // and the round trip to the server (-1 before it is known).
+    bool relay;
+    char relayRoom[5];
+    bool relayPartner;
+    S32 relayPingMs;
 };
 
 void iCoopGetStatus(iCoopStatus* out);
@@ -352,6 +359,16 @@ bool iCoopHost(U16 port, const char* password, const char* name, bool loopback, 
 // connects saves nothing.
 bool iCoopJoin(const char* address, const char* password, const char* name, char* why,
                size_t whySize, bool remember = false);
+
+// Through the co-op relay server (docs/MULTIPLAYER.md 15): no forwarded port.
+// `server` is "host" or "host:port" (names allowed). Hosting asks the server
+// for a room: its 4-character code shows in iCoopStatus::relayRoom, and the
+// guest needs it and the join code (`password`, the session's password as
+// when hosting directly). Joining enters room `room`. The server address goes
+// to [coop] server when hosting or joining starts.
+bool iCoopHostServer(const char* server, const char* password, const char* name, char* why, size_t whySize);
+bool iCoopJoinServer(const char* server, const char* room, const char* password, const char* name, char* why,
+                     size_t whySize);
 
 // Stops hosting or joining; says goodbye to a partner.
 void iCoopStop();
@@ -370,6 +387,7 @@ void iCoopNewJoinCode(char out[16]);
 const char* iCoopDefaultName();
 U16 iCoopDefaultPort();
 const char* iCoopDefaultAddress();
+const char* iCoopDefaultServer(); // [coop] server
 bool iCoopDefaultLoopback();
 bool iCoopNeedsPassword();
 const char* iCoopStartupJoinCode(); // the code a startup host generated, or ""

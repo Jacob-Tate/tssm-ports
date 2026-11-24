@@ -230,14 +230,40 @@ set(NET_SOURCES
   ${PC_DIR}/iNetProto.cpp
   ${PC_DIR}/iNetSession.cpp
   ${PC_DIR}/iNetSockCommon.cpp
-  ${PC_DIR}/iCoopLocalCore.cpp)
+  ${PC_DIR}/iCoopLocalCore.cpp
+  # Co-op through the relay server (docs/MULTIPLAYER.md 15, server/): ENet.
+  ${PC_DIR}/iNetRelay.cpp)
 if(WIN32)
   list(APPEND NET_SOURCES ${PC_DIR}/iNetSockWin32.cpp)
-  set(NET_LIBS ws2_32 bcrypt iphlpapi)
+  set(NET_LIBS ws2_32 bcrypt iphlpapi winmm)
 else()
   list(APPEND NET_SOURCES ${PC_DIR}/iNetSockPosix.cpp)
   set(NET_LIBS)
 endif()
+# ENet, for the relay server's protocol (include/netplay/protocol.h). The same
+# release the server and the user's other ports use. FETCHCONTENT_SOURCE_DIR_ENET
+# points it at a local copy for builds without the network.
+include(FetchContent)
+FetchContent_Declare(enet
+  GIT_REPOSITORY https://github.com/lsalzman/enet.git
+  GIT_TAG v1.3.18
+  GIT_SHALLOW TRUE
+  # Downloaded only: its own CMakeLists.txt predates CMake 3.5 (CMake 4 refuses
+  # it), so the library is built here from its sources.
+  SOURCE_SUBDIR no-cmake)
+FetchContent_MakeAvailable(enet)
+file(GLOB TSSM_ENET_SOURCES ${enet_SOURCE_DIR}/*.c)
+add_library(tssm_enet STATIC ${TSSM_ENET_SOURCES})
+target_include_directories(tssm_enet PUBLIC ${enet_SOURCE_DIR}/include)
+if(WIN32)
+  target_link_libraries(tssm_enet PUBLIC ws2_32 winmm)
+  target_compile_definitions(tssm_enet PRIVATE _WINSOCK_DEPRECATED_NO_WARNINGS _CRT_SECURE_NO_WARNINGS)
+else()
+  target_compile_definitions(tssm_enet PRIVATE HAS_FCNTL=1 HAS_POLL=1 HAS_GETADDRINFO=1 HAS_GETNAMEINFO=1
+    HAS_INET_PTON=1 HAS_INET_NTOP=1 HAS_MSGHDR_FLAGS=1 HAS_SOCKLEN_T=1)
+endif()
+list(APPEND NET_LIBS tssm_enet)
+set_source_files_properties(${PC_DIR}/iNetRelay.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # SHA-256 is optimised even in a debug build: the game-files hash reads the
 # whole asset folder once, and the handshake's PBKDF2 runs 100,000 rounds.
 set_source_files_properties(${PC_DIR}/iNetCrypto.cpp PROPERTIES COMPILE_OPTIONS "-O2")
@@ -1063,6 +1089,13 @@ if(TSSM_BUILD_TESTS AND TSSM_HOST_TOOLS)
   add_dependencies(tssm_nettest tssm_coop_id)
   target_link_libraries(tssm_nettest PRIVATE ${NET_LIBS})
   add_test(NAME tssm_nettest COMMAND tssm_nettest)
+
+  # tssm_relaytest: the co-op session through a running relay server
+  # (server/, docs/MULTIPLAYER.md 15): tssm_relaytest HOST:PORT. Not an
+  # add_test: it needs the server started first (tools/server_test.sh).
+  add_executable(tssm_relaytest ${PC_DIR}/tests/relaytest.cpp ${NET_SOURCES})
+  target_include_directories(tssm_relaytest PRIVATE ${PC_DIR})
+  target_link_libraries(tssm_relaytest PRIVATE ${NET_LIBS})
 
   # tssm_netfuzz: the same targets under libFuzzer with ASan, by hand once per
   # milestone (docs/MULTIPLAYER.md, 4.7). Needs a clang that ships libFuzzer.
