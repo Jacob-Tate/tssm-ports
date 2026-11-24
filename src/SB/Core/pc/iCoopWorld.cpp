@@ -3175,6 +3175,7 @@ void iCoopWorldSceneReset()
     if (iCoopRunning())
     {
         iCoopCombatSceneReset();
+        iCoopBossSceneReset();
     }
 }
 

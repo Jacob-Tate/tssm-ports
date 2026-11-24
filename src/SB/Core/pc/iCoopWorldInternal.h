@@ -73,6 +73,8 @@ void iCoopBossPoolEvent(const iNet::GameEvent& e, U64 now);
 // host's fight.
 void iCoopBossGuestShow(S32 id, xEnt* e, F32 dt);
 void iCoopBossReset();
+// The level's own reset (zScene, through iCoopWorldSceneReset).
+void iCoopBossSceneReset();
 // Host, a guest's hit on `e`: how much further than the attack's own reach it
 // may land (a boss's size; 0 for any other enemy).
 F32 iCoopBossReach(xEnt* e);

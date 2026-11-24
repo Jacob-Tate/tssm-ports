@@ -247,9 +247,29 @@ namespace
             return;
         }
         U32 h = globals.player.s->Health;
-        if (iCoopCombatRespawning() || h == 0 || sGuestLast == 0)
+        if (iCoopCombatRespawning() || h == 0)
         {
-            sGuestLast = h;
+            if (sGuestLast > 0)
+            {
+                // This player's own defeat (the last hit, or a fall, which
+                // loses a chance without emptying the health): it empties
+                // the pool, so both are defeated, as a fall defeats the host.
+                GameEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type = EV_POOL_DELTA;
+                ev.scene = globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0;
+                ev.dir[0] = -kPlayerHealthMax;
+                if (ev.scene != 0 && iCoopPushEvent(ev))
+                {
+                    PoolLog("this player is defeated: the pool is emptied", (S32)sGuestLast, 0);
+                }
+            }
+            sGuestLast = 0;
+            return;
+        }
+        if (sGuestLast == 0)
+        {
+            sGuestLast = h; // back from a defeat, or the pool just began: nothing to report
             return;
         }
         if (h == sGuestLast)
@@ -447,6 +467,20 @@ F32 iCoopBossReach(xEnt* e)
     F32 dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z;
     F32 r = sqrtf(dx * dx + dy * dy + dz * dz) + e->bound.sph.r;
     return r == r ? (r > 30.0f ? 30.0f : r) : 0.0f;
+}
+
+void iCoopBossSceneReset()
+{
+    // The level's own reset (the host lost a chance: the last hit, or a
+    // fall): the fight starts again, and so does the pool, from the host's
+    // health after the reset. Nothing of the reset counts as a change.
+    if (sPoolOn)
+    {
+        PoolLog("the level was reset: the pool starts again", sPool, sPool);
+    }
+    sPoolOn = false;
+    sHostKilling = false;
+    sGuestLast = 0;
 }
 
 void iCoopBossReset()

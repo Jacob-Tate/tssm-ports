@@ -3599,6 +3599,11 @@ fight. The host keeps it (iCoopBoss.cpp):
   its level resets, and the guest comes back beside the host. Nothing is
   counted while a player's defeat plays out, and coming back from one starts
   the pool again from the host's new health. It is not a gain.
+- **A fall defeats both, like the last hit.** A fall loses a chance without
+  emptying the health. The host's fall resets its level (the fight starts
+  again), and the pool starts again from the host's health after the reset.
+  The guest's defeat (a fall, or the last hit) empties the pool, so the host
+  is defeated too. Neither player's fall is free.
 - **It starts from the host's health** when the fight starts, and ends when
   the boss is beaten (or the guest leaves the level). From then on each player
   keeps their own health, starting from the pool's last value.
