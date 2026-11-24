@@ -3548,7 +3548,7 @@ port (7865 by default) must be reachable by both players.
 
 ---
 
-## 16. Boss fights: the Frogfish (protocol version 9)
+## 16. Boss fights: the Frogfish, and one health (protocol version 9)
 
 Until protocol 9 each game ran its own boss for its own player. Protocol 9
 shares the first boss, the Frogfish (B101), the same way as the other enemies,
@@ -3582,7 +3582,33 @@ in B201 and B301, King Neptune in B401) are still each game's own.
 - **The end of the fight** is the host's: its death cutscene reaches the guest
   as a show (7.3), and the guest follows the host's exit (7.2).
 
-### 16.2 Limits
+### 16.2 One health for both players
+
+While a shared boss fights (alive, not dying) and the guest is in the level,
+the two players have one health between them, so neither gets the easier
+fight. The host keeps it (iCoopBoss.cpp):
+
+- **Each game's changes count, as changes.** The host's own (a hit, a pickup)
+  go straight into the pool. The guest's go to the host as `EV_POOL_DELTA`
+  (a signed change, never 0, at most a whole health either way). Two hits at
+  once both count, in whatever order they arrive.
+- **The pool's value goes to the guest** as `EV_POOL` on every change and once
+  a second. Both games set their player's health to it.
+- **When it runs out, both are defeated** with the game's own defeat
+  (`eEventKill`). Then the usual rules apply (6.4): the host loses a life and
+  its level resets, and the guest comes back beside the host. Nothing is
+  counted while a player's defeat plays out, and coming back from one starts
+  the pool again from the host's new health. It is not a gain.
+- **It starts from the host's health** when the fight starts, and ends when
+  the boss is beaten (or the guest leaves the level). From then on each player
+  keeps their own health, starting from the pool's last value.
+- The guest's game leaves the pool by itself 3 s after the host's last word.
+- A guest's change is believed as it is. A modified guest could heal the
+  pair, but it could not hurt the host other than by the pool.
+- Between a guest's own hit and the host's answer, the guest can see its old
+  health for one round trip.
+
+### 16.3 Limits
 
 - Not yet played through in a test with two games; the protocol checks are in
   tssm_nettest.

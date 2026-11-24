@@ -2331,6 +2331,19 @@ void iCoopCombatFrame(U64 now, const PlayerState* partner, U64 partnerAt)
                 iCoopBossEvent(e);
             }
             break;
+        // Protocol 9: one health for both players in a boss fight.
+        case EV_POOL:
+            if (guest)
+            {
+                iCoopBossPoolEvent(e, now);
+            }
+            break;
+        case EV_POOL_DELTA:
+            if (!guest)
+            {
+                iCoopBossPoolEvent(e, now);
+            }
+            break;
         default:
             break;
         }

@@ -66,6 +66,9 @@ bool iCoopWorldFollowedHere();
 void iCoopBossFrame(U64 now, bool guest);
 // Guest: an EV_BOSS from the host.
 void iCoopBossEvent(const iNet::GameEvent& e);
+// EV_POOL (guest) or EV_POOL_DELTA (host): one health for both players during
+// a boss fight (docs/MULTIPLAYER.md 16.3).
+void iCoopBossPoolEvent(const iNet::GameEvent& e, U64 now);
 // Guest: from iCoopWorldGuestPose, after posing thing `id`: a boss shows the
 // host's fight.
 void iCoopBossGuestShow(S32 id, xEnt* e, F32 dt);

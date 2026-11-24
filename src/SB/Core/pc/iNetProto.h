@@ -376,6 +376,8 @@ enum EventType : uint8_t
     EV_UPGRADE_ACK = 11, // host to guest: the answer to an EV_UPGRADE
     // Protocol 9 (docs/MULTIPLAYER.md 16)
     EV_BOSS = 12, // host to guest: a shared boss's fight state (BOSS_*: state, stage, camera, health, attack)
+    EV_POOL = 13, // host to guest: during a boss fight, the players' one health (dir[0], 0..kPlayerHealthMax)
+    EV_POOL_DELTA = 14, // guest to host: the guest's own health changed by dir[0] (nonzero, +-kPlayerHealthMax)
     EV_END
 };
 

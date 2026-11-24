@@ -672,6 +672,12 @@ static GameEvent good_event(uint8_t type)
         e.dir[1] = 7;  // health
         e.dir[2] = 1;  // attack
         break;
+    case EV_POOL:
+        e.dir[0] = 5;
+        break;
+    case EV_POOL_DELTA:
+        e.dir[0] = -2;
+        break;
     }
     return e;
 }
@@ -706,11 +712,12 @@ static void test_events()
     uint8_t buf[kMaxPayload];
     static Payload q;
     // Each type round-trips from its own side, and is refused from the other.
-    const uint8_t types[7] = { EV_HIT, EV_DAMAGE, EV_PICKUP, EV_GRANT, EV_UPGRADE, EV_UPGRADE_ACK, EV_BOSS };
-    const Role sides[7] = { Role::Client, Role::Host,   Role::Client, Role::Host,
-                            Role::Client, Role::Host,   Role::Host };
-    const size_t sizes[7] = { 31, 22, 12, 12, 7, 8, 20 };
-    for (int k = 0; k < 7; k++)
+    const uint8_t types[9] = { EV_HIT,         EV_DAMAGE, EV_PICKUP, EV_GRANT,     EV_UPGRADE,
+                               EV_UPGRADE_ACK, EV_BOSS,   EV_POOL,   EV_POOL_DELTA };
+    const Role sides[9] = { Role::Client, Role::Host, Role::Client, Role::Host,  Role::Client,
+                            Role::Host,   Role::Host, Role::Host,   Role::Client };
+    const size_t sizes[9] = { 31, 22, 12, 12, 7, 8, 20, 7, 7 };
+    for (int k = 0; k < 9; k++)
     {
         GameEvent e = good_event(types[k]);
         Role other = sides[k] == Role::Host ? Role::Client : Role::Host;
@@ -838,6 +845,21 @@ static void test_events()
                "a boss's health past 999, attack past 63 or state past 0x1FFF refused");
         b.id = kMaxNetIds;
         EXPECT(encode_events(&b, 1, Role::Host, buf, sizeof buf) == 0, "a boss's net ID past the table refused");
+        // The shared health (offsets: type 0, scene 1, value 5).
+        GameEvent pool = good_event(EV_POOL);
+        EXPECT(event_patched(pool, Role::Host, 5, 0) && event_patched(pool, Role::Host, 5, kPlayerHealthMax) &&
+                   !event_patched(pool, Role::Host, 5, kPlayerHealthMax + 1) &&
+                   !event_patched(pool, Role::Host, 6, 0xFF),
+               "the shared health from 0 to the most a player has, never below");
+        GameEvent d = good_event(EV_POOL_DELTA);
+        EXPECT(!event_patched(d, Role::Client, 5, 0) || !event_patched(d, Role::Client, 6, 0),
+               "a change of 0 refused");
+        d.dir[0] = 0;
+        EXPECT(encode_events(&d, 1, Role::Client, buf, sizeof buf) == 0, "a change of 0 refused (encoder)");
+        d.dir[0] = kPlayerHealthMax + 1;
+        EXPECT(encode_events(&d, 1, Role::Client, buf, sizeof buf) == 0, "a change past the most a player has refused");
+        d.dir[0] = -kPlayerHealthMax;
+        EXPECT(encode_events(&d, 1, Role::Client, buf, sizeof buf) > 0, "a change of the whole health accepted");
     }
     // The message: 1-8 events, ids from `first` on (across the wrap), no
     // trailing bytes, nothing cut short.
